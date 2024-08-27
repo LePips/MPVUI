@@ -22,3 +22,4 @@ client.play()
 - [ ] player views for video playback
 - [ ] API around commands
 - [ ] better event observation
+- [ ] provide route to decouple from mpvkit
