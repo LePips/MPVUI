@@ -3,6 +3,8 @@ import Foundation
 import GLKit
 import MPVKit
 
+// TODO: init with configuration
+//       - log level
 public class MPVClient {
     
     // events
