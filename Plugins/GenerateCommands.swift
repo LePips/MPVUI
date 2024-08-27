@@ -14,6 +14,7 @@ struct Plugin: CommandPlugin {
         
         try makeCommandFile(with: commands, context: context)
         
+        try deleteCommandFile(context: context)
     }
     
     private func downloadSourceFiles(context: PluginContext) throws {
@@ -21,8 +22,6 @@ struct Plugin: CommandPlugin {
             "curl -fsSl https://raw.githubusercontent.com/mpv-player/mpv/master/player/command.c -o command.c",
             context: context
         )
-        
-        try runProcess(<#T##commandLine: String##String#>, context: <#T##PluginContext#>)
     }
     
     private func deleteCommandFile(context: PluginContext) throws {

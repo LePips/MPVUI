@@ -1,0 +1,15 @@
+{
+  "originHash" : "3ef8bb801f943f82e7d8ae72877aaa773223dfb84fc9f195c27376f5df97a011",
+  "pins" : [
+    {
+      "identity" : "mpvkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/cxfksword/MPVKit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "7efe962ab2c1886b380212b661255a651fdba18b"
+      }
+    }
+  ],
+  "version" : 3
+}
