@@ -1,0 +1,20 @@
+From: MPVUI maintainers
+Subject: [PATCH] mac: take Swift dependency include paths from explicit build flags
+
+Meson normalizes backslash-escaped spaces returned by pkg-config variables as
+path separators. The native recipe supplies the verified include directories
+as individually quoted arguments in the Swift response file instead.
+
+--- a/osdep/mac/meson.build
++++ b/osdep/mac/meson.build
+@@ -38,9 +38,7 @@ swift_compile = [swift_prog, swift_flags, '-module-name', 'swift',
+                  '-emit-module-path', '@OUTPUT0@', '-import-objc-header', bridge,
+                  '-emit-objc-header-path', '@OUTPUT1@', '-o', '@OUTPUT2@',
+                  '@INPUT@', '-I.', '-I' + source_root, '-I' + source_root / 'include',
+-                 '-I' + libplacebo.get_variable('includedir',
+-                            default_value: source_root / 'subprojects' / 'libplacebo' / 'src' / 'include'),
+-                 '-I' + libavutil.get_variable('includedir')]
++                 ]
+ 
+ swift_targets = custom_target('swift_targets',
+     input: swift_sources,

@@ -1,0 +1,10 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+*.mkv binary
+*.mp4 binary
+*.webm binary
+*.zip binary
+
+# Unified patches contain space-only context lines by design.
+Build/Patches/**/*.patch whitespace=-blank-at-eol

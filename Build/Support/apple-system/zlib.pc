@@ -1,0 +1,5 @@
+Name: zlib
+Description: zlib supplied by the selected Apple SDK
+Version: 1.2.12
+Libs: -lz
+Cflags:

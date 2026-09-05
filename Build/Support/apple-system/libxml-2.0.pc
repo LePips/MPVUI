@@ -1,0 +1,6 @@
+Name: libXML
+Description: libxml2 supplied by the selected Apple SDK
+Version: 2.9.13
+Libs: -lxml2
+Libs.private: -lz -lpthread -licucore -lm
+Cflags:

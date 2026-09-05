@@ -1,0 +1,572 @@
+diff --git a/options/options.h b/options/options.h
+index 12dafea..5154e4a 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -97,6 +97,7 @@ typedef struct mp_vo_opts {
+ struct mp_subtitle_opts {
+     float sub_fps;
+     float sub_speed;
++    bool sub_text_intercept;
+     bool sub_forced_events_only;
+     bool stretch_dvd_subs;
+     bool stretch_image_subs;
+diff --git a/options/options.c b/options/options.c
+index 8faa877..385dac5 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -300,6 +300,7 @@ const struct m_sub_options mp_subtitle_sub_opts = {
+     .opts = (const struct m_option[]){
+         {"sub-fps", OPT_FLOAT(sub_fps)},
+         {"sub-speed", OPT_FLOAT(sub_speed)},
++        {"sub-text-intercept", OPT_BOOL(sub_text_intercept)},
+         {"sub-forced-events-only", OPT_BOOL(sub_forced_events_only)},
+         {"stretch-dvd-subs", OPT_BOOL(stretch_dvd_subs)},
+         {"stretch-image-subs-to-screen", OPT_BOOL(stretch_image_subs)},
+diff --git a/sub/dec_sub.h b/sub/dec_sub.h
+index 476e83a..4727416 100644
+--- a/sub/dec_sub.h
++++ b/sub/dec_sub.h
+@@ -33,6 +33,18 @@ struct sd_times {
+     double end;
+ };
+ 
++struct sub_text_region {
++    char *text;
++    // NULL for automatic placement. Non-NULL (including an empty string) is
++    // the raw settings string of a WebVTT cue.
++    char *webvtt_settings;
++};
++
++struct sub_text_snapshot {
++    struct sub_text_region *regions;
++    int num_regions;
++};
++
+ struct attachment_list {
+     struct demux_attachment *entries;
+     int num_entries;
+@@ -50,6 +62,8 @@ void sub_read_packets(struct dec_sub *sub, double video_pts, bool force,
+ struct sub_bitmaps *sub_get_bitmaps(struct dec_sub *sub, struct mp_osd_res dim,
+                                     int format, double pts);
+ char *sub_get_text(struct dec_sub *sub, double pts, enum sd_text_type type);
++struct sub_text_snapshot *sub_get_text_snapshot(struct dec_sub *sub,
++                                                void *ta_parent, double pts);
+ char *sub_ass_get_extradata(struct dec_sub *sub);
+ struct sd_times sub_get_times(struct dec_sub *sub, double pts);
+ void sub_reset(struct dec_sub *sub);
+diff --git a/sub/sd.h b/sub/sd.h
+index 8db7c41..2029df1 100644
+--- a/sub/sd.h
++++ b/sub/sd.h
+@@ -50,6 +50,8 @@ struct sd_functions {
+     struct sub_bitmaps *(*get_bitmaps)(struct sd *sd, struct mp_osd_res dim,
+                                        int format, double pts);
+     char *(*get_text)(struct sd *sd, double pts, enum sd_text_type type);
++    void (*get_text_snapshot)(struct sd *sd, double pts,
++                              struct sub_text_snapshot *snapshot);
+     struct sd_times (*get_times)(struct sd *sd, double pts);
+ };
+ 
+@@ -58,8 +60,10 @@ struct lavc_conv;
+ struct lavc_conv *lavc_conv_create(struct sd *sd);
+ char *lavc_conv_get_extradata(struct lavc_conv *priv);
+ char **lavc_conv_decode(struct lavc_conv *priv, struct demux_packet *packet,
+-                        double *sub_pts, double *sub_duration);
++                        double *sub_pts, double *sub_duration,
++                        const char **webvtt_settings);
+ bool lavc_conv_is_styled(struct lavc_conv *priv);
++bool lavc_conv_is_webvtt(struct lavc_conv *priv);
+ void lavc_conv_reset(struct lavc_conv *priv);
+ void lavc_conv_uninit(struct lavc_conv *priv);
+ 
+diff --git a/sub/dec_sub.c b/sub/dec_sub.c
+index 118221a..97313e3 100644
+--- a/sub/dec_sub.c
++++ b/sub/dec_sub.c
+@@ -447,6 +447,29 @@ char *sub_get_text(struct dec_sub *sub, double pts, enum sd_text_type type)
+     return text;
+ }
+ 
++struct sub_text_snapshot *sub_get_text_snapshot(struct dec_sub *sub,
++                                                void *ta_parent, double pts)
++{
++    struct sub_text_snapshot *snapshot =
++        talloc_zero(ta_parent, struct sub_text_snapshot);
++
++    mp_mutex_lock(&sub->lock);
++
++    pts = pts_to_subtitle(sub, pts);
++
++    sub->last_vo_pts = pts;
++    update_segment(sub);
++
++    if (!(sub->end != MP_NOPTS_VALUE && pts >= sub->end) &&
++        sub->sd->driver->get_text_snapshot)
++    {
++        sub->sd->driver->get_text_snapshot(sub->sd, pts, snapshot);
++    }
++
++    mp_mutex_unlock(&sub->lock);
++    return snapshot;
++}
++
+ char *sub_ass_get_extradata(struct dec_sub *sub)
+ {
+     char *data = NULL;
+diff --git a/sub/lavc_conv.c b/sub/lavc_conv.c
+index da21033..749e9e0 100644
+--- a/sub/lavc_conv.c
++++ b/sub/lavc_conv.c
+@@ -41,6 +41,8 @@ struct lavc_conv {
+     char *extradata;
+     AVSubtitle cur;
+     char **cur_list;
++    bool is_webvtt;
++    char *webvtt_settings;
+ };
+ 
+ static const char *get_lavc_format(const char *format)
+@@ -61,6 +63,8 @@ struct lavc_conv *lavc_conv_create(struct sd *sd)
+     priv->opts = sd->opts;
+     priv->cur_list = talloc_array(priv, char*, 0);
+     priv->codec = sd->codec->codec;
++    priv->is_webvtt = strcmp(priv->codec, "webvtt") == 0 ||
++                          strcmp(priv->codec, "webvtt-webm") == 0;
+     AVCodecContext *avctx = NULL;
+     AVDictionary *opts = NULL;
+     const char *fmt = get_lavc_format(priv->codec);
+@@ -228,7 +232,8 @@ static int parse_webvtt(AVPacket *in, AVPacket *pkt)
+ // the AVSubtitle display PTS and duration set to input
+ // double variables.
+ char **lavc_conv_decode(struct lavc_conv *priv, struct demux_packet *packet,
+-                        double *sub_pts, double *sub_duration)
++                        double *sub_pts, double *sub_duration,
++                        const char **webvtt_settings)
+ {
+     AVCodecContext *avctx = priv->avctx;
+     AVPacket *curr_pkt = priv->avpkt;
+@@ -236,6 +241,8 @@ char **lavc_conv_decode(struct lavc_conv *priv, struct demux_packet *packet,
+     int num_cur = 0;
+ 
+     avsubtitle_free(&priv->cur);
++    TA_FREEP(&priv->webvtt_settings);
++    *webvtt_settings = NULL;
+ 
+     mp_set_av_packet(priv->avpkt, packet, &avctx->time_base);
+     if (priv->avpkt->pts < 0)
+@@ -249,6 +256,16 @@ char **lavc_conv_decode(struct lavc_conv *priv, struct demux_packet *packet,
+         curr_pkt = priv->avpkt_vtt;
+     }
+ 
++    if (priv->is_webvtt) {
++        size_t settings_size = 0;
++        uint8_t *settings = av_packet_get_side_data(
++            curr_pkt, AV_PKT_DATA_WEBVTT_SETTINGS, &settings_size);
++        priv->webvtt_settings = settings
++            ? talloc_strndup(priv, (char *)settings, settings_size)
++            : talloc_strdup(priv, "");
++        *webvtt_settings = priv->webvtt_settings;
++    }
++
+     priv->styled = avctx->codec_id == AV_CODEC_ID_DVB_TELETEXT;
+ 
+     if (avctx->codec_id == AV_CODEC_ID_DVB_TELETEXT) {
+@@ -297,6 +314,11 @@ bool lavc_conv_is_styled(struct lavc_conv *priv)
+     return priv->styled;
+ }
+ 
++bool lavc_conv_is_webvtt(struct lavc_conv *priv)
++{
++    return priv->is_webvtt;
++}
++
+ void lavc_conv_reset(struct lavc_conv *priv)
+ {
+     avcodec_flush_buffers(priv->avctx);
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+index ece372a..0e03e03 100644
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -47,6 +47,7 @@ struct sd_ass_priv {
+     struct ass_track *shadow_track; // for --sub-ass=no rendering
+     bool ass_configured;
+     bool is_converted;
++    bool is_webvtt;
+     struct lavc_conv *converter;
+     struct sd_filter **filters;
+     int num_filters;
+@@ -62,6 +63,15 @@ struct sd_ass_priv {
+     int *packets_animated;
+     int num_packets_animated;
+     bool check_animated;
++    struct text_event_metadata *text_event_metadata;
++    int num_text_event_metadata;
++};
++
++struct text_event_metadata {
++    int read_order;
++    long long start;
++    long long end;
++    char *webvtt_settings;
+ };
+ 
+ struct seen_packet {
+@@ -100,6 +110,87 @@ const struct m_sub_options mp_sub_filter_opts = {
+ static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts);
+ static void fill_plaintext(struct sd *sd, double pts);
+ 
++static void clear_text_event_metadata(struct sd_ass_priv *ctx)
++{
++    for (int n = 0; n < ctx->num_text_event_metadata; n++)
++        talloc_free(ctx->text_event_metadata[n].webvtt_settings);
++    TA_FREEP(&ctx->text_event_metadata);
++    ctx->num_text_event_metadata = 0;
++}
++
++static void add_text_event_metadata(struct sd_ass_priv *ctx, ASS_Event *event,
++                                    const char *webvtt_settings)
++{
++    struct text_event_metadata metadata = {
++        .read_order = event->ReadOrder,
++        .start = event->Start,
++        .end = event->Start + event->Duration,
++        .webvtt_settings = talloc_strdup(ctx, webvtt_settings),
++    };
++    MP_TARRAY_APPEND(ctx, ctx->text_event_metadata,
++                     ctx->num_text_event_metadata, metadata);
++}
++
++static const char *find_webvtt_settings(struct sd_ass_priv *ctx,
++                                        ASS_Event *event)
++{
++    for (int n = ctx->num_text_event_metadata - 1; n >= 0; n--) {
++        struct text_event_metadata *metadata = &ctx->text_event_metadata[n];
++        if (metadata->read_order == event->ReadOrder &&
++            metadata->start == event->Start)
++            return metadata->webvtt_settings;
++    }
++    // Empty settings are still semantically a WebVTT placement.
++    return ctx->is_webvtt ? "" : NULL;
++}
++
++static void update_text_event_metadata_end(struct sd_ass_priv *ctx,
++                                           ASS_Event *event)
++{
++    for (int n = ctx->num_text_event_metadata - 1; n >= 0; n--) {
++        struct text_event_metadata *metadata = &ctx->text_event_metadata[n];
++        if (metadata->read_order == event->ReadOrder &&
++            metadata->start == event->Start)
++        {
++            metadata->end = event->Start + event->Duration;
++            return;
++        }
++    }
++}
++
++static void prune_text_event_metadata(struct sd_ass_priv *ctx,
++                                      long long deadline)
++{
++    int dst = 0;
++    for (int src = 0; src < ctx->num_text_event_metadata; src++) {
++        struct text_event_metadata metadata = ctx->text_event_metadata[src];
++        if (metadata.end <= deadline) {
++            talloc_free(metadata.webvtt_settings);
++            continue;
++        }
++        ctx->text_event_metadata[dst++] = metadata;
++    }
++    ctx->num_text_event_metadata = dst;
++
++    if (!dst) {
++        TA_FREEP(&ctx->text_event_metadata);
++    } else if (MP_TALLOC_AVAIL(ctx->text_event_metadata) > MPMAX(32, dst * 2)) {
++        MP_RESIZE_ARRAY(ctx, ctx->text_event_metadata, dst);
++    }
++}
++
++static bool get_prune_deadline(struct sd *sd, long long ts,
++                               long long *deadline)
++{
++#if LIBASS_VERSION >= 0x01703010
++    if (sd->opts->ass_prune_delay >= 0) {
++        *deadline = ts - llrint(sd->opts->ass_prune_delay * 1000.0);
++        return true;
++    }
++#endif
++    return false;
++}
++
+ static const struct sd_filter_functions *const filters[] = {
+     // Note: list order defines filter order.
+     &sd_filter_sdh,
+@@ -294,6 +385,7 @@ static void assobjects_destroy(struct sd *sd)
+ {
+     struct sd_ass_priv *ctx = sd->priv;
+ 
++    clear_text_event_metadata(ctx);
+     ass_free_track(ctx->ass_track);
+     ass_free_track(ctx->shadow_track);
+     enable_output(sd, false);
+@@ -314,6 +406,7 @@ static int init(struct sd *sd)
+         ctx->converter = lavc_conv_create(sd);
+         if (!ctx->converter)
+             return -1;
++        ctx->is_webvtt = lavc_conv_is_webvtt(ctx->converter);
+     }
+ 
+     assobjects_init(sd);
+@@ -367,7 +460,8 @@ static bool is_animated(const char *str)
+ }
+ 
+ // Note: pkt is not necessarily a fully valid refcounted packet.
+-static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
++static void filter_and_add(struct sd *sd, struct demux_packet *pkt,
++                           const char *webvtt_settings)
+ {
+     struct sd_ass_priv *ctx = sd->priv;
+     struct demux_packet *orig_pkt = pkt;
+@@ -388,6 +482,11 @@ static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
+                       llrint(pkt->pts * 1000),
+                       llrint(pkt->duration * 1000));
+ 
++    if (webvtt_settings) {
++        for (int n = old_n_events; n < track->n_events; n++)
++            add_text_event_metadata(ctx, &track->events[n], webvtt_settings);
++    }
++
+     // This bookkeeping only has any practical use for ASS subs
+     // over a VO with no video.
+     if (!ctx->is_converted) {
+@@ -465,8 +564,9 @@ static void decode(struct sd *sd, struct demux_packet *packet)
+ 
+         double sub_pts = 0;
+         double sub_duration = 0;
++        const char *webvtt_settings = NULL;
+         char **r = lavc_conv_decode(ctx->converter, packet, &sub_pts,
+-                                    &sub_duration);
++                                    &sub_duration, &webvtt_settings);
+         if (sd->opts->sub_stretch_durations ||
+             packet->duration < 0 || sub_duration == UINT32_MAX) {
+             MP_VERBOSE(sd, "Subtitle with unknown duration.\n");
+@@ -480,7 +580,7 @@ static void decode(struct sd *sd, struct demux_packet *packet)
+                 .buffer = r[n],
+                 .len = strlen(r[n]),
+             };
+-            filter_and_add(sd, &pkt2);
++            filter_and_add(sd, &pkt2, webvtt_settings);
+         }
+         for (int n = track->n_events - 1; n >= 0; n--) {
+             if (track->events[track->n_events - 1].Start == track->events[n].Start)
+@@ -492,6 +592,8 @@ static void decode(struct sd *sd, struct demux_packet *packet)
+                 } else if (track->events[n].Start == track->events[n + 1].Start) {
+                     track->events[n].Duration = track->events[n + 1].Duration;
+                 }
++                if (track->events[n].Duration != UNKNOWN_DURATION * 1000)
++                    update_text_event_metadata_end(ctx, &track->events[n]);
+             }
+             if (n > 0 && track->events[n].Start != track->events[n - 1].Start)
+                 break;
+@@ -501,7 +603,7 @@ static void decode(struct sd *sd, struct demux_packet *packet)
+         // for discarding duplicate (already seen) packets but we check this
+         // anyways for our purposes for ASS subtitles.
+         packet->seen = check_packet_seen(sd, packet);
+-        filter_and_add(sd, packet);
++        filter_and_add(sd, packet, NULL);
+     }
+ }
+ 
+@@ -739,7 +841,24 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+     struct mp_osd_res old_osd = ctx->osd;
+     ctx->osd = dim;
+ 
+-    if (pts == MP_NOPTS_VALUE || !renderer)
++    if (pts == MP_NOPTS_VALUE)
++        goto done;
++
++    long long ts = find_timestamp(sd, pts);
++    long long prune_deadline = 0;
++    bool prune = get_prune_deadline(sd, ts, &prune_deadline);
++
++    if (opts->sub_text_intercept && ctx->is_converted) {
++#if LIBASS_VERSION >= 0x01703010
++        if (prune)
++            ass_prune_events(ctx->ass_track, prune_deadline);
++#endif
++        if (prune)
++            prune_text_event_metadata(ctx, prune_deadline);
++        goto done;
++    }
++
++    if (!renderer)
+         goto done;
+ 
+     // Currently no supported text sub formats support a distinction between forced
+@@ -771,13 +890,17 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+     } else {
+         ass_set_storage_size(renderer, 0, 0);
+     }
+-    long long ts = find_timestamp(sd, pts);
+-
+     if (no_ass)
+         fill_plaintext(sd, pts);
+ 
+     int changed;
+     ASS_Image *imgs = ass_render_frame(renderer, track, ts, &changed);
++#if LIBASS_VERSION >= 0x01703010
++    if (prune && track != ctx->ass_track)
++        ass_prune_events(ctx->ass_track, prune_deadline);
++#endif
++    if (prune)
++        prune_text_event_metadata(ctx, prune_deadline);
+     mp_ass_packer_pack(ctx->packer, &imgs, 1, changed, !converted, format, res);
+ 
+ done:
+@@ -920,6 +1043,42 @@ static char *get_text(struct sd *sd, double pts, enum sd_text_type type)
+     return bstrto0(NULL, get_text_buf(sd, pts, type));
+ }
+ 
++static void get_text_snapshot(struct sd *sd, double pts,
++                              struct sub_text_snapshot *snapshot)
++{
++    struct sd_ass_priv *ctx = sd->priv;
++    ASS_Track *track = ctx->ass_track;
++
++    if (!ctx->is_converted || pts == MP_NOPTS_VALUE ||
++        sd->opts->sub_forced_events_only)
++        return;
++
++    long long ipts = find_timestamp(sd, pts);
++
++    for (int n = 0; n < track->n_events; n++) {
++        ASS_Event *event = &track->events[n];
++        if (ipts < event->Start || ipts >= event->Start + event->Duration ||
++            !event->Text)
++            continue;
++
++        bstr text = {0};
++        ass_to_plaintext(&text, event->Text);
++        if (is_whitespace_only(text)) {
++            talloc_free(text.start);
++            continue;
++        }
++
++        const char *settings = find_webvtt_settings(ctx, event);
++        struct sub_text_region region = {
++            .text = bstrto0(snapshot, text),
++            .webvtt_settings = settings ? talloc_strdup(snapshot, settings) : NULL,
++        };
++        MP_TARRAY_APPEND(snapshot, snapshot->regions, snapshot->num_regions,
++                         region);
++        talloc_free(text.start);
++    }
++}
++
+ static struct sd_times get_times(struct sd *sd, double pts)
+ {
+     struct sd_ass_priv *ctx = sd->priv;
+@@ -996,6 +1155,7 @@ static void reset(struct sd *sd)
+     struct sd_ass_priv *ctx = sd->priv;
+     if (sd->opts->sub_clear_on_seek || ctx->clear_once) {
+         ass_flush_events(ctx->ass_track);
++        clear_text_event_metadata(ctx);
+         ctx->num_seen_packets = 0;
+         sd->preload_ok = false;
+         ctx->clear_once = false;
+@@ -1065,6 +1225,7 @@ const struct sd_functions sd_ass = {
+     .decode = decode,
+     .get_bitmaps = get_bitmaps,
+     .get_text = get_text,
++    .get_text_snapshot = get_text_snapshot,
+     .get_times = get_times,
+     .control = control,
+     .reset = reset,
+diff --git a/player/command.c b/player/command.c
+index 96bc06a..e082593 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -3346,6 +3346,56 @@ static int mp_property_sub_text(void *ctx, struct m_property *prop,
+     return M_PROPERTY_NOT_IMPLEMENTED;
+ }
+ 
++static int mp_property_sub_text_snapshot(void *ctx, struct m_property *prop,
++                                         int action, void *arg)
++{
++    MPContext *mpctx = ctx;
++
++    switch (action) {
++    case M_PROPERTY_GET_TYPE:
++        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_NODE};
++        return M_PROPERTY_OK;
++    case M_PROPERTY_GET: {
++        struct mpv_node node;
++        node_init(&node, MPV_FORMAT_NODE_ARRAY, NULL);
++
++        double pts = mpctx->playback_pts;
++        if (pts != MP_NOPTS_VALUE) {
++            // Match native subtitle presentation order: primary, then secondary.
++            for (int order = 0; order < num_ptracks[STREAM_SUB]; order++) {
++                struct track *track = mpctx->current_track[order][STREAM_SUB];
++                struct dec_sub *sub = track ? track->d_sub : NULL;
++                if (!sub)
++                    continue;
++                if (order == 0 && !sub_is_primary_visible(sub))
++                    continue;
++                if (order == 1 && !sub_is_secondary_visible(sub))
++                    continue;
++
++                struct sub_text_snapshot *snapshot =
++                    sub_get_text_snapshot(sub, NULL, pts);
++                for (int n = 0; n < snapshot->num_regions; n++) {
++                    struct sub_text_region *region = &snapshot->regions[n];
++                    struct mpv_node *entry =
++                        node_array_add(&node, MPV_FORMAT_NODE_MAP);
++                    node_map_add_string(entry, "text", region->text);
++                    if (region->webvtt_settings) {
++                        node_map_add_string(entry, "format", "webvtt");
++                        node_map_add_string(entry, "settings",
++                                            region->webvtt_settings);
++                    }
++                }
++                talloc_free(snapshot);
++            }
++        }
++
++        *(struct mpv_node *)arg = node;
++        return M_PROPERTY_OK;
++    }
++    }
++    return M_PROPERTY_NOT_IMPLEMENTED;
++}
++
+ static struct sd_times get_times(void *ctx, struct m_property *prop,
+                                 int action, void *arg)
+ {
+@@ -4499,6 +4549,7 @@ static const struct m_property mp_properties_base[] = {
+         .priv = (void *)&(const int[]){0, SD_TEXT_TYPE_PLAIN}},
+     {"secondary-sub-text", mp_property_sub_text,
+         .priv = (void *)&(const int[]){1, SD_TEXT_TYPE_PLAIN}},
++    {"sub-text-snapshot", mp_property_sub_text_snapshot},
+     M_PROPERTY_DEPRECATED_ALIAS("sub-text-ass", "sub-text/ass"),
+     {"sub-start", mp_property_sub_start,
+         .priv = (void *)&(const int){0}},
+@@ -4578,15 +4629,17 @@ static const char *const *const mp_event_property_change[] = {
+     E(MPV_EVENT_END_FILE, "*"),
+     E(MPV_EVENT_FILE_LOADED, "*"),
+     E(MP_EVENT_CHANGE_ALL, "*"),
+-    E(MP_EVENT_TRACKS_CHANGED, "track-list", "current-tracks"),
+-    E(MP_EVENT_TRACK_SWITCHED, "track-list", "current-tracks"),
++    E(MP_EVENT_TRACKS_CHANGED, "track-list", "current-tracks",
++      "sub-text-snapshot"),
++    E(MP_EVENT_TRACK_SWITCHED, "track-list", "current-tracks",
++      "sub-text-snapshot"),
+     E(MPV_EVENT_IDLE, "*"),
+     E(MPV_EVENT_TICK, "time-pos", "audio-pts", "stream-pos", "avsync",
+       "percent-pos", "time-remaining", "playtime-remaining", "playback-time",
+       "estimated-vf-fps", "total-avsync-change", "audio-speed-correction",
+       "video-speed-correction", "vo-delayed-frame-count", "mistimed-frame-count",
+       "vsync-ratio", "estimated-display-fps", "vsync-jitter", "sub-text",
+-      "secondary-sub-text", "audio-bitrate", "video-bitrate", "sub-bitrate",
++      "secondary-sub-text", "sub-text-snapshot", "audio-bitrate", "video-bitrate", "sub-bitrate",
+       "decoder-frame-drop-count", "frame-drop-count", "video-frame-info",
+       "vf-metadata", "af-metadata", "sub-start", "sub-end", "secondary-sub-start",
+       "secondary-sub-end", "video-out-params", "video-dec-params", "video-params",

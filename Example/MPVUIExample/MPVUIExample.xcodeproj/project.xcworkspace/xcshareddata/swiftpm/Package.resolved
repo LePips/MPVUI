@@ -1,0 +1,15 @@
+{
+  "originHash" : "367f2b5edff8d3b75f6f3bae7ef5634f2d2b7c092d4ecf50f61e340c10e877b9",
+  "pins" : [
+    {
+      "identity" : "mediaaccessibilitykit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/LePips/MediaAccessibilityKit",
+      "state" : {
+        "revision" : "178a06258c39bd964fb11f1031891a9bd231ebb8",
+        "version" : "0.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}

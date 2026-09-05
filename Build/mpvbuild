@@ -1,0 +1,56 @@
+#!/bin/bash
+set -euo pipefail
+if [[ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 && "$(/usr/bin/uname -m)" != arm64 ]]; then
+    # An Intel parent (for example an older Python install) must not launch Xcode under Rosetta.
+    exec /usr/bin/arch -arm64 /bin/bash "${BASH_SOURCE[0]}" "$@"
+fi
+umask 022
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+lock="${root}/Build/Inputs.lock.json"
+expected_build="$(/usr/bin/plutil -extract toolchain.xcode.build raw -o - "${lock}")"
+selected="${DEVELOPER_DIR:-}"
+if [[ -z "${selected}" ]]; then
+    for app in /Applications/Xcode*.app; do
+        if [[ "$(/usr/bin/plutil -extract ProductBuildVersion raw -o - "${app}/Contents/version.plist" 2>/dev/null || true)" == "${expected_build}" ]]; then
+            selected="${app}/Contents/Developer"
+            break
+        fi
+    done
+fi
+if [[ -z "${selected}" || ! -x "${selected}/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift" ]]; then
+    echo "error: Xcode ${expected_build} is required; install it or set DEVELOPER_DIR." >&2
+    exit 1
+fi
+export DEVELOPER_DIR="${selected}"
+export LC_ALL=C TZ=UTC ZERO_AR_DATE=1
+export SOURCE_DATE_EPOCH="$(/usr/bin/plutil -extract sourceDateEpoch raw -o - "${lock}")"
+swift="${DEVELOPER_DIR}/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
+key="$( { /usr/bin/find "${root}/Build/Sources" -type f -name '*.swift' -print | LC_ALL=C /usr/bin/sort | while IFS= read -r file; do /usr/bin/shasum -a 256 "${file}"; done; /usr/bin/shasum -a 256 "${root}/Build/Package.swift"; "${swift}" --version 2>&1; /usr/bin/plutil -extract ProductBuildVersion raw -o - "${selected%/Developer}/version.plist"; } | /usr/bin/shasum -a 256 | /usr/bin/cut -d ' ' -f 1)"
+cache="${root}/.build/mpvbuild-cli/${key}"
+/bin/mkdir -p "${root}/.build/mpvbuild-cli"
+while ! /bin/mkdir "${cache}.lock" 2>/dev/null; do
+    if [[ -f "${cache}.lock/pid" ]]; then
+        owner="$(/bin/cat "${cache}.lock/pid")"
+        if [[ "${owner}" =~ ^[0-9]+$ ]] && ! kill -0 "${owner}" 2>/dev/null; then
+            /bin/rm -f "${cache}.lock/pid"
+            /bin/rmdir "${cache}.lock" 2>/dev/null || true
+        fi
+    elif (( $(/bin/date +%s) - $(/usr/bin/stat -f %m "${cache}.lock" 2>/dev/null || /bin/date +%s) > 30 )); then
+        /bin/rmdir "${cache}.lock" 2>/dev/null || true
+    fi
+    /bin/sleep 0.1
+done
+echo "$$" > "${cache}.lock/pid"
+cleanup_bootstrap() { /bin/rm -f "${cache}.lock/pid"; /bin/rmdir "${cache}.lock" 2>/dev/null || true; }
+trap cleanup_bootstrap EXIT
+if [[ ! -x "${cache}/release/mpvbuild" ]]; then
+    /bin/mkdir -p "${cache}/package"
+    /bin/cp "${root}/Build/Package.swift" "${cache}/package/Package.swift"
+    /usr/bin/rsync -a --delete "${root}/Build/Sources/" "${cache}/package/Sources/"
+    /usr/bin/rsync -a --delete "${root}/Build/Tests/" "${cache}/package/Tests/"
+    "${swift}" build --package-path "${cache}/package" --scratch-path "${cache}" -c release >&2
+fi
+cleanup_bootstrap
+trap - EXIT
+export MPVBUILD_CODE_ROOT="${cache}/package/Sources/MPVBuildCore"
+exec "${cache}/release/mpvbuild" --root "${root}" "$@"

@@ -1,0 +1,50 @@
+# version: 0.63.0
+
+--swiftversion 6.3
+
+--assetliterals visual-width
+--computedvarattrs prev-line
+--funcattributes prev-line
+--ifdef no-indent 
+--maxwidth 140
+--semicolons never
+--shortoptionals "always"
+--storedvarattrs prev-line
+--stripunusedargs closure-only
+--tabwidth 4
+--trailingclosures
+--typeattributes prev-line
+--wraparguments before-first
+--wrapcollections before-first
+--wrapconditions after-first
+--wrapparameters before-first
+--xcodeindentation enabled
+
+--enable blankLinesAroundMark,   \
+    isEmpty,                \
+    leadingDelimiters,      \
+    redundantInit,          \
+    redundantLet,           \
+    spaceInsideBraces,      \
+    spaceInsideBrackets,    \
+    spaceInsideComments,    \
+    spaceInsideGenerics,    \
+    spaceInsideParens,      \
+    trailingSpace,          \
+    typeSugar,              \
+    void,                   \
+    wrapEnumCases
+
+--disable andOperator,       \
+    blankLinesAtStartOfScope,\
+    docComments,             \
+    redundantClosure,       \
+    redundantFileprivate,   \
+    redundantSelf,          \
+    redundantType,          \
+    redundantViewBuilder,   \
+    strongOutlets,          \
+    trailingCommas,         \
+    yodaConditions
+
+--header ""

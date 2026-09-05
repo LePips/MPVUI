@@ -1,0 +1,32 @@
+diff --git a/video/out/vulkan/context.c b/video/out/vulkan/context.c
+index 7c196eb..43cbe4d 100644
+--- a/video/out/vulkan/context.c
++++ b/video/out/vulkan/context.c
+@@ -18,6 +18,7 @@
+ #include "config.h"
+ 
+ #include <libavutil/uuid.h>
++#include <string.h>
+ 
+ #include "options/m_config.h"
+ #include "video/out/placebo/ra_pl.h"
+@@ -396,6 +397,11 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
+                     struct ra_ctx_params params,
+                     VkPresentModeKHR preferred_mode)
+ {
++    bool is_moltenvk = false;
++#if HAVE_MOLTENVK
++    is_moltenvk = strcmp(ctx->fns->name, "moltenvk") == 0;
++#endif
++
+     struct ra_swapchain *sw = ctx->swapchain = talloc_zero(NULL, struct ra_swapchain);
+     sw->ctx = ctx;
+     sw->fns = &vulkan_swapchain;
+@@ -420,6 +426,7 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
+         .surface = vk->surface,
+         .present_mode = preferred_mode,
+         .swapchain_depth = ctx->vo->opts->swapchain_depth,
++        .disable_10bit_sdr = is_moltenvk,
+     };
+ 
+     if (p->opts->swap_mode >= 0) // user override
