@@ -3,6 +3,13 @@
 Builds mpv, FFmpeg, and dependencies into one `Libmpv.xcframework.zip`.
 Run commands from the repository root.
 
+Each architecture is packaged as a self-contained dynamic framework. Only the
+functions declared `MPV_EXPORT` in libmpv's public headers remain global; FFmpeg
+and other native dependencies are private to that image. This prevents symbol
+collisions and incompatible implementations from being mixed when linking
+against other dependencies. SwiftPM/Xcode embeds the framework in the app automatically.
+Consumer checks include a conflicting host `avcodec_version` definition.
+
 Requires the Xcode version in [Inputs.lock.json](Inputs.lock.json) and Python 3.10+.
 Publishing also requires GitHub CLI authentication (`gh auth login`).
 

@@ -267,17 +267,23 @@ private final class WorkerResults: @unchecked Sendable {
     }
 }
 
-func verifyMPV(_ binary: URL, slice: Slice, contracts: Contracts, runner: Runner) throws {
+func verifyMPV(_ binary: URL, slice: Slice, contracts: Contracts, runner: Runner, isolated: Bool = false) throws {
     try require(
         (fm.attributesOfItem(atPath: binary.path)[.size] as? NSNumber)?.intValue ?? 0 >= contracts.minimumMPVBytes,
-        "Implausibly small libmpv archive"
+        "Implausibly small libmpv binary"
     )
-    let members = try Set(runner.run("/usr/bin/ar", ["-t", binary.path]).components(separatedBy: "\n"))
-    for member in contracts.mpvMembers {
-        try require(members.contains(member), "Missing compiled patch member \(member)")
-    }
-    if slice.id == "macos" {
-        try require(members.contains(contracts.macOSSwiftMember), "Missing macOS Swift object")
+    if isolated {
+        let bytes = try Data(contentsOf: binary, options: .mappedIfSafe)
+        let objects = try MachO.objects(bytes)
+        try require(objects.count == 1 && bytes.uint(12) == 6, "Expected one native dynamic library (MH_DYLIB)")
+    } else {
+        let members = try Set(runner.run("/usr/bin/ar", ["-t", binary.path]).components(separatedBy: "\n"))
+        for member in contracts.mpvMembers {
+            try require(members.contains(member), "Missing compiled patch member \(member)")
+        }
+        if slice.id == "macos" {
+            try require(members.contains(contracts.macOSSwiftMember), "Missing macOS Swift object")
+        }
     }
     let definitions = try Set(runner.run("/usr/bin/nm", ["-Uj", binary.path]).components(separatedBy: "\n"))
     for symbol in contracts.mpvDefinitions {
@@ -285,7 +291,10 @@ func verifyMPV(_ binary: URL, slice: Slice, contracts: Contracts, runner: Runner
     }
     let references = try Set(runner.run("/usr/bin/nm", ["-uj", binary.path]).components(separatedBy: "\n"))
     for symbol in contracts.mpvReferences {
-        try require(references.contains(symbol), "Missing required external reference \(symbol)")
+        try require(
+            (isolated ? definitions : references).contains(symbol),
+            "Missing required \(isolated ? "resolved definition" : "external reference") \(symbol)"
+        )
     }
     let bytes = try Data(contentsOf: binary)
     for string in contracts.mpvStrings {

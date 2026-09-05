@@ -107,6 +107,7 @@ struct ConsumerTests {
             for arch in slice.architectures {
                 try nativeConsumer(slice: slice, arch: arch, paths: paths, work: work)
                 checks.append("native-import-link/\(slice.id)/\(arch)")
+                checks.append("native-symbol-isolation/\(slice.id)/\(arch)")
             }
         }
         if !nativeOnly {
@@ -264,7 +265,10 @@ struct ConsumerTests {
         let imports = ProductDefinition.all.map { "@import \($0.framework);" }.joined(separator: "\n")
         try put(
             imports +
-                "\nint main(void) { mpv_handle *h = mpv_create(); if (!h) return 2; mpv_set_option_string(h, \"vo\", \"null\"); mpv_set_option_string(h, \"ao\", \"null\"); int rc = mpv_initialize(h); if (rc < 0) { mpv_destroy(h); return 3; } mpv_terminate_destroy(h); return 0; }\n",
+                // Simulate a host that already exports an incompatible FFmpeg.
+                // mpv must use its own avcodec_version, while the host keeps 0.
+                "\nunsigned avcodec_version(void) { return 0; }\n" +
+                "int main(void) { mpv_handle *h = mpv_create(); if (!h) return 2; mpv_set_option_string(h, \"vo\", \"null\"); mpv_set_option_string(h, \"ao\", \"null\"); int rc = mpv_initialize(h); if (rc < 0) { mpv_destroy(h); return 3; } mpv_terminate_destroy(h); return avcodec_version() != 0; }\n",
             source
         )
         try require(paths.count == 1 && paths["Libmpv-GPL"] != nil, "Consumer must link only the combined native artifact")
@@ -282,54 +286,25 @@ struct ConsumerTests {
                 ]
             }
         }
-        let sdk = try graph.runner.sdk(slice.sdk)
-        let system = [
-            "AVFoundation",
-            "AudioToolbox",
-            "CoreAudio",
-            "CoreFoundation",
-            "CoreGraphics",
-            "CoreMedia",
-            "CoreText",
-            "CoreVideo",
-            "Foundation",
-            "IOSurface",
-            "Metal",
-            "QuartzCore",
-            "Security",
-            "VideoToolbox"
-        ] + (slice.id == "macos" ? ["AppKit", "OpenGL", "IOKit"] : ["UIKit"]) +
-            (["ios", "isimulator", "tvos", "tvsimulator"].contains(slice.id) ? ["OpenGLES"] : []) +
-            (slice.variant == "maccatalyst" ? ["IOKit"] : [])
-        var args = [
-            "-target",
-            slice.triple(arch),
-            "-isysroot",
-            sdk.path,
+        var args = try NativeLibrary.linkArguments(slice: slice, arch: arch, runner: graph.runner) + [
             "-fmodules",
             "-fmodules-cache-path=" + work.appendingPathComponent("modules").path,
             source.path
-        ] + frameworks + libraries + system.flatMap { ["-framework", $0] } + [
-            "-lc++",
-            "-lbz2",
-            "-liconv",
-            "-lexpat",
-            "-lresolv",
-            "-lxml2",
-            "-lz"
-        ]
-        if slice.variant == "maccatalyst" {
-            args += [
-                "-iframework",
-                sdk.appendingPathComponent("System/iOSSupport/System/Library/Frameworks").path
-            ]
-        }
-        if slice.id == "macos" {
-            let swiftLib = URL(fileURLWithPath: graph.runner.environment["DEVELOPER_DIR"]!)
-                .appendingPathComponent("Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx")
-            args += ["-L", swiftLib.path, "-L", sdk.appendingPathComponent("usr/lib/swift").path, "-Wl,-rpath,/usr/lib/swift"]
+        ] + frameworks + libraries
+        // The native executable lives outside an app bundle during validation.
+        // SwiftPM/Xcode embeds this framework in the consumer app normally.
+        for index in stride(from: 1, to: frameworks.count, by: 2) {
+            args += ["-Xlinker", "-rpath", "-Xlinker", frameworks[index]]
         }
         args += ["-o", work.appendingPathComponent("smoke-\(slice.id)-\(arch)").path]
         try graph.runner.run("/usr/bin/clang", args)
+        #if arch(arm64)
+        let hostArchitecture = "arm64"
+        #else
+        let hostArchitecture = "x86_64"
+        #endif
+        if slice.id == "macos", arch == hostArchitecture {
+            try graph.runner.run(work.appendingPathComponent("smoke-\(slice.id)-\(arch)").path)
+        }
     }
 }

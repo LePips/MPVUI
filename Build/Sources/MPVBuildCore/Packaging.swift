@@ -130,7 +130,7 @@ struct Packager {
                     let framework = work.appendingPathComponent("frameworks/\(slice.id)/\(product.framework).framework")
                     try mkdir(framework)
                     let thinPaths = try selected.sorted { $0.architecture < $1.architecture }.map { thin in
-                        let combined = work.appendingPathComponent("combined/\(slice.id)/\(thin.architecture)/libmpv.a")
+                        let combined = work.appendingPathComponent("combined/\(slice.id)/\(thin.architecture)/Libmpv")
                         combinedInputs[slice.id + "/" + thin.architecture] = try combine(thin, products: products, destination: combined)
                         return combined.path
                     }
@@ -241,7 +241,14 @@ struct Packager {
                 output.appendingPathComponent("candidate.json")
             )
             try remove(work)
-            return ["exact-slice-inventory", "MachO-platforms", "public-headers", "compiled-contracts", "ZIP-round-trip"]
+            return [
+                "exact-slice-inventory",
+                "MachO-platforms",
+                "public-headers",
+                "compiled-contracts",
+                "isolated-native-symbols",
+                "ZIP-round-trip"
+            ]
         }
     }
 
@@ -271,9 +278,13 @@ struct Packager {
             ) }
         }
         try mkdir(destination.deletingLastPathComponent())
-        try graph.runner.run("/usr/bin/libtool", ["-static", "-D", "-o", destination.path] + libraries.map(\.1.path))
+        let merged = destination.deletingLastPathComponent().appendingPathComponent("merged.a")
+        defer { try? remove(merged) }
+        try graph.runner.run("/usr/bin/libtool", ["-static", "-D", "-o", merged.path] + libraries.map(\.1.path))
         let expectedCount = try libraries.reduce(0) { try $0 + MachO.validate($1.1, slice: slice, arch: arch).count }
-        try require(MachO.validate(destination, slice: slice, arch: arch).count == expectedCount, "Static merge lost input objects")
+        try require(MachO.validate(merged, slice: slice, arch: arch).count == expectedCount, "Static merge lost input objects")
+        let exports = try NativeLibrary.publicSymbols(in: mpvRoot.appendingPathComponent("include/mpv"))
+        try NativeLibrary.link(merged, to: destination, exports: exports, slice: slice, arch: arch, runner: graph.runner)
         return try Dictionary(uniqueKeysWithValues: libraries.map { try ($0.0, digest($0.1)) })
     }
 
@@ -290,7 +301,7 @@ struct Packager {
                 let binary = library.binary(xcf)
                 _ = try MachO.validate(binary, slice: slice, arch: arch, allowOtherArchitectures: true)
                 if product.component == "mpv" {
-                    let thin = graph.runner.logs.appendingPathComponent("verify-\(slice.id)-\(arch).a")
+                    let thin = graph.runner.logs.appendingPathComponent("verify-\(slice.id)-\(arch).dylib")
                     let magic = try Data(contentsOf: binary, options: .mappedIfSafe).uint(0)
                     if [0xBEBA_FECA, 0xBFBA_FECA].contains(magic) {
                         try graph.runner.run(
@@ -301,7 +312,9 @@ struct Packager {
                         try fm.copyItem(at: binary.resolvingSymlinksInPath(), to: thin)
                     }
                     defer { try? remove(thin) }
-                    try verifyMPV(thin, slice: slice, contracts: graph.native.contracts, runner: graph.runner)
+                    try verifyMPV(thin, slice: slice, contracts: graph.native.contracts, runner: graph.runner, isolated: true)
+                    let headers = binary.deletingLastPathComponent().appendingPathComponent("Headers")
+                    try NativeLibrary.verify(thin, exports: NativeLibrary.publicSymbols(in: headers), runner: graph.runner)
                 }
             }
         }
