@@ -1,0 +1,113 @@
+{
+  "buildRecordPath" : "Libmpv.xcframework/build-record.json",
+  "dependencies" : [
+
+  ],
+  "nativeInputFingerprint" : "0a687b169b29c9c12ca0d1e475fd8d78f837807913cb1f808395fb8af2d91296",
+  "products" : [
+    {
+      "archive" : "Libmpv.xcframework.zip",
+      "framework" : "Libmpv",
+      "module" : "Libmpv",
+      "sha256" : "f8e00735f869eff2cac977c4300ace3729c3b47a8725e201d55ae6d4a5218274",
+      "slices" : [
+        {
+          "architectures" : [
+            "arm64"
+          ],
+          "id" : "ios",
+          "machOPlatform" : 2,
+          "minimumOS" : "15.0",
+          "platform" : "ios",
+          "sdk" : "iphoneos",
+          "variant" : ""
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "x86_64"
+          ],
+          "id" : "isimulator",
+          "machOPlatform" : 7,
+          "minimumOS" : "15.0",
+          "platform" : "ios",
+          "sdk" : "iphonesimulator",
+          "variant" : "simulator"
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "x86_64"
+          ],
+          "id" : "maccatalyst",
+          "machOPlatform" : 6,
+          "minimumOS" : "15.0",
+          "platform" : "ios",
+          "sdk" : "macosx",
+          "variant" : "maccatalyst"
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "x86_64"
+          ],
+          "id" : "macos",
+          "machOPlatform" : 1,
+          "minimumOS" : "12.0",
+          "platform" : "macos",
+          "sdk" : "macosx",
+          "variant" : ""
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "arm64e"
+          ],
+          "id" : "tvos",
+          "machOPlatform" : 3,
+          "minimumOS" : "15.0",
+          "platform" : "tvos",
+          "sdk" : "appletvos",
+          "variant" : ""
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "x86_64"
+          ],
+          "id" : "tvsimulator",
+          "machOPlatform" : 8,
+          "minimumOS" : "15.0",
+          "platform" : "tvos",
+          "sdk" : "appletvsimulator",
+          "variant" : "simulator"
+        },
+        {
+          "architectures" : [
+            "arm64"
+          ],
+          "id" : "xros",
+          "machOPlatform" : 11,
+          "minimumOS" : "1.0",
+          "platform" : "xros",
+          "sdk" : "xros",
+          "variant" : ""
+        },
+        {
+          "architectures" : [
+            "arm64"
+          ],
+          "id" : "xrsimulator",
+          "machOPlatform" : 12,
+          "minimumOS" : "1.0",
+          "platform" : "xros",
+          "sdk" : "xrsimulator",
+          "variant" : "simulator"
+        }
+      ],
+      "target" : "Libmpv-GPL",
+      "url" : "https://github.com/LePips/MPVUI/releases/download/0.2.0/Libmpv.xcframework.zip"
+    }
+  ],
+  "releaseID" : "0.2.0"
+}
