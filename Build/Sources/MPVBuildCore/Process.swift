@@ -116,7 +116,7 @@ struct Runner: Sendable {
         let clang = try run("/usr/bin/clang", ["--version"]).components(separatedBy: "\n").first ?? ""
         try require(swift == lock.xcode.swift && clang == lock.xcode.clang, "Actual compiler identities differ from lock")
         var identities = ["xcode": lock.xcode.build, "swift": swift, "clang": clang]
-        let allowed = Set(["meson", "ninja", "pkg-config", "make", "zip", "gitMinimum"])
+        let allowed = Set(["meson", "ninja", "pkg-config", "make", "zip", "gitMinimum", "glslc", "nasm"])
         try require(Set(lock.tools.keys) == allowed, "Tool lock has missing or unsupported tools")
         for name in lock.tools.keys.sorted() {
             let expected = lock.tools[name]!
@@ -126,9 +126,21 @@ struct Runner: Sendable {
                 identities["git"] = actual
                 continue
             }
+            if name == "glslc" || name == "nasm" {
+                try require(
+                    (try? executable(name)) != nil,
+                    "Missing \(name); install the host compiler pinned in Build/Inputs.lock.json"
+                )
+            }
             let raw = try run(name, [name == "zip" || name == "nasm" ? "-v" : "--version"])
-            let actual = name == "zip" ? raw.components(separatedBy: "\n").first(where: { $0.hasPrefix("This is Zip") }) ?? "" : raw
-                .components(separatedBy: "\n")[0]
+            let actual: String = if name == "glslc" {
+                // shaderc also reports the SPIRV-Tools and glslang revisions.
+                raw
+            } else if name == "zip" {
+                raw.components(separatedBy: "\n").first(where: { $0.hasPrefix("This is Zip") }) ?? ""
+            } else {
+                raw.components(separatedBy: "\n")[0]
+            }
             try require(
                 name == "nasm" ? actual.hasPrefix(expected + " ") : actual == expected,
                 "\(name): expected '\(expected)', found '\(actual)'"

@@ -47,28 +47,9 @@ public struct MPVMediaInformation: Equatable, Sendable {
     /// HDR source and output status.
     public let hdr: MPVHDRStatus
 
-    /// Creates a media-information snapshot.
-    ///
-    /// Negative durations, invalid frame rates, and negative file sizes are
-    /// discarded.
-    ///
-    /// - Parameters:
-    ///   - sourceURL: The local or remote media source.
-    ///   - title: The media title, when reported.
-    ///   - duration: The duration, when known.
-    ///   - container: The container or demuxer format name.
-    ///   - fileSize: The source size in bytes, when known.
-    ///   - videoCodec: The active video codec name.
-    ///   - audioCodec: The active audio codec name.
-    ///   - hardwareDecoder: The active hardware decoder name.
-    ///   - dimensions: The active video dimensions.
-    ///   - framesPerSecond: The active video frame rate.
-    ///   - rotation: Clockwise video rotation in degrees.
-    ///   - metadata: Container-level metadata.
-    ///   - chapters: Timeline chapters.
-    ///   - tracks: Selectable media tracks.
-    ///   - hdr: HDR source and output status.
-    public init(
+    /// Creates a snapshot, discarding negative durations and file sizes,
+    /// and negative or non-finite frame rates.
+    init(
         sourceURL: URL? = nil,
         title: String? = nil,
         duration: Duration? = nil,
@@ -94,7 +75,7 @@ public struct MPVMediaInformation: Equatable, Sendable {
         self.audioCodec = audioCodec
         self.hardwareDecoder = hardwareDecoder
         self.dimensions = dimensions
-        self.framesPerSecond = Self.normalizedPositiveOrZero(framesPerSecond)
+        self.framesPerSecond = framesPerSecond?.positiveOrZero
         self.rotation = rotation
         self.metadata = metadata
         self.chapters = chapters
@@ -104,9 +85,4 @@ public struct MPVMediaInformation: Equatable, Sendable {
 
     /// A media-information value containing no source or reported properties.
     public static let empty = Self()
-
-    private static func normalizedPositiveOrZero(_ value: Double?) -> Double? {
-        guard let value, value.isFinite, value >= 0 else { return nil }
-        return value
-    }
 }

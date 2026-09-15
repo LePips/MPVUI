@@ -1,0 +1,300 @@
+From: MPVUI contributors
+Subject: [PATCH] Native P7 opt-in; strict sample checks
+
+Source: edde746/MPVKit b8b922ec74b84ac3a496e29e226a3a3e91491045
+FFmpeg/0003-videotoolbox-convert-dolby-vision-p7.patch; RPU forwarding.
+Authors: cxfksword / MPVKit contributors, Alex Kim, edde746.
+Source copyright/license headers retained.
+
+P7 conversion: default OFF; native devices only. libdovi mode 2 drops
+enhancement layer and resets luma/chroma mapping. Require verified HDR10
+base, parsed exact RPU, native session identity, matching converted-output
+policy, and decoder RPU. Preserve P5/P8 checks, frame-thread session identity,
+Metal pipeline, geometry/compositing guards, and Metal fallback.
+No plain-HEVC base-only retry.
+
+diff --git a/configure b/configure
+index 374bd5c1512943439480825f32e448e7871eb61c..08076304be464e8a127edc150b78fed346e46fb1 100755
+--- a/configure
++++ b/configure
+@@ -226,6 +226,7 @@ External library support:
+   --enable-libcdio         enable audio CD grabbing with libcdio [no]
+   --enable-libcodec2       enable codec2 en/decoding using libcodec2 [no]
+   --enable-libdav1d        enable AV1 decoding via libdav1d [no]
++  --enable-libdovi         enable explicit native DV Profile 7 conversion [no]
+   --enable-libdavs2        enable AVS2 decoding via libdavs2 [no]
+   --enable-libdc1394       enable IIDC-1394 grabbing using libdc1394
+                            and libraw1394 [no]
+@@ -2083,6 +2084,7 @@ EXTERNAL_LIBRARY_LIST="
+     libcaca
+     libcodec2
+     libdav1d
++    libdovi
+     libdc1394
+     libflite
+     libfontconfig
+@@ -3466,6 +3468,7 @@ hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
+ hevc_vdpau_hwaccel_select="hevc_decoder"
+ hevc_videotoolbox_hwaccel_deps="videotoolbox"
+ hevc_videotoolbox_hwaccel_select="hevc_decoder"
++hevc_videotoolbox_hwaccel_suggest="libdovi"
+ hevc_vulkan_hwaccel_deps="vulkan"
+ hevc_vulkan_hwaccel_select="hevc_decoder"
+ mjpeg_nvdec_hwaccel_deps="nvdec"
+@@ -7331,6 +7334,7 @@ enabled libbluray         && require_pkg_config libbluray libbluray libbluray/bl
+ enabled libbs2b           && require_pkg_config libbs2b libbs2b bs2b.h bs2b_open
+ enabled libcaca           && require_pkg_config libcaca caca caca.h caca_create_canvas
+ enabled libcodec2         && require libcodec2 codec2/codec2.h codec2_create -lcodec2
++enabled libdovi           && require_pkg_config libdovi "dovi >= 3.3.2" libdovi/rpu_parser.h dovi_convert_rpu_with_mode
+ enabled libdav1d          && require_pkg_config libdav1d "dav1d >= 1.0.0" "dav1d/dav1d.h" dav1d_version
+ enabled libdavs2          && require_pkg_config libdavs2 "davs2 >= 1.6.0" davs2.h davs2_decoder_open
+ enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1394.h dc1394_new
+diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
+index 9da4d0820a6fb7e1cedc67d8c227722b31fa51f6..9a585fcff840f9e6e4843921fd17966c42c04b62 100644
+--- a/libavcodec/videotoolbox.c
++++ b/libavcodec/videotoolbox.c
+@@ -23,6 +23,9 @@
+ #include "config.h"
+ #include "config_components.h"
+ #include "videotoolbox.h"
++#if CONFIG_LIBDOVI
++#include <libdovi/rpu_parser.h>
++#endif
+ #include "libavutil/attributes.h"
+ #include "libavutil/hwcontext_videotoolbox.h"
+ #include "libavutil/dovi_meta.h"
+@@ -904,16 +907,64 @@ static int videotoolbox_session_is_dovi(AVCodecContext *avctx)
+            context->cm_codec_type == kCMVideoCodecType_DolbyVisionHEVC_FF;
+ }
+ 
++/* Per-device; default OFF. Never infer compatibility from enhancement layer
++ * or process environment. P7 Blu-ray base uses CCID 6; converted P8.1 uses
++ * CCID 1. Keep source configuration distinct. */
++static int videotoolbox_dovi_p7_allowed(int native_enabled, int convert_p7,
++                                      const AVDOVIDecoderConfigurationRecord *dovi)
++{
++    return CONFIG_LIBDOVI && native_enabled && convert_p7 && dovi &&
++           dovi->dv_profile == 7 && dovi->rpu_present_flag && dovi->bl_present_flag &&
++           dovi->dv_bl_signal_compatibility_id == 6 &&
++           dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
++}
++
++static int videotoolbox_dovi_convert_p7(AVCodecContext *avctx)
++{
++    AVHWDeviceContext *device = NULL;
++    if (avctx->hw_frames_ctx) {
++        AVHWFramesContext *frames = (AVHWFramesContext *)avctx->hw_frames_ctx->data;
++        device = frames->device_ctx;
++    } else if (avctx->hw_device_ctx) {
++        device = (AVHWDeviceContext *)avctx->hw_device_ctx->data;
++    }
++    int native = videotoolbox_native_dovi_enabled(avctx);
++    return videotoolbox_dovi_p7_allowed(native,
++        native && ((AVVTDeviceContext *)device->hwctx)->convert_native_dolby_vision_profile7,
++        videotoolbox_dovi_get_conf(avctx));
++}
++
++static const AVDOVIDecoderConfigurationRecord *videotoolbox_dovi_effective_conf(
++    AVCodecContext *avctx, AVDOVIDecoderConfigurationRecord *converted)
++{
++    const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_get_conf(avctx);
++    if (!videotoolbox_dovi_convert_p7(avctx))
++        return dovi;
++    *converted = *dovi;
++    converted->dv_profile = 8;
++    converted->el_present_flag = 0;
++    converted->dv_bl_signal_compatibility_id = 1;
++    return converted;
++}
++
+ static void videotoolbox_dovi_tag_output_attachments(AVCodecContext *avctx,
+                                                      CVPixelBufferRef pixbuf)
+ {
+-    const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_get_conf(avctx);
++    AVDOVIDecoderConfigurationRecord converted;
++    const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_effective_conf(avctx, &converted);
+     if (!videotoolbox_session_is_dovi(avctx))
+         return;
+     /* Session identity alone cannot prove valid DV. VO also needs VideoToolbox's
+      * actual RPU attachment. */
+     CVBufferSetAttachment(pixbuf, CFSTR("MPVUI.NativeDolbyVisionSession"),
+                           kCFBooleanTrue, kCVAttachmentMode_ShouldPropagate);
++    // Set/remove on decoding worker before frame-thread handoff. Recycled
++    // surfaces must not retain another session's conversion marker.
++    if (videotoolbox_dovi_convert_p7(avctx))
++        CVBufferSetAttachment(pixbuf, CFSTR("MPVUI.NativeDolbyVisionProfile7To81"),
++                              kCFBooleanTrue, kCVAttachmentMode_ShouldPropagate);
++    else
++        CVBufferRemoveAttachment(pixbuf, CFSTR("MPVUI.NativeDolbyVisionProfile7To81"));
+     if (!dovi || dovi->dv_profile != 8)
+         return; // P5 is IPT; never tag ordinary BT.2020 YCbCr.
+     CFStringRef transfer = dovi->dv_bl_signal_compatibility_id == 4 ?
+@@ -960,6 +1011,7 @@ static CFDictionaryRef videotoolbox_decoder_config_create(CMVideoCodecType codec
+     CFDataRef data = NULL;
+     CFDataRef dovi_data = NULL;
+     const AVDOVIDecoderConfigurationRecord *dovi = NULL;
++    AVDOVIDecoderConfigurationRecord converted;
+ 
+     CFMutableDictionaryRef config_info = CFDictionaryCreateMutable(kCFAllocatorDefault,
+                                                                    0,
+@@ -976,7 +1028,7 @@ static CFDictionaryRef videotoolbox_decoder_config_create(CMVideoCodecType codec
+                          kCFBooleanTrue);
+ 
+     if (codec_type == kCMVideoCodecType_DolbyVisionHEVC_FF) {
+-        dovi = videotoolbox_dovi_get_conf(avctx);
++        dovi = videotoolbox_dovi_effective_conf(avctx, &converted);
+         if (dovi && dovi->dv_profile == 8) {
+             CFDictionarySetValue(config_info, kCMFormatDescriptionExtension_ColorPrimaries,
+                                  kCMFormatDescriptionColorPrimaries_ITU_R_2020);
+@@ -1012,7 +1064,7 @@ static CFDictionaryRef videotoolbox_decoder_config_create(CMVideoCodecType codec
+         if (data)
+             CFDictionarySetValue(avc_info, CFSTR("hvcC"), data);
+         if (codec_type == kCMVideoCodecType_DolbyVisionHEVC_FF) {
+-            dovi = videotoolbox_dovi_get_conf(avctx);
++            dovi = videotoolbox_dovi_effective_conf(avctx, &converted);
+             dovi_data = videotoolbox_dovi_extradata_create(dovi);
+             if (dovi_data)
+                 CFDictionarySetValue(avc_info, dovi->dv_profile > 7 ? CFSTR("dvvC") : CFSTR("dvcC"), dovi_data);
+@@ -1071,10 +1123,15 @@ static int videotoolbox_start(AVCodecContext *avctx)
+         break;
+     case AV_CODEC_ID_HEVC :
+         {
+-            const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_get_conf(avctx);
++            AVDOVIDecoderConfigurationRecord converted;
++            const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_effective_conf(avctx, &converted);
+ 
+             if (videotoolbox_dovi_is_apple_hevc(dovi)) {
+                 videotoolbox->cm_codec_type = kCMVideoCodecType_DolbyVisionHEVC_FF;
++                if (videotoolbox_dovi_convert_p7(avctx))
++                    av_log(avctx, AV_LOG_WARNING,
++                           "Explicit lossy Dolby Vision P7 to P8.1 mode: "
++                           "dropping enhancement layer and mapping curves.\n");
+                 av_log(avctx, AV_LOG_VERBOSE,
+                        "Using Dolby Vision HEVC VideoToolbox format "
+                        "(profile %u, compatibility %u).\n",
+@@ -1285,6 +1342,14 @@ static int videotoolbox_hevc_decode_slice(AVCodecContext *avctx,
+                                           const uint8_t *buffer,
+                                           uint32_t size)
+ {
++    if (videotoolbox_session_is_dovi(avctx) && videotoolbox_dovi_convert_p7(avctx)) {
++        if (size < 2)
++            return AVERROR_INVALIDDATA;
++        int nal_type = (buffer[0] >> 1) & 0x3f;
++        int layer_id = ((buffer[0] & 1) << 5) | (buffer[1] >> 3);
++        if (layer_id || nal_type == HEVC_NAL_UNSPEC62 || nal_type == HEVC_NAL_UNSPEC63)
++            return 0;
++    }
+     return videotoolbox_common_decode_slice(avctx, buffer, size);
+ }
+ 
+@@ -1297,6 +1362,59 @@ static int videotoolbox_hevc_decode_params(AVCodecContext *avctx,
+     return videotoolbox_common_decode_slice(avctx, buffer, size);
+ }
+ 
++#if CONFIG_LIBDOVI
++/* Append only complete, validated P8.1 RPU. libdovi mode 2 also accepts
++ * P5/P8; verify bitstream source profile independently of container before
++ * P7-only conversion. */
++static int videotoolbox_hevc_append_converted_p7_rpu(AVCodecContext *avctx,
++                                                   const uint8_t *buffer, uint32_t size)
++{
++    int ret = AVERROR_INVALIDDATA;
++    HEVCContext *h = avctx->priv_data;
++    // HEVC parser installs only validated RPU. Require exact current payload:
++    // reserved syntax can abort libdovi parser. Reject FFmpeg-invalid bytes
++    // and stale metadata.
++    const AVFrameSideData *validated = av_frame_get_side_data(
++        h->cur_frame->f, AV_FRAME_DATA_DOVI_RPU_BUFFER);
++    if (!buffer || size <= 2 || !validated || validated->size != size - 2 ||
++        memcmp(validated->data, buffer + 2, size - 2))
++        return AVERROR_INVALIDDATA;
++    DoviRpuOpaque *rpu = dovi_parse_unspec62_nalu(buffer, size);
++    if (!rpu)
++        return AVERROR(ENOMEM);
++    const DoviData *data = NULL;
++    const DoviRpuDataHeader *header = NULL;
++    if (dovi_rpu_get_error(rpu))
++        goto done;
++    header = dovi_rpu_get_header(rpu);
++    // Per-frame conversion has no established previous-RPU mapping
++    // dependency. Reject references; never guess mapping.
++    if (!header || header->guessed_profile != 7 || header->use_prev_vdr_rpu_flag)
++        goto done;
++    dovi_rpu_free_header(header);
++    header = NULL;
++    if (dovi_convert_rpu_with_mode(rpu, 2) < 0 || dovi_rpu_get_error(rpu))
++        goto done;
++    header = dovi_rpu_get_header(rpu);
++    if (!header || header->guessed_profile != 8 || header->use_prev_vdr_rpu_flag)
++        goto done;
++    data = dovi_write_unspec62_nalu(rpu);
++    if (!data || !data->data || data->len <= 2 || data->len > UINT32_MAX ||
++        dovi_rpu_get_error(rpu))
++        goto done;
++    ret = videotoolbox_common_decode_slice(avctx, data->data, data->len);
++done:
++    if (header)
++        dovi_rpu_free_header(header);
++    if (data)
++        dovi_data_free(data);
++    if (ret < 0)
++        av_log(avctx, AV_LOG_ERROR, "Refusing invalid or unconvertible native P7 RPU.\n");
++    dovi_rpu_free(rpu);
++    return ret;
++}
++#endif
++
+ /* HEVC hwaccel forwards VCL/parameter NALs but omits suffix UNSPEC62 RPU.
+  * dvh1 description still needs per-frame RPU. */
+ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+@@ -1304,15 +1422,31 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+     HEVCContext *h = avctx->priv_data;
+     if (!videotoolbox_session_is_dovi(avctx))
+         return 0;
++    int convert_p7 = videotoolbox_dovi_convert_p7(avctx);
++    int rpu_count = 0;
+     for (int i = 0; i < h->pkt.nb_nals; i++) {
+         H2645NAL *nal = &h->pkt.nals[i];
+-        if (nal->type != HEVC_NAL_UNSPEC62 || nal->raw_size <= 2)
++        if (nal->type != HEVC_NAL_UNSPEC62)
+             continue;
+-        int ret = videotoolbox_common_decode_slice(avctx, nal->raw_data, nal->raw_size);
++        if (nal->raw_size <= 2) {
++            if (convert_p7)
++                return AVERROR_INVALIDDATA;
++            continue;
++        }
++        rpu_count++;
++        if (convert_p7 && rpu_count != 1)
++            return AVERROR_INVALIDDATA;
++        int ret;
++#if CONFIG_LIBDOVI
++        if (convert_p7)
++            ret = videotoolbox_hevc_append_converted_p7_rpu(avctx, nal->raw_data, nal->raw_size);
++        else
++#endif
++            ret = videotoolbox_common_decode_slice(avctx, nal->raw_data, nal->raw_size);
+         if (ret < 0)
+             return ret; // Never submit stripped native DV sample.
+     }
+-    return 0;
++    return convert_p7 && rpu_count != 1 ? AVERROR_INVALIDDATA : 0;
+ }
+ 
+ static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
+diff --git a/libavutil/hwcontext_videotoolbox.h b/libavutil/hwcontext_videotoolbox.h
+index e2788269a91946b3c8559176ea78a68e301c9e26..f887915f84e76a1b578f9822f07a26ce1fb6278c 100644
+--- a/libavutil/hwcontext_videotoolbox.h
++++ b/libavutil/hwcontext_videotoolbox.h
+@@ -42,6 +42,11 @@ typedef struct AVVTDeviceContext {
+      * decoder init/open. Leave zero for shader consumers, including
+      * libplacebo's own DV reshape. */
+     int enable_native_dolby_vision;
++    /** Lossy P7 -> P8.1, libdovi mode 2: drop enhancement layer, reset
++     * luma/chroma mapping. Requires enable_native_dolby_vision, libdovi,
++     * HDR10-compatible P7 base. Set before decoder init. Default zero rejects
++     * P7. */
++    int convert_native_dolby_vision_profile7;
+ } AVVTDeviceContext;
+ 
+ typedef struct AVVTFramesContext {

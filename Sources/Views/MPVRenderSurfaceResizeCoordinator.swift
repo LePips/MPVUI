@@ -103,7 +103,9 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     typealias Commit = @MainActor (CommitRequest) async -> Bool
-    typealias EmitDiagnostic = @MainActor (DiagnosticSnapshot) -> Void
+    /// Diagnostics can be disabled dynamically by the consumer. Defer even
+    /// reading the drawable until the consumer actually needs the snapshot.
+    typealias EmitDiagnostic = @MainActor (() -> DiagnosticSnapshot) -> Void
 
     fileprivate struct Geometry: Equatable {
         let drawableSize: CGSize
@@ -738,11 +740,6 @@ private extension MPVRenderSurfaceResizeCoordinator {
         )
         inFlightRequest = inFlight
 
-        if request.kind == .continuousInteractive {
-            lastContinuousSubmissionUptimeNanoseconds =
-                DispatchTime.now().uptimeNanoseconds
-        }
-
         // Keep these mutations in the same disabled-actions transaction and
         // immediately before the native resize submission.
         apply(
@@ -754,6 +751,16 @@ private extension MPVRenderSurfaceResizeCoordinator {
 
         let commit = self.commit
         commitTask = Task { @MainActor [weak self] in
+            if request.kind == .continuousInteractive,
+               self?.surfaceGeneration == request.surfaceGeneration,
+               self?.isContinuousInteraction == true
+            {
+                // Start the cadence when the native submission actually runs.
+                // Main-actor work (including renderer teardown) may delay this
+                // task; time spent queued must not shorten the next interval.
+                self?.lastContinuousSubmissionUptimeNanoseconds =
+                    DispatchTime.now().uptimeNanoseconds
+            }
             let didCommit = await commit(commitRequest)
             self?.complete(inFlight, didCommit: didCommit)
         }
@@ -868,7 +875,7 @@ private extension MPVRenderSurfaceResizeCoordinator {
     }
 
     func emit(_ event: DiagnosticEvent) {
-        emitDiagnostic?(makeDiagnosticSnapshot(event: event))
+        emitDiagnostic? { makeDiagnosticSnapshot(event: event) }
     }
 
     func makeDiagnosticSnapshot(event: DiagnosticEvent) -> DiagnosticSnapshot {

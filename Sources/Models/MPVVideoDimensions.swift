@@ -12,17 +12,8 @@ public struct MPVVideoDimensions: Equatable, Hashable, Sendable {
     /// Display height after applying pixel-aspect correction, when reported.
     public let displayHeight: Int?
 
-    /// Creates a video-dimensions value.
-    ///
-    /// Negative dimensions are normalized to zero. Negative optional display
-    /// dimensions are discarded.
-    ///
-    /// - Parameters:
-    ///   - width: Encoded width in pixels.
-    ///   - height: Encoded height in pixels.
-    ///   - displayWidth: Pixel-aspect-corrected display width, when known.
-    ///   - displayHeight: Pixel-aspect-corrected display height, when known.
-    public init(
+    /// Clamps negative encoded dimensions to zero and discards negative display dimensions.
+    init(
         width: Int,
         height: Int,
         displayWidth: Int? = nil,

@@ -7,6 +7,7 @@ struct MPVEngineLifecycleDiagnostics: Equatable, Sendable {
     var startFileEvents: UInt64 = 0
     var seekCommands: UInt64 = 0
     var surfaceResizeCommands: UInt64 = 0
+    var liveColorUpdates: UInt64 = 0
     var loadingStateTransitions: UInt64 = 0
     var bufferingStateTransitions: UInt64 = 0
     var seekingStateTransitions: UInt64 = 0

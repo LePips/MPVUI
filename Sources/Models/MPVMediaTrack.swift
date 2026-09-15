@@ -23,6 +23,10 @@ public struct MPVMediaTrack: Identifiable, Hashable, Sendable {
     /// Whether mpv currently selected this track.
     public let isSelected: Bool
 
+    /// The selected subtitle slot, or nil for unselected and non-subtitle tracks.
+    /// Both subtitle slots can have a selected track at the same time.
+    public let subtitleRole: MPVSubtitleRole?
+
     /// Whether the container marks this as a default track.
     public let isDefault: Bool
 
@@ -32,25 +36,15 @@ public struct MPVMediaTrack: Identifiable, Hashable, Sendable {
     /// Whether the track was loaded from outside the primary media source.
     public let isExternal: Bool
 
-    /// Creates a media track description.
-    ///
-    /// - Parameters:
-    ///   - id: The integer identifier assigned by mpv.
-    ///   - type: The track category.
-    ///   - title: An optional display title.
-    ///   - language: An optional language tag or name.
-    ///   - codec: An optional codec name.
-    ///   - isSelected: Whether the track is currently selected.
-    ///   - isDefault: Whether the track is marked as the default.
-    ///   - isForced: Whether the track is marked as forced.
-    ///   - isExternal: Whether the track came from an external source.
-    public init(
+    /// Creates a track with mpv's integer `id`, stored as ``mpvID``.
+    init(
         id: Int,
         type: MPVTrackType,
         title: String? = nil,
         language: String? = nil,
         codec: String? = nil,
         isSelected: Bool = false,
+        subtitleRole: MPVSubtitleRole? = nil,
         isDefault: Bool = false,
         isForced: Bool = false,
         isExternal: Bool = false
@@ -61,6 +55,7 @@ public struct MPVMediaTrack: Identifiable, Hashable, Sendable {
         self.language = language
         self.codec = codec
         self.isSelected = isSelected
+        self.subtitleRole = type == .subtitle && isSelected ? subtitleRole : nil
         self.isDefault = isDefault
         self.isForced = isForced
         self.isExternal = isExternal

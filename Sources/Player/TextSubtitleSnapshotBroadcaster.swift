@@ -1,10 +1,8 @@
 import Foundation
 
-/// Multi-consumer, replaying delivery for current-value subtitle snapshots.
-///
-/// Every subscriber owns an independent newest-one buffer. Producing a cue
-/// therefore never waits for a renderer, and a slow renderer cannot accumulate
-/// subtitle states that are already obsolete.
+/// Replays the latest subtitle snapshot to each subscriber.
+/// Independent newest-one buffers prevent slow renderers from blocking delivery
+/// or accumulating stale cues.
 final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
     private struct State {
         var latest = TextSubtitleSnapshot()
@@ -60,9 +58,7 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
         publish(TextSubtitleSnapshot())
     }
 
-    /// Clears an active cue, finishes every subscription, and permanently
-    /// prevents new subscriptions from waiting on a player that no longer
-    /// exists.
+    /// Clears the active cue and finishes current and future subscriptions.
     func terminate() {
         lock.lock()
         guard !state.isTerminated else {

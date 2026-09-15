@@ -1,11 +1,8 @@
 # MPVUI
 
-mpv for SwiftUI, utilizing [MPVKit](https://github.com/mpvkit/MPVKit).
+A SwiftUI video player backed by mpv, built on [MPVKit](https://github.com/mpvkit/MPVKit).
 
 ## Usage
-
-`MPVPlayer` handles media playback. Create one for audio playback or pass it to
-an `MPVVideoPlayer` for video playback.
 
 ```swift
 import MPVUI

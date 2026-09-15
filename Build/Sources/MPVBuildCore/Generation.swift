@@ -37,14 +37,13 @@ enum Generator {
     }
 
     static func validate(_ index: ArtifactIndex, native: NativeLock, release: Bool) throws {
-        try require(index.schemaVersion == 2, "Unsupported artifact index schema")
         try hex(index.nativeInputFingerprint)
         try require(
             index.releaseID == artifactPrefix(native) + index.nativeInputFingerprint || index.releaseID == native.publication
                 .nativePrefix + index.nativeInputFingerprint || isVersionTag(index.releaseID),
             "Artifact release identity mismatch"
         )
-        try require(index.provenancePath == "Libmpv.xcframework/provenance.json", "Invalid embedded provenance path")
+        try require(index.buildRecordPath == "Libmpv.xcframework/build-record.json", "Invalid embedded build record path")
         try unique(index.products.map(\.target), "published products")
         try require(
             Set(index.products.map(\.target)) == Set(ProductDefinition.all.map(\.target)),

@@ -17,6 +17,7 @@ enum MPVRecipe {
             "-Dlibbluray=enabled",
             "-Dlibavdevice=enabled",
             "-Davfoundation=enabled",
+            "-Dvo-avfoundation=enabled",
             "-Dvideotoolbox-pl=enabled",
             "-Dgl=\(vision ? "disabled" : "enabled")",
             "-Dplain-gl=\(vision ? "disabled" : "enabled")",
@@ -138,7 +139,7 @@ enum MPVRecipe {
             try put(text, file)
         }
         let config = try String(contentsOf: build.appendingPathComponent("config.h"), encoding: .utf8)
-        for feature in ["HAVE_AVFOUNDATION", "HAVE_VULKAN", "HAVE_MOLTENVK", "HAVE_VIDEOTOOLBOX_PL"] {
+        for feature in ["HAVE_VO_AVFOUNDATION", "HAVE_AVFOUNDATION", "HAVE_VULKAN", "HAVE_MOLTENVK", "HAVE_VIDEOTOOLBOX_PL"] {
             try require(config.contains("#define \(feature) 1"), "mpv configuration lost required \(feature)")
         }
         if c.slice.platform == "xros" {

@@ -1,0 +1,608 @@
+diff --git a/common/av_log.c b/common/av_log.c
+index 6785e89..40089d7 100644
+--- a/common/av_log.c
++++ b/common/av_log.c
+@@ -59,6 +59,45 @@ static struct mp_log *log_root, *log_decaudio, *log_decvideo, *log_demuxer;
+ static bool log_print_prefix = true;
+ static bstr log_buffer;
+ 
++struct decoder_log_owner {
++    void *opaque;
++    struct mp_log *log;
++    struct decoder_log_owner *next;
++};
++static struct decoder_log_owner *decoder_log_owners;
++static void mp_msg_av_log_callback(void *, int, const char *, va_list);
++
++void mp_av_log_register_decoder(void *opaque, struct mpv_global *global)
++{
++    mp_mutex_lock(&log_lock);
++    struct decoder_log_owner *owner = talloc_zero(NULL, struct decoder_log_owner);
++    owner->opaque = opaque;
++    owner->log = mp_log_new(owner, global->log, "ffmpeg/video");
++    owner->next = decoder_log_owners;
++    decoder_log_owners = owner;
++    av_log_set_callback(mp_msg_av_log_callback);
++    mp_mutex_unlock(&log_lock);
++}
++
++void mp_av_log_unregister_decoder(void *opaque)
++{
++    mp_mutex_lock(&log_lock);
++    struct decoder_log_owner **link = &decoder_log_owners;
++    while (*link) {
++        struct decoder_log_owner *owner = *link;
++        if (owner->opaque == opaque) {
++            *link = owner->next;
++            talloc_free(owner);
++            break;
++        }
++        link = &owner->next;
++    }
++    if (!decoder_log_owners && !log_mpv_instance)
++        av_log_set_callback(av_log_default_callback);
++    mp_mutex_unlock(&log_lock);
++}
++
++
+ static int av_log_level_to_mp_level(int av_level)
+ {
+     if (av_level > AV_LOG_VERBOSE)
+@@ -123,6 +162,25 @@ static void mp_msg_av_log_callback(void *ptr, int level, const char *fmt,
+     // Note: mp_log is thread-safe, but destruction of the log instances is not.
+     mp_mutex_lock(&log_lock);
+ 
++    // FFmpeg's legacy global log belongs to the first player. Never send
++    // state-changing native diagnostics there: opaque identifies the actual
++    // decoder, including FFmpeg's copied frame-thread contexts. These stable
++    // application signals use info visibility even though generic AV_LOG_INFO
++    // is intentionally mapped to verbose for normal FFmpeg chatter.
++    if (avc && !strcmp(avc->class_name, "AVCodecContext") &&
++        !strncmp(fmt, "MPVUI_", 6)) {
++        AVCodecContext *avctx = ptr;
++        for (struct decoder_log_owner *owner = decoder_log_owners; owner; owner = owner->next) {
++            if (owner->opaque == avctx->opaque) {
++                mp_msg_va(owner->log, mp_level == MSGL_V ? MSGL_INFO : mp_level, fmt, vl);
++                goto done;
++            }
++        }
++        // An unowned callback may outlive a decoder or come from another
++        // library. It cannot change any libmpv player's state.
++        goto done;
++    }
++
+     if (!log_mpv_instance) {
+         mp_mutex_unlock(&log_lock);
+         // Fallback to stderr
+@@ -175,7 +233,8 @@ void uninit_libav(struct mpv_global *global)
+ {
+     mp_mutex_lock(&log_lock);
+     if (log_mpv_instance == global) {
+-        av_log_set_callback(av_log_default_callback);
++        if (!decoder_log_owners)
++            av_log_set_callback(av_log_default_callback);
+         log_mpv_instance = NULL;
+         talloc_free(log_root);
+     }
+diff --git a/common/av_log.h b/common/av_log.h
+index ae12838..225d2a2 100644
+--- a/common/av_log.h
++++ b/common/av_log.h
+@@ -6,6 +6,11 @@
+ struct mpv_global;
+ struct mp_log;
+ void init_libav(struct mpv_global *global);
++// Route structured decoder diagnostics to their owning libmpv instance.
++// opaque is copied into FFmpeg frame-worker contexts. Unregister after closing
++// the codec, once all workers and callbacks have joined.
++void mp_av_log_register_decoder(void *opaque, struct mpv_global *global);
++void mp_av_log_unregister_decoder(void *opaque);
+ void uninit_libav(struct mpv_global *global);
+ void check_library_versions(struct mp_log *log, int v);
+ #endif
+diff --git a/demux/demux_lavf.c b/demux/demux_lavf.c
+index 7013dbd..2968ede 100644
+--- a/demux/demux_lavf.c
++++ b/demux/demux_lavf.c
+@@ -768,6 +768,7 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
+             sh->codec->dovi = true;
+             sh->codec->dv_profile = cfg->dv_profile;
+             sh->codec->dv_level = cfg->dv_level;
++            sh->codec->dv_bl_signal_compatibility_id = cfg->dv_bl_signal_compatibility_id;
+         }
+ 
+         // This also applies to vfw-muxed mkv, but we can't detect these easily.
+diff --git a/demux/demux_mkv.c b/demux/demux_mkv.c
+index 501d20e..f85d94b 100644
+--- a/demux/demux_mkv.c
++++ b/demux/demux_mkv.c
+@@ -1788,6 +1788,7 @@ static int demux_mkv_open_video(demuxer_t *demuxer, mkv_track_t *track)
+         sh_v->dovi = true;
+         sh_v->dv_level = track->dovi_config->dv_level;
+         sh_v->dv_profile = track->dovi_config->dv_profile;
++        sh_v->dv_bl_signal_compatibility_id = track->dovi_config->dv_bl_signal_compatibility_id;
+     }
+ 
+ done:
+diff --git a/demux/stheader.h b/demux/stheader.h
+index 42046a4..f8a3650 100644
+--- a/demux/stheader.h
++++ b/demux/stheader.h
+@@ -127,6 +127,7 @@ struct mp_codec_params {
+     bool dovi;
+     uint8_t dv_profile;
+     uint8_t dv_level;
++    uint8_t dv_bl_signal_compatibility_id;
+ 
+     // STREAM_VIDEO + STREAM_AUDIO
+     int bits_per_coded_sample;
+diff --git a/player/command.c b/player/command.c
+index cd00739..54ac221 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -444,6 +444,48 @@ static int mp_property_generic_option(void *ctx, struct m_property *prop,
+     return M_PROPERTY_NOT_IMPLEMENTED;
+ }
+ 
++static int mp_property_native_video_statistics(void *ctx, struct m_property *prop,
++                                                int action, void *arg)
++{
++    MPContext *mpctx = ctx;
++    struct voctrl_native_video_statistics stats = {0};
++    if (!mpctx->video_out || vo_control(mpctx->video_out,
++            VOCTRL_GET_NATIVE_VIDEO_STATISTICS, &stats) <= 0)
++        return M_PROPERTY_UNAVAILABLE;
++    struct m_sub_property props[] = {
++        {"pixel-buffer-copies", SUB_PROP_INT64(stats.pixel_buffer_copies)},
++        {"sample-build-count", SUB_PROP_INT64(stats.sample_build_count)},
++        {"last-sample-build-ns", SUB_PROP_INT64(stats.last_sample_build_ns)},
++        {"total-sample-build-ns", SUB_PROP_INT64(stats.total_sample_build_ns)},
++        {0}
++    };
++    return m_property_read_sub(props, action, arg);
++}
++
++// A VO-thread fence for host-owned surfaces. This is deliberately a property,
++// not a cached option: success proves the live renderer acknowledged the fence.
++static int mp_property_external_surface_update(void *ctx, struct m_property *prop,
++                                               int action, void *arg)
++{
++    MPContext *mpctx = ctx;
++    if (action == M_PROPERTY_GET_TYPE) {
++        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_FLAG};
++        return M_PROPERTY_OK;
++    }
++    if (!mpctx->video_out)
++        return M_PROPERTY_UNAVAILABLE;
++    if (action == M_PROPERTY_SET || action == M_PROPERTY_GET) {
++        int value = action == M_PROPERTY_SET ? *(int *)arg : 0;
++        int request = action == M_PROPERTY_SET ? VOCTRL_EXTERNAL_SURFACE_UPDATE
++                                              : VOCTRL_GET_EXTERNAL_SURFACE_UPDATE;
++        int result = vo_control(mpctx->video_out, request, &value);
++        if (result <= 0) return M_PROPERTY_ERROR;
++        if (action == M_PROPERTY_GET) *(int *)arg = value;
++        return M_PROPERTY_OK;
++    }
++    return M_PROPERTY_NOT_IMPLEMENTED;
++}
++
+ // Return VO external-resize result synchronously through libmpv properties;
+ // option bridge drops VOCTRL result.
+ static int mp_property_external_surface_size(void *ctx,
+@@ -2125,6 +2167,8 @@ static int get_track_entry(int item, int action, void *arg, void *ctx)
+                         .unavailable = !p.dovi},
+         {"dolby-vision-level", SUB_PROP_INT(p.dv_level),
+                         .unavailable = !p.dovi},
++        {"dolby-vision-bl-signal-compatibility-id", SUB_PROP_INT(p.dv_bl_signal_compatibility_id),
++                        .unavailable = !p.dovi},
+         {"metadata", SUB_PROP_KEYVALUE_LIST(tag_list),
+                         .unavailable = !tags->num_keys},
+         {0}
+@@ -4482,6 +4526,8 @@ static const struct m_property mp_properties_base[] = {
+     {"window-id", mp_property_window_id},
+     {"display-swapchain", mp_property_vo_display_swapchain},
+     {"external-surface-size", mp_property_external_surface_size},
++    {"external-surface-update", mp_property_external_surface_update},
++    {"avfoundation-video-statistics", mp_property_native_video_statistics},
+ 
+     {"chapter-list", mp_property_list_chapters},
+     {"track-list", mp_property_list_tracks},
+diff --git a/player/playloop.c b/player/playloop.c
+index f111920..267d485 100644
+--- a/player/playloop.c
++++ b/player/playloop.c
+@@ -890,6 +890,8 @@ static void handle_vo_events(struct MPContext *mpctx)
+         mp_notify(mpctx, MP_EVENT_FOCUS, NULL);
+     if (events & VO_EVENT_AMBIENT_LIGHTING_CHANGED)
+         mp_notify(mpctx, MP_EVENT_AMBIENT_LIGHTING_CHANGED, NULL);
++    if (events & VO_EVENT_TARGET_PARAMS)
++        mp_notify_property(mpctx, "video-target-params");
+ }
+ 
+ static void handle_sstep(struct MPContext *mpctx)
+diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
+index 81f2094..a2ce542 100644
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -36,6 +36,7 @@
+ #include "osdep/threads.h"
+ #include "misc/bstr.h"
+ #include "common/av_common.h"
++#include "common/av_log.h"
+ #include "common/codecs.h"
+ 
+ #include "video/fmt-conversion.h"
+@@ -733,6 +734,8 @@ static void init_avctx(struct mp_filter *vd)
+     AVCodecContext *avctx = ctx->avctx;
+     if (!ctx->avctx)
+         goto error;
++    avctx->opaque = vd;
++    mp_av_log_register_decoder(vd, vd->global);
+     avctx->codec_type = AVMEDIA_TYPE_VIDEO;
+     avctx->codec_id = lavc_codec->id;
+     avctx->pkt_timebase = ctx->codec_timebase;
+@@ -915,6 +918,7 @@ static void uninit_avctx(struct mp_filter *vd)
+     av_buffer_unref(&ctx->cached_hw_frames_ctx);
+ 
+     avcodec_free_context(&ctx->avctx);
++    mp_av_log_unregister_decoder(vd);
+ 
+     av_buffer_unref(&ctx->hwdec_dev);
+ 
+diff --git a/video/out/avfoundation_hdr10plus.h b/video/out/avfoundation_hdr10plus.h
+new file mode 100644
+index 0000000..0681cb1
+--- /dev/null
++++ b/video/out/avfoundation_hdr10plus.h
+@@ -0,0 +1,74 @@
++/* Per-frame HDR10+ bridge. This header is also compiled by the sanitizer tests.
++ * LGPL-2.1-or-later, like the native video output. */
++#ifndef MP_AVFOUNDATION_HDR10PLUS_H
++#define MP_AVFOUNDATION_HDR10PLUS_H
++
++#include <CoreMedia/CoreMedia.h>
++#include <libavutil/hdr_dynamic_metadata.h>
++#include <stdbool.h>
++#include <string.h>
++
++enum avf_hdr10plus_result {
++    AVF_HDR10PLUS_NONE = 0,
++    AVF_HDR10PLUS_ATTACHED,
++    AVF_HDR10PLUS_INVALID,
++    AVF_HDR10PLUS_TRANSFORMED,
++    AVF_HDR10PLUS_UNAVAILABLE,
++};
++
++// A new immutable CFData belongs to this sample only. No previous-frame cache:
++// decoder reordering, mp_image reference copies, seeks and flushes keep the
++// metadata paired with the exact frame whose pixels are enqueued.
++static inline enum avf_hdr10plus_result avf_attach_hdr10plus(
++    CMSampleBufferRef sample, const void *metadata, size_t metadata_size,
++    bool pixels_transformed)
++{
++    if (!sample) return AVF_HDR10PLUS_INVALID;
++    if (@available(macOS 13.0, iOS 16.0, tvOS 16.0, *)) {
++        CFArrayRef array = CMSampleBufferGetSampleAttachmentsArray(sample, true);
++        if (!array || CFArrayGetCount(array) != 1)
++            return AVF_HDR10PLUS_INVALID;
++        CFMutableDictionaryRef attachments = (CFMutableDictionaryRef)
++            CFArrayGetValueAtIndex(array, 0);
++        // Also safe if a caller reuses a sample: absent/malformed/transformed
++        // input must never inherit another frame's HDR10+ payload.
++        CFDictionaryRemoveValue(attachments, kCMSampleAttachmentKey_HDR10PlusPerFrameData);
++        if (!metadata) return AVF_HDR10PLUS_NONE;
++        if (pixels_transformed) return AVF_HDR10PLUS_TRANSFORMED;
++        if (metadata_size < sizeof(AVDynamicHDRPlus)) return AVF_HDR10PLUS_INVALID;
++        AVDynamicHDRPlus hdr;
++        memcpy(&hdr, metadata, sizeof(hdr));
++        // FFmpeg's parser excludes the registered T.35 header and leaves
++        // country_code zero. Accept that decoded representation or explicit US.
++        if ((hdr.itu_t_t35_country_code && hdr.itu_t_t35_country_code != 0xb5) ||
++            hdr.application_version > 1)
++            return AVF_HDR10PLUS_INVALID;
++        // The pinned parser emits absolute integral window coordinates. The
++        // serializer cannot reconstruct fractional, normalized coordinates.
++        if (hdr.num_windows > 3) return AVF_HDR10PLUS_INVALID;
++        for (int w = 1; w < hdr.num_windows; w++) {
++            AVHDRPlusColorTransformParams *p = &hdr.params[w];
++            if (p->window_upper_left_corner_x.den != 1 ||
++                p->window_upper_left_corner_y.den != 1 ||
++                p->window_lower_right_corner_x.den != 1 ||
++                p->window_lower_right_corner_y.den != 1)
++                return AVF_HDR10PLUS_INVALID;
++        }
++        // The public Apple sample key takes the complete registered T.35 SEI
++        // payload, starting at country_code. Match FFmpeg libaomenc.c's six
++        // byte HDR10+ header: US, Samsung provider, provider-oriented code1,
++        // application identifier4. The FFmpeg API emits the remaining bits.
++        uint8_t bytes[6 + AV_HDR_PLUS_MAX_PAYLOAD_SIZE] = {0xb5, 0, 0x3c, 0, 1, 4};
++        uint8_t *payload = bytes + 6;
++        size_t size = sizeof(bytes) - 6;
++        if (av_dynamic_hdr_plus_to_t35(&hdr, &payload, &size) < 0)
++            return AVF_HDR10PLUS_INVALID;
++        CFDataRef data = CFDataCreate(kCFAllocatorDefault, bytes, size + 6);
++        if (!data) return AVF_HDR10PLUS_INVALID;
++        CFDictionarySetValue(attachments, kCMSampleAttachmentKey_HDR10PlusPerFrameData, data);
++        CFRelease(data);
++        return AVF_HDR10PLUS_ATTACHED;
++    }
++    return metadata ? AVF_HDR10PLUS_UNAVAILABLE : AVF_HDR10PLUS_NONE;
++}
++#endif
+diff --git a/video/out/vo.h b/video/out/vo.h
+index 160d860..2ef5391 100644
+--- a/video/out/vo.h
++++ b/video/out/vo.h
+@@ -48,10 +48,13 @@ enum {
+     // For VOCTRL_GET_HIDPI_SCALE changes.
+     VO_EVENT_DPI                        = 1 << 6,
+     VO_EVENT_FOCUS                      = 1 << 7,
++    // A successful redraw published output parameters after reconfiguration.
++    VO_EVENT_TARGET_PARAMS              = 1 << 8,
+ 
+     // Set of events the player core may be interested in.
+     VO_EVENTS_USER = VO_EVENT_RESIZE | VO_EVENT_WIN_STATE | VO_EVENT_DPI |
+-                     VO_EVENT_FOCUS | VO_EVENT_AMBIENT_LIGHTING_CHANGED,
++                     VO_EVENT_FOCUS | VO_EVENT_AMBIENT_LIGHTING_CHANGED |
++                     VO_EVENT_TARGET_PARAMS,
+ };
+ 
+ enum mp_voctrl {
+@@ -122,6 +125,10 @@ enum mp_voctrl {
+ 
+     /* private to vo_gpu and vo_gpu_next */
+     VOCTRL_EXTERNAL_RESIZE,
++    // Synchronous host CAMetalLayer/target transaction. int* flag in/out.
++    VOCTRL_EXTERNAL_SURFACE_UPDATE,
++    VOCTRL_GET_EXTERNAL_SURFACE_UPDATE,
++    VOCTRL_GET_NATIVE_VIDEO_STATISTICS, // struct voctrl_native_video_statistics*
+ 
+     // Begin VO dragging.
+     VOCTRL_BEGIN_DRAGGING,
+@@ -135,6 +142,13 @@ enum mp_voctrl {
+     VOCTRL_SET_CLIPBOARD,
+ };
+ 
++struct voctrl_native_video_statistics {
++    int64_t pixel_buffer_copies;
++    int64_t sample_build_count;
++    int64_t last_sample_build_ns;
++    int64_t total_sample_build_ns;
++};
++
+ // Helper to expose what kind of content is currently playing to the VO.
+ enum mp_content_type {
+     MP_CONTENT_NONE, // used for force-window
+diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+index 56f96db..513fe71 100644
+--- a/video/out/vo_avfoundation.m
++++ b/video/out/vo_avfoundation.m
+@@ -35,6 +35,7 @@
+ #include "video/hwdec.h"
+ #include "sub/osd.h"
+ #include "avfoundation_color.h"
++#include "avfoundation_hdr10plus.h"
+ 
+ #import <CoreMedia/CoreMedia.h>
+ #import <AVFoundation/AVFoundation.h>
+@@ -386,6 +387,9 @@ struct priv {
+     // Log Dolby Vision geometry refusal once.
+     bool dovi_geometry_skip_logged;
+     bool dovi_unsupported_logged;
++    int dovi_validated_state;
++    int hdr10plus_state;
++    struct voctrl_native_video_statistics video_statistics;
+ 
+     // Log resized-composite rejection once.
+     bool composite_size_mismatch_logged;
+@@ -3014,6 +3018,22 @@ static bool validate_native_dovi_frame(struct vo *vo, struct mp_image *mpi,
+         report_unsupported_dovi(vo, "decoder supplied no validated native Dolby Vision sample metadata");
+         return false;
+     }
++    int profile = -1, compatibility = -1;
++    CFTypeRef profile_value = CVBufferGetAttachment(pixbuf,
++        CFSTR("MPVUI.NativeDolbyVisionSessionProfile"), NULL);
++    CFTypeRef compatibility_value = CVBufferGetAttachment(pixbuf,
++        CFSTR("MPVUI.NativeDolbyVisionSessionCompatibility"), NULL);
++    if (profile_value && CFGetTypeID(profile_value) == CFNumberGetTypeID())
++        CFNumberGetValue(profile_value, kCFNumberIntType, &profile);
++    if (compatibility_value && CFGetTypeID(compatibility_value) == CFNumberGetTypeID())
++        CFNumberGetValue(compatibility_value, kCFNumberIntType, &compatibility);
++    int state = (converted ? 20000 : 10000) + (profile + 1) * 100 + compatibility + 1;
++    if (p->dovi_validated_state != state) {
++        MP_INFO(vo, "MPVUI_NATIVE_DOLBY_VISION_VALIDATED: profile7-to81=%s "
++                    "session-profile=%d session-compatibility=%d\n",
++                converted ? "yes" : "no", profile, compatibility);
++        p->dovi_validated_state = state;
++    }
+     return true;
+ }
+ 
+@@ -3041,6 +3061,7 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
+                 return NULL;
+             }
+             pixbufNeedsRelease = true;
++            p->video_statistics.pixel_buffer_copies++;
+         }
+ 
+         CVPixelBufferRef finalBuffer = pixbuf;
+@@ -3065,8 +3086,12 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
+                 overlay = composite_yuv_frame(vo, pixbuf, CVPixelBufferGetPixelFormatType(pixbuf), false);
+             CVPixelBufferRef rendered = render_video_geometry_frame(vo, overlay ?: pixbuf,
+                                                                     !overlay && p->has_subtitle);
+-            if (overlay) CVPixelBufferRelease(overlay);
++            if (overlay) {
++                p->video_statistics.pixel_buffer_copies++;
++                CVPixelBufferRelease(overlay);
++            }
+             if (rendered) {
++                p->video_statistics.pixel_buffer_copies++;
+                 if (!p->applied_geometry_last_frame) {
+                     struct mp_vo_opts *opts = vo->opts;
+                     MP_INFO(vo, "AVFoundation geometry rendering enabled "
+@@ -3101,6 +3126,8 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
+         if (!needsRelease && !applyGeometry && should_composite_into_video(p)) {
+             // Composite this flip's subtitle.
+             CVPixelBufferRef composited = composite_frame(vo, pixbuf);
++            if (composited)
++                p->video_statistics.pixel_buffer_copies++;
+             if (composited && should_use_frame_space_osd(p) &&
+                 (CVPixelBufferGetWidth(composited) != CVPixelBufferGetWidth(pixbuf) ||
+                  CVPixelBufferGetHeight(composited) != CVPixelBufferGetHeight(pixbuf))) {
+@@ -3180,6 +3207,26 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
+             return NULL;
+         }
+ 
++        const void *hdr10plus = NULL;
++        size_t hdr10plus_size = 0;
++        for (int i = 0; i < mpi->num_ff_side_data; i++) {
++            if (mpi->ff_side_data[i].type == AV_FRAME_DATA_DYNAMIC_HDR_PLUS) {
++                hdr10plus = mpi->ff_side_data[i].buf->data;
++                hdr10plus_size = mpi->ff_side_data[i].buf->size;
++                break;
++            }
++        }
++        // Static source mastering metadata remains meaningful after an overlay,
++        // but dynamic scene mapping describes the untouched original pixels.
++        int hdr_state = avf_attach_hdr10plus(buf, hdr10plus, hdr10plus_size,
++                                           finalBuffer != pixbuf);
++        if (hdr_state != p->hdr10plus_state) {
++            const char *states[] = {"absent", "attached", "invalid",
++                                    "pixels-transformed", "os-unavailable"};
++            MP_INFO(vo, "MPVUI_NATIVE_HDR10PLUS: %s\n", states[hdr_state]);
++            p->hdr10plus_state = hdr_state;
++        }
++
+         // Stopped timebase cannot pass equal-PTS replacement; paused
+         // subtitles/seek previews may retain old image. Display these paused
+         // media frames immediately; schedule playing frames normally.
+@@ -3278,7 +3325,11 @@ static void flip_page(struct vo *vo)
+ 
+         int64_t t = mp_time_ns();
+         CMSampleBufferRef video_buf = create_video_sample_buffer(vo, p->next_image);
+-        p->perf.video_sample_ns += mp_time_ns() - t;
++        int64_t sample_ns = mp_time_ns() - t;
++        p->perf.video_sample_ns += sample_ns;
++        p->video_statistics.sample_build_count++;
++        p->video_statistics.last_sample_build_ns = sample_ns;
++        p->video_statistics.total_sample_build_ns += sample_ns;
+ 
+         bool osd_enqueued = !osd_needed;
+ 
+@@ -3426,6 +3477,10 @@ static void clear_subtitle_state(struct vo *vo)
+ static int reconfig(struct vo *vo, struct mp_image_params *params)
+ {
+     MP_VERBOSE(vo, "reconfig: %dx%d\n", params->w, params->h);
++    struct priv *p = vo->priv;
++    p->dovi_validated_state = p->hdr10plus_state = 0;
++    p->video_statistics = (struct voctrl_native_video_statistics){0};
++    p->dovi_unsupported_logged = false;
+ 
+     if (params->repr.sys == PL_COLOR_SYSTEM_DOLBYVISION &&
+         params->imgfmt != IMGFMT_VIDEOTOOLBOX) {
+@@ -3512,6 +3567,9 @@ static int control(struct vo *vo, uint32_t request, void *data)
+     struct priv *p = vo->priv;
+ 
+     switch (request) {
++    case VOCTRL_GET_NATIVE_VIDEO_STATISTICS:
++        *(struct voctrl_native_video_statistics *)data = p->video_statistics;
++        return VO_TRUE;
+     case VOCTRL_CHECK_EVENTS:
+         update_avfoundation_options(vo);
+         return VO_TRUE;
+@@ -3525,6 +3583,9 @@ static int control(struct vo *vo, uint32_t request, void *data)
+         sync_osd_layer_frame(vo);
+         return VO_TRUE;
+     case VOCTRL_RESET:
++        p->dovi_validated_state = p->hdr10plus_state = 0;
++        p->video_statistics = (struct voctrl_native_video_statistics){0};
++        p->dovi_unsupported_logged = false;
+         // vo_seek_reset() runs on seek/stop/track change. Flush queued
+         // samples, retain displayed frame through demux/decode to avoid black
+         // flashes, matching gpu/gpu-next. Drop OSD layer so stale cues
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index 1913e97..b7510dc 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -134,6 +134,8 @@ struct priv {
+     bool is_interpolated;
+     bool want_reset;
+     bool frame_pending;
++    bool external_surface_update;
++    bool target_params_pending;
+ 
+     pl_options pars;
+     struct m_config_cache *opts_cache;
+@@ -1005,6 +1007,11 @@ static void update_hook_opts_dynamic(struct priv *p, const struct pl_hook *hook,
+ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+ {
+     struct priv *p = vo->priv;
++    // The host may change CAMetalLayer and target options after a synchronous
++    // fence. Do not acquire, render, or present until the complete contract is
++    // installed. The VO thread remains free to process options and controls.
++    if (p->external_surface_update)
++        return VO_FALSE;
+     pl_options pars = p->pars;
+     pl_gpu gpu = p->gpu;
+     update_options(vo);
+@@ -1430,6 +1437,14 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     }
+     mp_mutex_unlock(&vo->params_mutex);
+ 
++    // Paused playback need not produce another core tick. Notify observers
++    // only once the new output parameters exist, rather than leaving the
++    // transient unavailable value from reconfiguration cached indefinitely.
++    if (p->target_params_pending) {
++        p->target_params_pending = false;
++        vo_event(vo, VO_EVENT_TARGET_PARAMS);
++    }
++
+     p->is_interpolated = pts_offset != 0 && mix.num_frames > 1;
+     valid = true;
+     // fall through
+@@ -1446,6 +1461,8 @@ done:
+ static void flip_page(struct vo *vo)
+ {
+     struct priv *p = vo->priv;
++    if (p->external_surface_update)
++        return;
+     struct ra_swapchain *sw = p->ra_ctx->swapchain;
+ 
+     if (p->frame_pending) {
+@@ -1510,6 +1527,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
+     mp_mutex_lock(&vo->params_mutex);
+     vo->target_params = NULL;
+     mp_mutex_unlock(&vo->params_mutex);
++    p->target_params_pending = true;
+     return 0;
+ }
+ 
+@@ -1799,6 +1817,28 @@ static int control(struct vo *vo, uint32_t request, void *data)
+     struct priv *p = vo->priv;
+ 
+     switch (request) {
++    case VOCTRL_GET_EXTERNAL_SURFACE_UPDATE:
++        *(int *)data = p->external_surface_update;
++        return VO_TRUE;
++    case VOCTRL_EXTERNAL_SURFACE_UPDATE: {
++        bool suspend = *(int *)data;
++        if (suspend && !p->external_surface_update) {
++            // Controls execute on this VO thread between draws. Complete an
++            // outstanding presentation before changing ownership, then wait
++            // for GPU use of the old swapchain to finish before acknowledging.
++            if (p->frame_pending)
++                flip_page(vo);
++            p->external_surface_update = true;
++            pl_gpu_finish(p->gpu);
++        } else if (!suspend && p->external_surface_update) {
++            update_options(vo);
++            p->external_surface_update = false;
++            p->target_params_pending = true;
++            p->want_reset = true;
++            vo->want_redraw = true;
++        }
++        return VO_TRUE;
++    }
+     case VOCTRL_SET_PANSCAN:
+         resize(vo);
+         return VO_TRUE;

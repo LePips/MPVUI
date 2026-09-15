@@ -12,10 +12,9 @@ struct Artifact: Codable, Sendable {
 }
 
 struct ArtifactIndex: Codable, Sendable {
-    let schemaVersion: Int
     let releaseID: String
     let nativeInputFingerprint: String
-    let provenancePath: String
+    let buildRecordPath: String
     let products: [Artifact]
     let dependencies: [RuntimeAsset]
 }
@@ -39,8 +38,7 @@ struct ProductDefinition: Codable, Sendable {
     )]
 }
 
-struct NativeBuildProvenance: Codable {
-    let schemaVersion: Int
+struct NativeBuildRecord: Codable {
     let nativeInputFingerprint: String
     let nativeLockDigest: String
     let componentDigests: [String: String]
@@ -186,14 +184,13 @@ struct Packager {
                     $0.contentDigest
                 ) })
                 try write(
-                    NativeBuildProvenance(
-                        schemaVersion: 1,
+                    NativeBuildRecord(
                         nativeInputFingerprint: nativeID,
                         nativeLockDigest: fingerprint(graph.native),
                         componentDigests: components,
                         combinedInputs: combinedInputs
                     ),
-                    xcf.appendingPathComponent("provenance.json")
+                    xcf.appendingPathComponent("build-record.json")
                 )
                 try verify(xcf, product: product, slices: slices)
                 try normalize(xcf)
@@ -222,10 +219,9 @@ struct Packager {
             }
             try write(
                 ArtifactIndex(
-                    schemaVersion: 2,
                     releaseID: release,
                     nativeInputFingerprint: nativeID,
-                    provenancePath: "Libmpv.xcframework/provenance.json",
+                    buildRecordPath: "Libmpv.xcframework/build-record.json",
                     products: artifacts,
                     dependencies: []
                 ),

@@ -16,10 +16,35 @@ final class MPVMetalLayer: CAMetalLayer {
     private let drawableStateLock = NSLock()
     private var storedLastValidDrawableSize: CGSize?
     private var nativeResizeTransactionCount = 0
+    private let colorStateLock = NSLock()
+    private var hostColorSpace: CGColorSpace?
+    private var hostPixelFormat: MTLPixelFormat?
+
+    /// MoltenVK may set a generic swapchain colorspace while rebuilding. The
+    /// host's exact profile is authoritative, particularly in calibrated ICC
+    /// mode where a second display transform would corrupt the result.
+    func configureHostColorSpace(_ colorSpace: CGColorSpace, pixelFormat: MTLPixelFormat) {
+        precondition(Thread.isMainThread)
+        colorStateLock.lock()
+        defer { colorStateLock.unlock() }
+        hostColorSpace = colorSpace
+        hostPixelFormat = pixelFormat
+        if !Self.matchesColorSpace(super.colorspace, colorSpace) {
+            super.colorspace = colorSpace
+        }
+        if super.pixelFormat != pixelFormat {
+            super.pixelFormat = pixelFormat
+        }
+    }
 
     override var colorspace: CGColorSpace? {
         get { super.colorspace }
         set {
+            colorStateLock.lock()
+            defer { colorStateLock.unlock() }
+            if let hostColorSpace, !Self.matchesColorSpace(hostColorSpace, newValue) {
+                return
+            }
             guard !Self.matchesColorSpace(super.colorspace, newValue) else { return }
             super.colorspace = newValue
         }
@@ -28,6 +53,11 @@ final class MPVMetalLayer: CAMetalLayer {
     override var pixelFormat: MTLPixelFormat {
         get { super.pixelFormat }
         set {
+            colorStateLock.lock()
+            defer { colorStateLock.unlock() }
+            if let hostPixelFormat, hostPixelFormat != newValue {
+                return
+            }
             guard super.pixelFormat != newValue else { return }
             super.pixelFormat = newValue
         }
@@ -222,8 +252,7 @@ final class MPVMetalLayer: CAMetalLayer {
             if lhs === rhs {
                 return true
             }
-            guard let lhsName = lhs.name, let rhsName = rhs.name else { return false }
-            return lhsName == rhsName
+            return CFEqual(lhs, rhs)
         default:
             return false
         }

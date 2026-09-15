@@ -7,12 +7,12 @@ struct Updater {
         let ref: String
         if ["mpv", "ffmpeg", "recipes"].contains(component) {
             id = component
-            ref = try requested ?? (id == "recipes" ? graph.native.recipeProvenance.ref : graph.native.source(id).ref)
+            ref = try requested ?? (id == "recipes" ? graph.native.recipeSource.ref : graph.native.source(id).ref)
         } else {
             id = component.hasPrefix("n") ? "ffmpeg" : "mpv"
             ref = component
         }
-        let url = try id == "recipes" ? graph.native.recipeProvenance.url : graph.native.source(id).url
+        let url = try id == "recipes" ? graph.native.recipeSource.url : graph.native.source(id).url
         try require(!graph.inputs.offline, "Update resolves upstream refs and cannot run offline")
         try require(!ref.hasPrefix("-") && !ref.contains("\n"), "Invalid upstream ref")
         let advertised = try graph.runner.run(
@@ -32,7 +32,7 @@ struct Updater {
         try mkdir(directory)
         if id == "recipes" {
             try put(
-                "Upstream recipe resolution\n\nPrevious: \(graph.native.recipeProvenance.commit)\nCandidate: \(commit)\nRef: \(ref)\n\nReview the upstream recipe diff and port relevant changes into Build/Sources/MPVBuildCore/Recipes. Inputs.lock.json is not promoted automatically.\n",
+                "Upstream recipe resolution\n\nPrevious: \(graph.native.recipeSource.commit)\nCandidate: \(commit)\nRef: \(ref)\n\nReview the upstream recipe diff and port relevant changes into Build/Sources/MPVBuildCore/Recipes. Inputs.lock.json is not promoted automatically.\n",
                 directory.appendingPathComponent("REVIEW.md")
             )
             let source = Source(id: "recipes", url: url, ref: ref, commit: commit, version: ref, patches: [])

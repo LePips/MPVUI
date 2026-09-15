@@ -71,6 +71,7 @@ struct Arguments {
     }
 }
 
+/// The command-line entry point for native library builds.
 public enum CLI {
     static func defaultStore(_ root: URL) -> URL {
         let current = root.appendingPathComponent(".build/mpvbuild")
@@ -79,6 +80,7 @@ public enum CLI {
         return !exists(current) && exists(previous) ? previous : current
     }
 
+    /// Runs the supplied command-line arguments, throwing if validation or execution fails.
     public static func run(_ raw: [String]) throws {
         // Native ar member modes and framework symlink modes must not inherit a caller's umask.
         umask(NativeEnvironment.fileCreationMask)

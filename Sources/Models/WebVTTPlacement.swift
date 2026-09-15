@@ -1,36 +1,46 @@
 /// WebVTT cue placement in normalized video coordinates.
 ///
-/// Positions can fall outside `0 ... 1` when a cue intentionally extends
-/// beyond the viewport. Maximum dimensions constrain the cue box when
-/// present; they are not its measured size. Snap-to-line coordinates can be
-/// approximate because their exact position depends on the client's font and
-/// collision layout.
+/// Positions may extend outside `0...1`. Maximum dimensions constrain the cue box;
+/// they do not measure it. Snap-to-line positions are approximate; exact placement
+/// depends on the client's font and collision layout.
 public struct WebVTTPlacement: Sendable, Hashable {
     /// The point on the cue box selected along the horizontal axis.
     public enum HorizontalAnchor: Sendable, Hashable {
+        /// The horizontal center of the cue box.
         case center
+        /// The left edge of the cue box.
         case left
+        /// The right edge of the cue box.
         case right
     }
 
     /// The point on the cue box selected along the vertical axis.
     public enum VerticalAnchor: Sendable, Hashable {
+        /// The vertical center of the cue box.
         case center
+        /// The top edge of the cue box.
         case top
+        /// The bottom edge of the cue box.
         case bottom
     }
 
     /// The physical alignment of text inside the cue box.
     public enum TextAlignment: Sendable, Hashable {
+        /// Centers text within the cue box.
         case center
+        /// Aligns text to the left edge.
         case left
+        /// Aligns text to the right edge.
         case right
     }
 
     /// The direction in which lines are laid out.
     public enum WritingDirection: Sendable, Hashable {
+        /// Horizontal text lines.
         case horizontal
+        /// Vertical text with successive lines placed to the left.
         case verticalGrowingLeft
+        /// Vertical text with successive lines placed to the right.
         case verticalGrowingRight
     }
 
@@ -58,8 +68,7 @@ public struct WebVTTPlacement: Sendable, Hashable {
     /// The cue's resolved writing direction.
     public let writingDirection: WritingDirection
 
-    /// Creates resolved WebVTT placement information.
-    public init(
+    init(
         horizontalPosition: Float,
         verticalPosition: Float,
         horizontalAnchor: HorizontalAnchor = .center,

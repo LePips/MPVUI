@@ -1,11 +1,8 @@
 import Foundation
 import Libmpv
 
-/// A copied Swift representation of an `mpv_node`.
-///
-/// libmpv owns node values attached to events and invalidates them when the
-/// next event is read. Converting them at the engine boundary keeps all of the
-/// public player state independent from C pointer lifetimes.
+/// A Swift copy of an `mpv_node`, independent of C pointer lifetimes.
+/// Copy event nodes before reading the next event, which invalidates them.
 indirect enum MPVNodeValue: Equatable, Sendable {
     case none
     case string(String)
@@ -15,6 +12,20 @@ indirect enum MPVNodeValue: Equatable, Sendable {
     case array([MPVNodeValue])
     case map([String: MPVNodeValue])
     case data(Data)
+
+    /// Property events store scalar values directly, whereas NODE events
+    /// point to an mpv_node. Both pointers expire at the next event read.
+    init?(copying property: mpv_event_property) {
+        guard let data = property.data else { return nil }
+        switch property.format {
+        case MPV_FORMAT_DOUBLE:
+            self = .double(data.assumingMemoryBound(to: Double.self).pointee)
+        case MPV_FORMAT_NODE:
+            self.init(copying: data.assumingMemoryBound(to: mpv_node.self).pointee)
+        default:
+            return nil
+        }
+    }
 
     init(copying node: mpv_node) {
         switch node.format {

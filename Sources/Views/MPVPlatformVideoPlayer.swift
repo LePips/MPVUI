@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import Metal
@@ -10,7 +11,7 @@ import AppKit
 import UIKit
 #endif
 
-/// The shared native Metal/MoltenVK player surface for macOS, iOS, and tvOS.
+/// A native player surface using Metal/MoltenVK or AVFoundation sample buffers.
 @MainActor
 public final class MPVPlatformVideoPlayer: PlatformView {
     /// The player rendered by this surface.
@@ -30,18 +31,93 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
+    /// Reports an opaque video surface.
     override public var isOpaque: Bool {
         true
     }
     #elseif canImport(UIKit)
+    /// The Metal-backed layer type used by the video surface.
     override public class var layerClass: AnyClass {
         MPVMetalLayer.self
     }
     #endif
 
     private var attachedLayerAddress: Int64?
+    private var isRetainedForPictureInPicture = false
     private let surfaceToken = UUID()
     private var surfaceConfiguration: MPVRenderSurfaceConfiguration?
+    private var headroomObservationTimer: Timer?
+    private var displayRefreshTask: Task<Void, Never>?
+    private let notificationCenter: NotificationCenter
+    /// Optional current/potential readings for deterministic display tests.
+    var wideGamutOverrideForTesting: Bool?
+    private lazy var calibratedDisplayProfile = MPVCalibratedDisplayProfile(
+        policy: player.configuration.colorManagement.displayProfile
+    )
+    var edrHeadroomOverrideForTesting: (current: Double, potential: Double)?
+    #if os(tvOS)
+    private lazy var displayMatchingCoordinator: MPVDisplayMatchingCoordinator = {
+        let coordinator = MPVDisplayMatchingCoordinator()
+        coordinator.displayModeSwitchDidChange = { [weak self, weak player] switching in
+            player?.setDisplaySwitchInProgress(switching)
+            self?.scheduleDisplayRefresh()
+        }
+        return coordinator
+    }()
+    #endif
+    private(set) var videoOverlay: MPVVideoOverlay?
+    private(set) var videoOverlayHost: MPVVideoOverlayHostingView?
+    private weak var videoOverlayContainer: PlatformView?
+
+    /// Keep the SwiftUI host outside a representable that can be dismantled
+    /// while macOS PiP is still visible. Ownership stays with this surface.
+    func moveVideoOverlay(to container: PlatformView?) {
+        videoOverlayContainer = container
+        guard let videoOverlayHost else { return }
+        let destination = container ?? self
+        videoOverlayHost.removeFromSuperview()
+        videoOverlayHost.frame = destination.bounds
+        destination.addSubview(videoOverlayHost)
+    }
+
+    func setVideoOverlay(_ overlay: MPVVideoOverlay?) {
+        videoOverlay = overlay
+        if let overlay {
+            if let videoOverlayHost {
+                videoOverlayHost.setContent(overlay.content)
+            } else {
+                let host = MPVVideoOverlayHostingView(content: overlay.content)
+                let container = videoOverlayContainer ?? self
+                host.frame = container.bounds
+                #if os(macOS) && !targetEnvironment(macCatalyst)
+                host.autoresizingMask = [.width, .height]
+                #else
+                host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                #endif
+                container.addSubview(host)
+                videoOverlayHost = host
+            }
+        } else {
+            videoOverlayHost?.removeFromSuperview()
+            videoOverlayHost = nil
+        }
+        player.pictureInPictureOverlayDidChange(self)
+    }
+
+    func swiftUISourceWasDismantled() {
+        #if os(macOS) && !targetEnvironment(macCatalyst)
+        guard isRetainedForPictureInPicture else { return }
+        // SwiftUI retires the source graph after dismantle returns. Refresh the
+        // independent PiP host on the next turn so it keeps scheduling updates.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRetainedForPictureInPicture,
+                  let host = self.videoOverlayHost else { return }
+            host.needsLayout = true
+            host.layoutSubtreeIfNeeded()
+            host.displayIfNeeded()
+        }
+        #endif
+    }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
     private var notificationObservations: [NSObjectProtocol] = []
@@ -54,9 +130,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     /// Simulated backing-scale input for deterministic integration tests.
     var displayScaleOverrideForTesting: CGFloat?
     #elseif canImport(UIKit)
-    #if os(iOS)
     private var notificationObservations: [NSObjectProtocol] = []
-    #endif
     private var registeredTransitionIdentifier: ObjectIdentifier?
     private var lastUncoordinatedLayoutUptimeNanoseconds: UInt64?
     #if os(iOS)
@@ -98,56 +172,75 @@ public final class MPVPlatformVideoPlayer: PlatformView {
             return true
         },
         emitDiagnostic: { [weak self] snapshot in
-            self?.emitResizeDiagnostic(snapshot)
+            guard let self else { return }
+            self.emitSurfaceDiagnostic(self.resizeDiagnosticMessage(snapshot()))
         }
     )
 
-    /// Creates a Metal surface for an existing player.
+    /// Creates a surface using the existing player's configured video output.
     public init(player: MPVPlayer) {
         self.player = player
+        notificationCenter = .default
         super.init(frame: .zero)
         configureBaseLayer()
     }
 
+    /// Isolates the notification boundary so adapter tests do not broadcast
+    /// synthetic fullscreen events to AppKit's own private window observers.
+    init(player: MPVPlayer, notificationCenter: NotificationCenter) {
+        self.player = player
+        self.notificationCenter = notificationCenter
+        super.init(frame: .zero)
+        configureBaseLayer()
+    }
+
+    /// Unavailable; create the surface with ``init(player:)``.
     @available(*, unavailable, message: "Use init(player:) to inject an MPVPlayer.")
     override public init(frame _: CGRect) {
         fatalError("Use init(player:) to inject an MPVPlayer")
     }
 
+    /// Unavailable; create the surface with ``init(player:)``.
     @available(*, unavailable, message: "Use init(player:) to inject an MPVPlayer.")
     public required init?(coder _: NSCoder) {
         fatalError("Use init(player:) to inject an MPVPlayer")
     }
 
     isolated deinit {
+        headroomObservationTimer?.invalidate()
+        displayRefreshTask?.cancel()
         #if os(macOS) && !targetEnvironment(macCatalyst)
         appKitTransitionStateTimeoutTask?.cancel()
         for observation in notificationObservations + windowNotificationObservations {
-            NotificationCenter.default.removeObserver(observation)
+            notificationCenter.removeObserver(observation)
         }
-        #elseif os(iOS)
+        #elseif canImport(UIKit)
         for observation in notificationObservations {
-            NotificationCenter.default.removeObserver(observation)
+            notificationCenter.removeObserver(observation)
         }
         #endif
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
+    /// Creates the surface's Metal-backed layer.
     override public func makeBackingLayer() -> CALayer {
         MPVMetalLayer()
     }
 
+    /// Updates rendering and display observations after the surface changes windows.
     override public func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         configureWindowTransitionObservations()
         platformDidMoveToWindow()
     }
 
+    /// Refreshes rendering for the window's current backing properties.
     override public func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateRenderingConfiguration()
     }
 
+    /// Updates render geometry for the current layout or window transition.
     override public func layout() {
         super.layout()
         let kind: MPVGeometryChangeKind =
@@ -168,12 +261,14 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         platformDidLayout(kind: kind)
     }
 
+    /// Begins coordinating render geometry during live resizing.
     override public func viewWillStartLiveResize() {
         super.viewWillStartLiveResize()
         isAppKitContinuousGeometryChange = true
         resizeCoordinator.beginContinuousInteraction()
     }
 
+    /// Commits the final render geometry after live resizing.
     override public func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
         isAppKitContinuousGeometryChange = false
@@ -187,11 +282,13 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         )
     }
     #elseif canImport(UIKit)
+    /// Updates rendering after the surface changes windows.
     override public func didMoveToWindow() {
         super.didMoveToWindow()
         platformDidMoveToWindow()
     }
 
+    /// Updates render geometry alongside UIKit layout and transitions.
     override public func layoutSubviews() {
         super.layoutSubviews()
         if let transitionCoordinator = activeTransitionCoordinator(),
@@ -217,52 +314,136 @@ public final class MPVPlatformVideoPlayer: PlatformView {
 
     /// Re-evaluates display capability and synchronizes the layer with mpv.
     public func updateRenderingConfiguration() {
+        refreshRenderingConfiguration(updateGeometry: true)
+    }
+
+    private func refreshRenderingConfiguration(updateGeometry: Bool) {
         guard window != nil else { return }
+        if player.videoOutput == .sampleBuffer {
+            updateSampleBufferSurface()
+            return
+        }
         handleLayerReplacementIfNeeded()
         guard player.isRenderSurfaceActive(token: surfaceToken) else {
             resizeCoordinator.surfaceWasSuperseded()
+            #if os(tvOS)
+            displayMatchingCoordinator.detach()
+            #endif
             return
         }
 
-        let newConfiguration = makeSurfaceConfiguration()
-        if let previousConfiguration = surfaceConfiguration,
-           newConfiguration.requiresRendererReconfiguration(
-               comparedTo: previousConfiguration
-           )
-        {
-            detachForSurfaceReconfiguration()
+        var newConfiguration = makeSurfaceConfiguration()
+        if !updateGeometry, let previous = surfaceConfiguration {
+            // Brightness/metadata polling must not turn an in-flight resize
+            // into a discrete geometry request or restart its final boundary.
+            newConfiguration = MPVRenderSurfaceConfiguration(
+                usesExtendedDynamicRange: newConfiguration.usesExtendedDynamicRange,
+                displaySupportsExtendedDynamicRange: newConfiguration.displaySupportsExtendedDynamicRange,
+                drawableSize: previous.drawableSize,
+                scale: previous.scale,
+                outputHeadroom: newConfiguration.outputHeadroom,
+                displayCapabilities: newConfiguration.displayCapabilities,
+                configuredDynamicRange: newConfiguration.configuredDynamicRange,
+                policyFallbackReason: newConfiguration.policyFallbackReason,
+                colorConfiguration: newConfiguration.colorConfiguration
+            )
         }
+        let requiresColorUpdate = surfaceConfiguration.map {
+            newConfiguration.requiresRendererReconfiguration(comparedTo: $0)
+        } ?? true
+        let changesPixelFormat = surfaceConfiguration.map {
+            $0.colorConfiguration?.pixelFormat != newConfiguration.colorConfiguration?.pixelFormat
+                || $0.usesExtendedDynamicRange != newConfiguration.usesExtendedDynamicRange
+        } ?? false
 
         let requiresGeometryCommit =
             surfaceConfiguration.map {
                 newConfiguration.requiresGeometryCommit(comparedTo: $0)
             } ?? true
+        if attachedLayerAddress == nil || changesPixelFormat {
+            guard currentGeometry() != nil else { return }
+        }
+        let suspendsRenderer = requiresColorUpdate && attachedLayerAddress != nil
+        if suspendsRenderer, let address = attachedLayerAddress {
+            guard player.beginRenderColorUpdate(token: surfaceToken, layerAddress: address) else {
+                // A loading item has no active VO yet, or an older library
+                // lacks the fence. Keep
+                // the visible contract intact and retry at the next refresh.
+                updateDisplayMatching()
+                return
+            }
+        }
         surfaceConfiguration = newConfiguration
 
         if attachedLayerAddress == nil {
             guard commitCurrentDrawableSize() else { return }
             attach(using: newConfiguration)
-        } else if requiresGeometryCommit {
-            // Keep the attached layer at its committed scale until the
-            // coordinator submits the native resize.
-            synchronizeRenderTargetAfterGeometryChange(kind: .discrete)
+        } else if changesPixelFormat {
+            // Retire geometry callbacks for the old swapchain, retaining the
+            // layer, decoder, media timebase, and mpv handle.
+            #if canImport(UIKit)
+            registeredTransitionIdentifier = nil
+            lastUncoordinatedLayoutUptimeNanoseconds = nil
+            #endif
+            resizeCoordinator.rendererConfigurationDidChange()
+            guard commitCurrentDrawableSize() else { return }
+            attach(using: newConfiguration, synchronousColorUpdate: suspendsRenderer)
+        } else {
+            if requiresColorUpdate {
+                configureLayer(for: newConfiguration, preserveCommittedScale: true)
+                updateAttachedRenderTarget(using: newConfiguration, synchronousColorUpdate: suspendsRenderer)
+            }
+            if requiresGeometryCommit {
+                // Keep the attached layer at its committed scale until the
+                // coordinator submits the native resize.
+                synchronizeRenderTargetAfterGeometryChange(kind: .discrete)
+            }
         }
+        updateDisplayMatching()
     }
 
     /// Makes this view the player's active rendering surface.
     public func activateRenderingSurface() {
         guard window != nil else { return }
+        startHeadroomObservation()
         let wasActive = player.isRenderSurfaceActive(token: surfaceToken)
         player.activateRenderSurface(token: surfaceToken)
+        guard player.isRenderSurfaceActive(token: surfaceToken) else {
+            // The PiP presenter retains the old render owner, but needs the
+            // new inline view as its restoration destination.
+            player.pictureInPictureSurfaceDidAttach(self)
+            return
+        }
         if !wasActive {
             resizeCoordinator.surfaceWasSuperseded()
             attachedLayerAddress = nil
         }
         updateRenderingConfiguration()
+        player.pictureInPictureSurfaceDidAttach(self)
     }
 
     /// Disconnects mpv before this view or its Metal layer is released.
     public func detach() {
+        guard !isRetainedForPictureInPicture else { return }
+        headroomObservationTimer?.invalidate()
+        headroomObservationTimer = nil
+        displayRefreshTask?.cancel()
+        displayRefreshTask = nil
+        #if os(tvOS)
+        displayMatchingCoordinator.detach()
+        #endif
+        player.pictureInPictureSurfaceDidDetach(self)
+        if player.videoOutput == .sampleBuffer,
+           player.isRenderSurfaceActive(token: surfaceToken)
+        {
+            player.sampleBufferDisplayLayer.removeFromSuperlayer()
+            player.updateSampleBufferOutput(
+                displayCapabilities: .unknown,
+                configuredDynamicRange: surfaceConfiguration?.configuredDynamicRange ?? .automatic,
+                policyFallbackReason: surfaceConfiguration?.policyFallbackReason == .unsupportedPolicy
+                    ? .unsupportedPolicy : nil
+            )
+        }
         resizeCoordinator.deactivate()
         player.detachRenderTarget(
             token: surfaceToken,
@@ -283,65 +464,118 @@ public final class MPVPlatformVideoPlayer: PlatformView {
 }
 
 extension MPVPlatformVideoPlayer {
+    /// The player has synchronously retired the previous native target.
+    /// Discard cached attachment state without detaching the new backend.
+    func videoOutputDidChange() {
+        resizeCoordinator.deactivate()
+        attachedLayerAddress = nil
+        surfaceConfiguration = nil
+        #if os(macOS) && !targetEnvironment(macCatalyst)
+        endAppKitAnimatedGeometryTransition()
+        isAppKitContinuousGeometryChange = false
+        #elseif canImport(UIKit)
+        registeredTransitionIdentifier = nil
+        lastUncoordinatedLayoutUptimeNanoseconds = nil
+        #endif
+        activateRenderingSurface()
+    }
+
+    func retainRenderingForPictureInPicture() {
+        guard isActiveRenderingSurface else { return }
+        isRetainedForPictureInPicture = true
+        player.retainRenderSurfaceForPictureInPicture(token: surfaceToken)
+    }
+
+    func releaseRenderingFromPictureInPicture() {
+        isRetainedForPictureInPicture = false
+        player.releaseRenderSurfaceFromPictureInPicture(token: surfaceToken)
+        if window == nil {
+            detach()
+            MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
+        } else {
+            activateRenderingSurface()
+        }
+    }
+
+    private func updateSampleBufferSurface() {
+        guard isActiveRenderingSurface, bounds.width > 0, bounds.height > 0 else { return }
+        let displayLayer = player.sampleBufferDisplayLayer
+        applyWithoutImplicitAnimations {
+            if displayLayer.superlayer !== metalLayer {
+                displayLayer.removeFromSuperlayer()
+                metalLayer.insertSublayer(displayLayer, at: 0)
+            }
+            displayLayer.frame = bounds
+            displayLayer.contentsScale = platformScale
+        }
+        let configuration = makeSurfaceConfiguration()
+        configureNativeLayerPolicy(displayLayer)
+        surfaceConfiguration = configuration
+        player.updateSampleBufferOutput(
+            displayCapabilities: configuration.displayCapabilities,
+            configuredDynamicRange: configuration.configuredDynamicRange,
+            policyFallbackReason: configuration.policyFallbackReason,
+            colorConfiguration: configuration.colorConfiguration
+        )
+        // A policy may select a backend fallback synchronously.
+        guard player.videoOutput == .sampleBuffer else { return }
+        player.attachSampleBufferOutput()
+        updateDisplayMatching()
+    }
+
+    private func configureNativeLayerPolicy(_ displayLayer: AVSampleBufferDisplayLayer) {
+        applyWithoutImplicitAnimations {
+            if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+                displayLayer.toneMapMode = .ifSupported
+                switch player.configuration.hdrPolicy {
+                case .automatic: displayLayer.preferredDynamicRange = .automatic
+                case .disabled: displayLayer.preferredDynamicRange = .standard
+                case .always: displayLayer.preferredDynamicRange = .high
+                case .constrained: displayLayer.preferredDynamicRange = .constrainedHigh
+                }
+            }
+        }
+    }
+
     /// Applies one complete renderer/color contract to the shared Metal layer.
+    /// Live changes run only inside the native renderer suspension boundary.
     func configureMetalLayer(
         usesExtendedDynamicRange: Bool,
         scale: CGFloat,
-        outputHeadroom: Double
+        outputHeadroom: Double,
+        colorConfiguration: MPVRenderColorConfiguration? = nil
     ) {
+        #if os(tvOS)
+        let effectiveHDR: Bool = if #available(tvOS 26.0, *) {
+            usesExtendedDynamicRange
+        } else {
+            false
+        }
+        #else
+        let effectiveHDR = usesExtendedDynamicRange
+        #endif
         applyWithoutImplicitAnimations {
             metalLayer.contentsScale = max(scale, 1)
-
+            let space = colorConfiguration?.layerColorSpace ?? CGColorSpace(
+                name: effectiveHDR ? CGColorSpace.extendedLinearDisplayP3 : CGColorSpace.sRGB
+            )!
+            let format = colorConfiguration?.pixelFormat ?? (effectiveHDR ? .rgba16Float : .bgra8Unorm)
+            (metalLayer as? MPVMetalLayer)?.configureHostColorSpace(space, pixelFormat: format)
             #if os(macOS)
-            if usesExtendedDynamicRange {
-                metalLayer.pixelFormat = .rgba16Float
-                metalLayer.colorspace = CGColorSpace(
-                    name: CGColorSpace.extendedLinearDisplayP3
-                )
-                metalLayer.edrMetadata = nil
-                metalLayer.wantsExtendedDynamicRangeContent = true
-                if #available(macOS 26.0, *) {
-                    metalLayer.preferredDynamicRange = .high
-                    metalLayer.contentsHeadroom = CGFloat(max(outputHeadroom, 1))
-                }
-            } else {
-                metalLayer.pixelFormat = .bgra8Unorm
-                metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-                metalLayer.edrMetadata = nil
-                metalLayer.wantsExtendedDynamicRangeContent = false
-                if #available(macOS 26.0, *) {
-                    metalLayer.preferredDynamicRange = .standard
-                    metalLayer.contentsHeadroom = 1
-                }
-            }
+            metalLayer.edrMetadata = nil
+            metalLayer.wantsExtendedDynamicRangeContent = effectiveHDR
             #elseif os(iOS)
-            if usesExtendedDynamicRange {
-                metalLayer.pixelFormat = .rgba16Float
-                metalLayer.colorspace = CGColorSpace(
-                    name: CGColorSpace.extendedLinearDisplayP3
-                )
-                metalLayer.edrMetadata = nil
-                (metalLayer as? MPVMetalLayer)?
-                    .configureExtendedDynamicRangeContent(true)
-                if #available(iOS 26.0, *) {
-                    metalLayer.preferredDynamicRange = .high
-                    metalLayer.contentsHeadroom = CGFloat(max(outputHeadroom, 1))
-                }
-            } else {
-                metalLayer.pixelFormat = .bgra8Unorm
-                metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-                metalLayer.edrMetadata = nil
-                (metalLayer as? MPVMetalLayer)?
-                    .configureExtendedDynamicRangeContent(false)
-                if #available(iOS 26.0, *) {
-                    metalLayer.preferredDynamicRange = .standard
-                    metalLayer.contentsHeadroom = 1
-                }
-            }
-            #else
-            metalLayer.pixelFormat = .bgra8Unorm
-            metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+            metalLayer.edrMetadata = nil
+            (metalLayer as? MPVMetalLayer)?.configureExtendedDynamicRangeContent(effectiveHDR)
             #endif
+            if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+                metalLayer.preferredDynamicRange = effectiveHDR
+                    ? (player.configuration.hdrPolicy == .constrained ? .constrainedHigh : .high)
+                    : .standard
+                metalLayer.contentsHeadroom = CGFloat(effectiveHDR ? max(outputHeadroom, 1) : 1)
+                metalLayer.toneMapMode = effectiveHDR
+                    && player.configuration.hdrPolicy == .constrained ? .ifSupported : .never
+            }
         }
     }
 
@@ -399,7 +633,7 @@ private extension MPVPlatformVideoPlayer {
         observePlayerRenderingState()
         #if os(macOS) && !targetEnvironment(macCatalyst)
         configureDisplayObservations()
-        #elseif os(iOS)
+        #elseif canImport(UIKit)
         configureDisplayObservations()
         #endif
         #if canImport(UIKit)
@@ -435,11 +669,12 @@ private extension MPVPlatformVideoPlayer {
         withObservationTracking {
             _ = player.mediaInformation
             _ = player.state
+            _ = player.videoOutput
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.observePlayerRenderingState()
-                self.updateRenderingConfiguration()
+                self.refreshRenderingConfiguration(updateGeometry: false)
             }
         }
     }
@@ -452,143 +687,199 @@ private extension MPVPlatformVideoPlayer {
         ]
         for name in names {
             notificationObservations.append(
-                NotificationCenter.default.addObserver(
+                notificationCenter.addObserver(
                     forName: name,
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
                     MainActor.assumeIsolated {
-                        self?.updateRenderingConfiguration()
+                        self?.scheduleDisplayRefresh()
                     }
                 }
             )
         }
     }
-    #elseif os(iOS)
+    #elseif canImport(UIKit)
     func configureDisplayObservations() {
-        notificationObservations.append(
-            NotificationCenter.default.addObserver(
-                forName: UIScreen.referenceDisplayModeStatusDidChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.updateRenderingConfiguration()
+        var names: [Notification.Name] = [
+            UIScreen.referenceDisplayModeStatusDidChangeNotification,
+            UIScreen.modeDidChangeNotification,
+            UIScreen.didConnectNotification,
+            UIScreen.didDisconnectNotification,
+            AVPlayer.eligibleForHDRPlaybackDidChangeNotification,
+        ]
+        #if os(iOS)
+        names.append(UIScreen.brightnessDidChangeNotification)
+        #endif
+        for name in names {
+            notificationObservations.append(
+                notificationCenter.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.scheduleDisplayRefresh() }
                 }
-            }
-        )
+            )
+        }
     }
     #endif
 
+    // NSScreen has no current-headroom notification. Sample at a bounded rate
+    // while attached, including paused playback and brightness/reference changes.
+    // Quantization in the surface contract prevents tiny changes from reaching mpv.
+    func startHeadroomObservation() {
+        guard headroomObservationTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isActiveRenderingSurface else { return }
+                self.refreshRenderingConfiguration(updateGeometry: false)
+            }
+        }
+        timer.tolerance = 0.05
+        RunLoop.main.add(timer, forMode: .common)
+        headroomObservationTimer = timer
+    }
+
+    func scheduleDisplayRefresh() {
+        guard displayRefreshTask == nil else { return }
+        displayRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            self.displayRefreshTask = nil
+            self.refreshRenderingConfiguration(updateGeometry: false)
+        }
+    }
+
     func platformDidMoveToWindow() {
         if window == nil {
+            if isRetainedForPictureInPicture, player.videoOutput == .sampleBuffer {
+                // The system's PiP window does not expose its display route.
+                // Keep the request but stop attributing the old inline screen.
+                player.updateSampleBufferOutput(
+                    displayCapabilities: .unknown,
+                    configuredDynamicRange: surfaceConfiguration?.configuredDynamicRange ?? .automatic,
+                    policyFallbackReason: surfaceConfiguration?.policyFallbackReason == .unsupportedPolicy
+                        ? .unsupportedPolicy : nil
+                )
+            }
             detach()
         } else {
+            startHeadroomObservation()
             activateRenderingSurface()
         }
     }
 
     func platformDidLayout(kind: MPVGeometryChangeKind) {
+        if player.videoOutput == .sampleBuffer {
+            updateSampleBufferSurface()
+            return
+        }
         synchronizeRenderTargetAfterGeometryChange(kind: kind)
     }
 
     func makeSurfaceConfiguration() -> MPVRenderSurfaceConfiguration {
+        let scale = platformScale
+        let currentHeadroom: Double
+        let potentialHeadroom: Double
+        let supportsHDR: Bool
+        let supportsWideGamut: Bool
+        let systemDisplayProfile: CGColorSpace?
+        let displayProfileName: String?
+        let supportsCalibratedICC: Bool
         #if os(macOS) && !targetEnvironment(macCatalyst)
         let screen = window?.screen ?? NSScreen.main
-        let scale = max(
-            displayScaleOverrideForTesting
-                ?? window?.backingScaleFactor
-                ?? 1,
-            1
-        )
-        let potentialHeadroom = max(
-            screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1,
-            1
-        )
-        let displaySupportsHDR = potentialHeadroom > 1
-        let useHDR = shouldUseExtendedDynamicRange(
-            displaySupportsHDR: displaySupportsHDR
-        )
-        return MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: useHDR,
-            displaySupportsExtendedDynamicRange: displaySupportsHDR,
-            drawableSize: drawableSize(for: scale),
-            scale: scale,
-            outputHeadroom: useHDR ? Double(potentialHeadroom) : 1
-        )
-        #elseif os(iOS)
-        let screen = window?.windowScene?.screen
-        let scale = max(
-            displayEnvironmentOverrideForTesting?.scale
-                ?? screen?.scale
-                ?? contentScaleFactor,
-            1
-        )
-        let potentialHeadroom = max(
-            displayEnvironmentOverrideForTesting?.potentialEDRHeadroom
-                ?? screen?.potentialEDRHeadroom
-                ?? 1,
-            1
-        )
-        let displaySupportsHDR = potentialHeadroom > 1
-        let useHDR = shouldUseExtendedDynamicRange(
-            displaySupportsHDR: displaySupportsHDR
-        )
-        return MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: useHDR,
-            displaySupportsExtendedDynamicRange: displaySupportsHDR,
-            drawableSize: drawableSize(for: scale),
-            scale: scale,
-            outputHeadroom: useHDR ? Double(potentialHeadroom) : 1
-        )
+        supportsWideGamut = wideGamutOverrideForTesting ?? screen?.colorSpace?.cgColorSpace?.isWideGamutRGB ?? false
+        systemDisplayProfile = screen?.colorSpace?.cgColorSpace
+        displayProfileName = screen?.colorSpace?.localizedName
+        supportsCalibratedICC = true
+        currentHeadroom = edrHeadroomOverrideForTesting?.current
+            ?? Double(screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)
+        potentialHeadroom = edrHeadroomOverrideForTesting?.potential
+            ?? Double(screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1)
+        supportsHDR = potentialHeadroom > 1
         #else
-        let scale = max(window?.screen.scale ?? contentScaleFactor, 1)
+        let screen = window?.windowScene?.screen ?? window?.screen
+        supportsWideGamut = wideGamutOverrideForTesting ?? (traitCollection.displayGamut == .P3)
+        systemDisplayProfile = nil
+        displayProfileName = supportsWideGamut ? "Display P3" : "sRGB"
+        supportsCalibratedICC = false
+        #if os(iOS)
+        let legacyPotential = displayEnvironmentOverrideForTesting.map { Double($0.potentialEDRHeadroom) }
+        #else
+        let legacyPotential: Double? = nil
+        #endif
+        currentHeadroom = edrHeadroomOverrideForTesting?.current
+            ?? legacyPotential ?? Double(screen?.currentEDRHeadroom ?? 1)
+        potentialHeadroom = edrHeadroomOverrideForTesting?.potential
+            ?? legacyPotential ?? Double(screen?.potentialEDRHeadroom ?? 1)
+        #if os(tvOS)
+        // Eligibility includes a connected route that can switch to HDR. It is
+        // capability evidence, not evidence of the current HDMI presentation.
+        supportsHDR = potentialHeadroom > 1 || AVPlayer.eligibleForHDRPlayback
+        #else
+        supportsHDR = potentialHeadroom > 1
+        #endif
+        #endif
+        let supportsLayerPolicy: Bool = if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+            true
+        } else {
+            false
+        }
+        #if os(tvOS)
+        let supportsMetalHDR = supportsLayerPolicy
+        #else
+        let supportsMetalHDR = true
+        #endif
+        let preservesHDRWhileOpening = player.state == .loading
+            && surfaceConfiguration?.usesExtendedDynamicRange == true
+        let policy = MPVHDRSurfacePolicy(
+            policy: player.configuration.hdrPolicy,
+            native: player.videoOutput == .sampleBuffer,
+            supportsLayerPolicy: supportsLayerPolicy,
+            supportsMetalHDR: supportsMetalHDR,
+            displaySupportsHDR: supportsHDR,
+            sourceIsHDR: player.mediaInformation.hdr.isHDRContent || preservesHDRWhileOpening
+        )
+        let capabilities = MPVDisplayCapabilities(
+            hdrSupport: supportsHDR ? .supported : .unsupported,
+            currentEDRHeadroom: currentHeadroom,
+            potentialEDRHeadroom: potentialHeadroom,
+            supportsWideGamut: supportsWideGamut,
+            displayProfileName: displayProfileName
+        )
+        let colorConfiguration = MPVRenderColorConfiguration.resolve(
+            configuration: player.configuration,
+            native: player.videoOutput == .sampleBuffer,
+            usesExtendedDynamicRange: policy.usesExtendedDynamicRange,
+            outputHeadroom: capabilities.currentEDRHeadroom ?? 1,
+            supportsWideGamut: supportsWideGamut,
+            systemDisplayProfile: systemDisplayProfile,
+            displayProfileName: displayProfileName,
+            calibratedProfile: calibratedDisplayProfile,
+            supportsCalibratedICC: supportsCalibratedICC
+        )
         return MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: false,
-            displaySupportsExtendedDynamicRange: false,
+            usesExtendedDynamicRange: policy.usesExtendedDynamicRange,
+            displaySupportsExtendedDynamicRange: supportsHDR,
             drawableSize: drawableSize(for: scale),
             scale: scale,
-            outputHeadroom: 1
+            outputHeadroom: policy.usesExtendedDynamicRange ? currentHeadroom : 1,
+            displayCapabilities: capabilities,
+            configuredDynamicRange: policy.dynamicRange,
+            policyFallbackReason: policy.fallbackReason,
+            colorConfiguration: colorConfiguration
         )
-        #endif
     }
 
-    func shouldUseExtendedDynamicRange(displaySupportsHDR: Bool) -> Bool {
-        switch player.configuration.hdrPolicy {
-        case .automatic:
-            let preservesActiveSurfaceWhileOpening =
-                player.state == .loading
-                    && surfaceConfiguration?.usesExtendedDynamicRange == true
-            return displaySupportsHDR
-                && (player.mediaInformation.hdr.isHDRContent
-                    || preservesActiveSurfaceWhileOpening)
-        case .always:
-            return displaySupportsHDR
-        case .disabled:
-            return false
-        }
-    }
-
-    func configureLayer(for configuration: MPVRenderSurfaceConfiguration) {
+    func configureLayer(
+        for configuration: MPVRenderSurfaceConfiguration,
+        preserveCommittedScale: Bool = false
+    ) {
         configureMetalLayer(
             usesExtendedDynamicRange: configuration.usesExtendedDynamicRange,
-            scale: configuration.scale,
-            outputHeadroom: configuration.outputHeadroom
+            scale: preserveCommittedScale ? metalLayer.contentsScale : configuration.scale,
+            outputHeadroom: configuration.outputHeadroom,
+            colorConfiguration: configuration.colorConfiguration
         )
-    }
-
-    func detachForSurfaceReconfiguration() {
-        #if canImport(UIKit)
-        registeredTransitionIdentifier = nil
-        lastUncoordinatedLayoutUptimeNanoseconds = nil
-        #endif
-        resizeCoordinator.rendererConfigurationDidChange()
-        guard let attachedLayerAddress else { return }
-        player.detachRenderTargetSynchronously(
-            token: surfaceToken,
-            layerAddress: attachedLayerAddress
-        )
-        self.attachedLayerAddress = nil
     }
 
     func rawGeometry() -> Geometry {
@@ -622,6 +913,8 @@ private extension MPVPlatformVideoPlayer {
                 ?? 1,
             1
         )
+        #elseif os(iOS)
+        max(displayEnvironmentOverrideForTesting?.scale ?? window?.screen.scale ?? contentScaleFactor, 1)
         #else
         max(window?.screen.scale ?? contentScaleFactor, 1)
         #endif
@@ -637,7 +930,7 @@ private extension MPVPlatformVideoPlayer {
         return true
     }
 
-    func attach(using configuration: MPVRenderSurfaceConfiguration) {
+    func attach(using configuration: MPVRenderSurfaceConfiguration, synchronousColorUpdate: Bool = false) {
         // `NSView` can replace its backing layer before the first attachment;
         // make host policy idempotent for every concrete layer we hand to mpv.
         configureMetalLayerForHosting()
@@ -653,6 +946,17 @@ private extension MPVPlatformVideoPlayer {
             contentsScale: configuration.scale,
             committedSize: drawableSize
         )
+        updateAttachedRenderTarget(using: configuration, synchronousColorUpdate: synchronousColorUpdate)
+        emitSurfaceDiagnostic(
+            "attach committed=\(drawableSize) observed=\(metalLayer.drawableSize) "
+                + "scale=\(metalLayer.contentsScale) hdr="
+                + "\(configuration.usesExtendedDynamicRange)"
+        )
+    }
+
+    func updateAttachedRenderTarget(using configuration: MPVRenderSurfaceConfiguration, synchronousColorUpdate: Bool = false) {
+        guard let address = attachedLayerAddress else { return }
+        let drawableSize = metalLayer.drawableSize
         player.attachRenderTarget(
             token: surfaceToken,
             layerAddress: address,
@@ -662,13 +966,29 @@ private extension MPVPlatformVideoPlayer {
             usesExtendedDynamicRange: configuration.usesExtendedDynamicRange,
             displaySupportsExtendedDynamicRange:
             configuration.displaySupportsExtendedDynamicRange,
-            outputHeadroom: configuration.outputHeadroom
+            outputHeadroom: configuration.outputHeadroom,
+            displayCapabilities: configuration.displayCapabilities,
+            configuredDynamicRange: configuration.configuredDynamicRange,
+            policyFallbackReason: configuration.policyFallbackReason,
+            colorConfiguration: configuration.colorConfiguration,
+            synchronousColorUpdate: synchronousColorUpdate
         )
-        emitSurfaceDiagnostic(
-            "attach committed=\(drawableSize) observed=\(metalLayer.drawableSize) "
-                + "scale=\(metalLayer.contentsScale) hdr="
-                + "\(configuration.usesExtendedDynamicRange)"
+    }
+
+    func updateDisplayMatching() {
+        #if os(tvOS)
+        let outputUsesHDR = player.videoOutput == .sampleBuffer
+            ? player.configuration.hdrPolicy != .disabled
+            : surfaceConfiguration?.usesExtendedDynamicRange == true
+        displayMatchingCoordinator.update(
+            window: window,
+            media: player.mediaInformation,
+            mediaGeneration: player.mediaGeneration,
+            state: player.state,
+            isActive: isActiveRenderingSurface,
+            outputUsesHDR: outputUsesHDR
         )
+        #endif
     }
 
     func synchronizeRenderTargetAfterGeometryChange(
@@ -735,14 +1055,14 @@ private extension MPVPlatformVideoPlayer {
         CATransaction.commit()
     }
 
-    func emitResizeDiagnostic(
+    func resizeDiagnosticMessage(
         _ snapshot: MPVRenderSurfaceResizeCoordinator.DiagnosticSnapshot
-    ) {
+    ) -> String {
         let inFlight =
             snapshot.inFlight.map {
                 "\($0.identifier):\($0.drawableSize)"
             } ?? "nil"
-        emitSurfaceDiagnostic(
+        return
             "event=\(snapshot.event.rawValue) token=\(surfaceToken) "
                 + "requested=\(String(describing: snapshot.latestRequestedDrawableSize)) "
                 + "pending=\(String(describing: snapshot.pendingDrawableSize)) "
@@ -756,23 +1076,22 @@ private extension MPVPlatformVideoPlayer {
                 + "generation=\(snapshot.surfaceGeneration) layer="
                 + "\(String(describing: snapshot.activeLayerAddress)) hdr="
                 + "\(surfaceConfiguration?.usesExtendedDynamicRange == true)"
-        )
     }
 
-    func emitSurfaceDiagnostic(_ message: String) {
-        player.emitRenderSurfaceDiagnostic(message)
+    func emitSurfaceDiagnostic(_ message: @autoclosure () -> String) {
+        player.emitRenderSurfaceDiagnostic(message())
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
     func configureWindowTransitionObservations() {
         endAppKitAnimatedGeometryTransition()
         for observation in windowNotificationObservations {
-            NotificationCenter.default.removeObserver(observation)
+            notificationCenter.removeObserver(observation)
         }
         windowNotificationObservations.removeAll()
         guard let window else { return }
 
-        let center = NotificationCenter.default
+        let center = notificationCenter
         windowNotificationObservations.append(
             center.addObserver(
                 forName: NSWindow.didChangeScreenNotification,

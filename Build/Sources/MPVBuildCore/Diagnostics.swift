@@ -28,13 +28,13 @@ final class BuildDiagnostics: @unchecked Sendable {
     }
 
     func save(to path: URL) throws {
-        struct Report: Encodable { let schemaVersion: Int
+        struct Report: Encodable {
             let elapsedSeconds: Double
             let events: [Event]
         }
         lock.lock()
         let snapshot = events
         lock.unlock()
-        try write(Report(schemaVersion: 1, elapsedSeconds: Date().timeIntervalSince(started), events: snapshot), path)
+        try write(Report(elapsedSeconds: Date().timeIntervalSince(started), events: snapshot), path)
     }
 }

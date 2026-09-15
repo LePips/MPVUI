@@ -4,8 +4,10 @@ import Foundation
 import AVFAudio
 #endif
 
+/// Manages the example app's playback audio session.
 @MainActor
 public enum ExampleAudioSession {
+    /// Activates movie playback audio on iOS and tvOS, returning any error message.
     @discardableResult
     public static func activate() -> String? {
         #if os(iOS) || os(tvOS)
@@ -23,6 +25,7 @@ public enum ExampleAudioSession {
         #endif
     }
 
+    /// Releases the iOS or tvOS audio session, returning any error message.
     @discardableResult
     public static func deactivate() -> String? {
         #if os(iOS) || os(tvOS)

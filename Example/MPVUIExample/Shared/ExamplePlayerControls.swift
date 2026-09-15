@@ -1,48 +1,101 @@
 import MPVUI
 import SwiftUI
 
+enum ExampleControlFocus: Hashable {
+    case media
+    case tracks
+    case pictureInPicture
+    case info
+}
+
 @MainActor
 struct ExamplePlayerControls: View {
     let player: MPVPlayer
-
+    let isVisible: Bool
     let mediaCatalog: [ExampleMedia]
     let media: ExampleMedia?
     let mediaTitle: String
     @Binding
     var isScrubbing: Bool
     @Binding
-    var scrubPosition: Duration
-    @Binding
-    var requestedSidecarID: String?
+    var focusedControl: ExampleControlFocus
     let selectMedia: (ExampleMedia) -> Void
     let openLocalFile: () -> Void
     let showInfo: () -> Void
-    let hideOverlay: () -> Void
-    let loadSidecar: (ExampleSubtitleSidecar) -> Void
-    let disableSubtitles: () -> Void
+    let onInteraction: () -> Void
+    let hideControls: () -> Void
+    let loadSidecar: (ExampleSubtitleSidecar, MPVSubtitleRole) -> Void
+    let disableSubtitles: (MPVSubtitleRole) -> Void
+    let seek: (Duration) -> Void
+    let jump: (Duration) -> Void
+    let onBottomControlsHeightChange: (CGFloat) -> Void
 
     @State
     private var lastSettledPlaybackWasPlaying = false
+    @FocusState
+    private var focusedSelector: ExampleControlFocus?
 
     var body: some View {
-        VStack {
-            Spacer(minLength: 0)
+        ZStack {
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 240)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
 
-            VStack(spacing: 8) {
-                header
+            #if !os(tvOS)
+            ExampleGlassControls {
                 transportButtons
-                    .frame(maxWidth: .infinity, alignment: .center)
-                timeline
             }
-            .padding(12)
-            .frame(maxWidth: 760)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .environment(\.colorScheme, .dark)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            #endif
+
+            VStack {
+                Spacer(minLength: 0)
+                VStack(spacing: 10) {
+                    ExampleGlassControls {
+                        selectors
+                    }
+                    ExamplePlaybackTimeline(
+                        player: player,
+                        isScrubbing: $isScrubbing,
+                        onInteraction: onInteraction,
+                        seek: seek
+                    )
+                }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.bottom, bottomPadding)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    onBottomControlsHeightChange($0)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("playerControls")
-        .onChange(of: player.state) { _, state in
+        #if os(tvOS)
+        .focusSection()
+        .defaultFocus($focusedSelector, focusedControl)
+        .onExitCommand(perform: hideControls)
+        #endif
+        .onChange(of: isVisible) { _, visible in
+            focusedSelector = visible ? focusedControl : nil
+        }
+        .onChange(of: focusedSelector) { _, focus in
+            guard let focus else { return }
+            focusedControl = focus
+            onInteraction()
+        }
+        .onAppear {
+            focusedSelector = focusedControl
+        }
+        .onChange(of: player.state, initial: true) { _, state in
             switch state {
             case .playing, .buffering:
                 lastSettledPlaybackWasPlaying = true
@@ -54,122 +107,90 @@ struct ExamplePlayerControls: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            mediaMenu
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            auxiliaryButton(
-                systemImage: "info.circle",
-                label: "Info",
-                action: showInfo
-            )
-            .accessibilityIdentifier("infoButton")
-
-            trackMenu
-
-            auxiliaryButton(
-                systemImage: "eye.slash",
-                label: "Hide controls",
-                action: hideOverlay
-            )
-            .accessibilityIdentifier("hideOverlayButton")
-        }
-    }
-
-    private var mediaMenu: some View {
-        Menu {
-            ForEach(mediaCatalog) { item in
-                Button {
-                    selectMedia(item)
-                } label: {
-                    if item == media {
-                        Label(item.title, systemImage: "checkmark")
-                    } else {
-                        Text(item.title)
-                    }
-                }
-                .accessibilityIdentifier("mediaChoice.\(item.id)")
-            }
-
-            if mediaCatalog.isEmpty {
-                Button("No bundled media") {}
-                    .disabled(true)
-            }
-
-            #if os(macOS) || os(iOS)
-            Divider()
-            Button(action: openLocalFile) {
-                Label("Open File…", systemImage: "folder")
-            }
-            .accessibilityIdentifier("openLocalFileButton")
-            #endif
-        } label: {
-            HStack(spacing: 6) {
-                Text(mediaTitle)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .accessibilityHidden(true)
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .accessibilityLabel("Media")
-        .accessibilityValue(mediaTitle)
-        .accessibilityIdentifier("mediaMenu")
-    }
-
-    private var timeline: some View {
-        HStack(spacing: 12) {
-            Text(ExampleDisplayFormat.duration(displayedPosition))
-                .accessibilityHidden(true)
-
-            timelineControl
-
-            Text(ExampleDisplayFormat.duration(player.duration))
-                .accessibilityHidden(true)
-        }
-        .font(.caption.monospacedDigit())
-    }
-
-    @ViewBuilder
-    private var timelineControl: some View {
+    private var horizontalPadding: CGFloat {
         #if os(tvOS)
-        ProgressView(
-            value: displayedPosition.seconds,
-            total: scrubberUpperBound.seconds
-        )
-        .progressViewStyle(.linear)
-        .tint(.white)
-        .frame(minHeight: 20)
-        .accessibilityLabel("Playback position")
-        .accessibilityValue(playbackPositionDescription)
+        64
+        #elseif os(macOS)
+        32
         #else
-        Slider(
-            value: scrubberBinding,
-            in: 0 ... scrubberUpperBound.seconds,
-            onEditingChanged: scrubberEditingChanged
-        )
-        .tint(.white)
-        .frame(minHeight: 44)
-        .disabled(!canSeek)
-        .accessibilityLabel("Playback position")
-        .accessibilityValue(playbackPositionDescription)
+        24
         #endif
     }
 
+    private var bottomPadding: CGFloat {
+        #if os(tvOS)
+        36
+        #else
+        16
+        #endif
+    }
+
+    private var selectors: some View {
+        HStack(spacing: 12) {
+            Menu {
+                mediaChoices
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "folder")
+                    Text(mediaTitle)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .frame(minHeight: 36)
+                .padding(.horizontal, 4)
+            }
+            .menuIndicator(.hidden)
+            .menuOrder(.fixed)
+            .exampleGlassButton()
+            .focused($focusedSelector, equals: .media)
+            .accessibilityLabel("Media")
+            .accessibilityValue(mediaTitle)
+            .accessibilityIdentifier("mediaMenu")
+
+            Spacer(minLength: 0)
+
+            Menu {
+                trackSection(title: "Video", type: .video, tracks: player.videoTracks)
+                trackSection(title: "Audio", type: .audio, tracks: player.audioTracks)
+                subtitleSection
+            } label: {
+                Image(systemName: "captions.bubble")
+                    .font(.system(size: 20, weight: .medium))
+                    .frame(width: 28, height: 36)
+            }
+            .menuIndicator(.hidden)
+            .menuOrder(.fixed)
+            .exampleGlassButton()
+            .focused($focusedSelector, equals: .tracks)
+            .accessibilityLabel("Tracks")
+            .accessibilityIdentifier("tracksMenu")
+
+            if player.pictureInPicture.isSupported {
+                selectorButton(
+                    systemImage: player.pictureInPicture.isActive ? "pip.exit" : "pip.enter",
+                    label: player.pictureInPicture.isActive ? "Exit picture in picture" : "Picture in picture",
+                    focus: .pictureInPicture,
+                    action: player.pictureInPicture.toggle
+                )
+                .disabled((!player.pictureInPicture.isPossible && !player.pictureInPicture.isActive)
+                    || player.pictureInPicture.isTransitioning)
+                .accessibilityIdentifier("pictureInPictureButton")
+            }
+
+            selectorButton(systemImage: "info.circle", label: "Info", focus: .info, action: showInfo)
+                .accessibilityIdentifier("infoButton")
+        }
+    }
+
     private var transportButtons: some View {
-        HStack(spacing: 8) {
-            transportButton(
-                systemImage: "gobackward.10",
-                label: "Go back 10 seconds",
-                action: { player.seek(by: .seconds(-10)) }
-            )
-            .disabled(!player.isSeekable)
+        HStack(spacing: 24) {
+            transportButton(systemImage: "gobackward.10", label: "Go back 10 seconds") {
+                jump(.seconds(-10))
+            }
+            .disabled(!canSeek)
             .accessibilityIdentifier("jumpBackwardButton")
 
             transportButton(
@@ -181,12 +202,10 @@ struct ExamplePlayerControls: View {
             .disabled(!canTogglePlayback)
             .accessibilityIdentifier("playPauseButton")
 
-            transportButton(
-                systemImage: "goforward.10",
-                label: "Go forward 10 seconds",
-                action: { player.seek(by: .seconds(10)) }
-            )
-            .disabled(!player.isSeekable)
+            transportButton(systemImage: "goforward.10", label: "Go forward 10 seconds") {
+                jump(.seconds(10))
+            }
+            .disabled(!canSeek)
             .accessibilityIdentifier("jumpForwardButton")
         }
     }
@@ -197,144 +216,142 @@ struct ExamplePlayerControls: View {
         prominent: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            onInteraction()
+            action()
+        } label: {
             Image(systemName: systemImage)
-                .font(.system(size: prominent ? 26 : 19, weight: .semibold))
-                .frame(width: prominent ? 52 : 44, height: prominent ? 52 : 44)
-                .contentShape(Rectangle())
+                .font(.system(size: prominent ? 32 : 24, weight: .semibold))
+                .frame(width: prominent ? 64 : 44, height: prominent ? 76 : 56)
         }
-        .buttonStyle(.plain)
+        .exampleGlassButton()
         .accessibilityLabel(label)
     }
 
-    private func auxiliaryButton(
+    private func selectorButton(
         systemImage: String,
         label: String,
+        focus: ExampleControlFocus,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            focusedControl = focus
+            onInteraction()
+            action()
+        } label: {
             Image(systemName: systemImage)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 28, height: 36)
         }
-        .buttonStyle(.plain)
+        .exampleGlassButton()
+        .focused($focusedSelector, equals: focus)
         .accessibilityLabel(label)
     }
 
-    private var trackMenu: some View {
-        Menu {
-            trackSubmenu(title: "Video", type: .video, tracks: player.videoTracks)
-            trackSubmenu(title: "Audio", type: .audio, tracks: player.audioTracks)
-            subtitleSubmenu
+    @ViewBuilder
+    private var mediaChoices: some View {
+        ForEach(mediaCatalog) { item in
+            Button {
+                onInteraction()
+                selectMedia(item)
+            } label: {
+                selectionLabel(item.title, selected: item == media)
+            }
+            .accessibilityIdentifier("mediaChoice.\(item.id)")
+        }
+        if mediaCatalog.isEmpty {
+            Text("No bundled media")
+        }
+        #if os(macOS) || os(iOS)
+        Divider()
+        Button {
+            onInteraction()
+            openLocalFile()
         } label: {
-            Image(systemName: "captions.bubble")
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            Label("Open File…", systemImage: "folder")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Tracks")
-        .accessibilityIdentifier("tracksMenu")
+        .accessibilityIdentifier("openLocalFileButton")
+        #endif
     }
 
-    private func trackSubmenu(
-        title: String,
-        type: MPVTrackType,
-        tracks: [MPVMediaTrack]
-    ) -> some View {
-        Menu(title) {
-            if type != .audio {
-                Button("Off") {
-                    if type == .subtitle {
-                        requestedSidecarID = nil
-                    }
+    private func trackSection(title: String, type: MPVTrackType, tracks: [MPVMediaTrack]) -> some View {
+        Section(title) {
+            if type == .video {
+                Button {
+                    onInteraction()
                     player.disableTrack(type)
+                } label: {
+                    selectionLabel("Off", selected: !tracks.contains(where: \.isSelected))
                 }
             }
-
             if tracks.isEmpty {
-                Button("No tracks") {}
-                    .disabled(true)
-            } else {
-                ForEach(tracks) { track in
-                    trackButton(track)
-                }
+                Text("No tracks").foregroundStyle(.secondary)
             }
+            ForEach(tracks) { track in trackButton(track) }
         }
     }
 
-    private var subtitleSubmenu: some View {
-        Menu("Subtitles") {
-            Button("Off") {
-                requestedSidecarID = nil
-                disableSubtitles()
-            }
+    private var subtitleSection: some View {
+        Section("Subtitles") {
+            subtitleMenu(for: .primary, title: "Primary subtitles")
+            subtitleMenu(for: .secondary, title: "Secondary subtitles")
+        }
+    }
 
+    private func subtitleMenu(for role: MPVSubtitleRole, title: String) -> some View {
+        Menu {
+            Button {
+                onInteraction()
+                disableSubtitles(role)
+            } label: {
+                selectionLabel("Off", selected: player.selectedSubtitle(for: role) == nil)
+            }
             ForEach(player.subtitleTracks) { track in
-                trackButton(track)
+                Button {
+                    onInteraction()
+                    player.selectSubtitle(track.id, for: role)
+                } label: {
+                    selectionLabel(trackTitle(track), selected: track.subtitleRole == role)
+                }
+                .accessibilityIdentifier("subtitle.\(role.rawValue).\(track.mpvID)")
             }
-
-            if !sidecars.isEmpty {
-                Section("External") {
+            if let sidecars = media?.sidecars, !sidecars.isEmpty {
+                Section("Load external subtitles") {
                     ForEach(sidecars) { sidecar in
-                        Button {
-                            loadSidecar(sidecar)
-                        } label: {
-                            if requestedSidecarID == sidecar.id {
-                                Label(sidecar.title, systemImage: "checkmark")
-                            } else {
-                                Text(sidecar.title)
-                            }
+                        Button(sidecar.title) {
+                            onInteraction()
+                            loadSidecar(sidecar, role)
                         }
                     }
                 }
             }
-
-            if player.subtitleTracks.isEmpty, sidecars.isEmpty {
-                Button("No tracks") {}
-                    .disabled(true)
-            }
+        } label: {
+            Text(title)
         }
-    }
-
-    private var sidecars: [ExampleSubtitleSidecar] {
-        media?.sidecars ?? []
+        .accessibilityIdentifier("subtitleMenu.\(role.rawValue)")
     }
 
     private func trackButton(_ track: MPVMediaTrack) -> some View {
         Button {
-            if track.type == .subtitle {
-                requestedSidecarID = nil
-            }
-            player.selectTrack(track)
+            onInteraction()
+            player.selectTrack(track.id)
         } label: {
-            if track.isSelected {
-                Label(trackTitle(track), systemImage: "checkmark")
-            } else {
-                Text(trackTitle(track))
-            }
+            selectionLabel(trackTitle(track), selected: track.isSelected)
+        }
+    }
+
+    @ViewBuilder
+    private func selectionLabel(_ title: String, selected: Bool) -> some View {
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
         }
     }
 
     private func trackTitle(_ track: MPVMediaTrack) -> String {
         let candidates: [String?] = [track.title, track.language, track.codec]
-        return candidates.compactMap(\.self).first(where: { !$0.isEmpty })
-            ?? "Track \(track.mpvID)"
-    }
-
-    private var scrubberBinding: Binding<Double> {
-        Binding(
-            get: { displayedPosition.seconds },
-            set: { scrubPosition = normalizedPosition(.seconds($0)) }
-        )
-    }
-
-    private var scrubberUpperBound: Duration {
-        guard player.duration > .zero else { return .seconds(1) }
-        return player.duration
-    }
-
-    private var displayedPosition: Duration {
-        isScrubbing ? scrubPosition : normalizedPosition(player.position)
+        return candidates.compactMap(\.self).first(where: { !$0.isEmpty }) ?? "Track \(track.mpvID)"
     }
 
     private var canSeek: Bool {
@@ -343,40 +360,16 @@ struct ExamplePlayerControls: View {
 
     private var displaysPauseButton: Bool {
         switch player.state {
-        case .playing, .buffering:
-            true
-        case .seeking:
-            lastSettledPlaybackWasPlaying
-        default:
-            false
+        case .playing, .buffering: true
+        case .seeking: lastSettledPlaybackWasPlaying
+        default: false
         }
     }
 
     private var canTogglePlayback: Bool {
         switch player.state {
-        case .idle, .loading, .failed:
-            false
-        default:
-            true
+        case .idle, .loading, .failed: false
+        default: true
         }
-    }
-
-    private var playbackPositionDescription: String {
-        "\(ExampleDisplayFormat.duration(displayedPosition)) of \(ExampleDisplayFormat.duration(player.duration))"
-    }
-
-    private func scrubberEditingChanged(_ editing: Bool) {
-        if editing {
-            isScrubbing = true
-            scrubPosition = normalizedPosition(player.position)
-        } else {
-            let target = scrubPosition
-            isScrubbing = false
-            player.seek(to: target)
-        }
-    }
-
-    private func normalizedPosition(_ position: Duration) -> Duration {
-        clamp(position, to: .zero ... scrubberUpperBound)
     }
 }

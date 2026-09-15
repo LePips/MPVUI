@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:04,000
+Welcome to the subtitle demo.
+
+2
+00:00:04,000 --> 00:00:08,000
+Two languages can appear at the same time.
+
+3
+00:00:08,000 --> 00:00:12,000
+Choose each language in the Tracks menu.

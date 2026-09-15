@@ -36,8 +36,10 @@ enum NativeLibrary {
         // Resolve dependencies within this image, with only libmpv's public API
         // exported. Keep normal archive selection: -all_load would also pull
         // mutually exclusive implementations from some bundled dependencies.
+        // Public entry points are rooted with -u below; strip unreachable
+        // internal code while retaining local symbols for crash diagnostics.
         try runner.run("/usr/bin/clang", linkArguments(slice: slice, arch: arch, runner: runner) + [
-            "-dynamiclib", "-Wl,-dead_strip_dylibs",
+            "-dynamiclib", "-Wl,-dead_strip", "-Wl,-dead_strip_dylibs",
             "-Xlinker", "-oso_prefix", "-Xlinker", archive.deletingLastPathComponent().path + "/",
             "-Xlinker", "-install_name", "-Xlinker", installName,
             "-Xlinker", "-exported_symbols_list", "-Xlinker", interface.path,
@@ -51,7 +53,7 @@ enum NativeLibrary {
         let sdk = try runner.sdk(slice.sdk)
         let system = [
             "AVFoundation", "AudioToolbox", "CoreAudio", "CoreFoundation", "CoreGraphics",
-            "CoreMedia", "CoreText", "CoreVideo", "Foundation", "IOSurface", "Metal",
+            "CoreMedia", "CoreImage", "CoreText", "CoreVideo", "Foundation", "IOSurface", "Metal",
             "QuartzCore", "Security", "VideoToolbox"
         ] + (slice.id == "macos" ? ["AppKit", "OpenGL", "IOKit"] : ["UIKit"]) +
             (["ios", "isimulator", "tvos", "tvsimulator"].contains(slice.id) ? ["OpenGLES"] : []) +

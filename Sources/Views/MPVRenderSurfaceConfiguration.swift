@@ -7,13 +7,21 @@ struct MPVRenderSurfaceConfiguration: Sendable {
     let drawableSize: CGSize
     let scale: CGFloat
     let outputHeadroom: Double
+    let displayCapabilities: MPVDisplayCapabilities
+    let configuredDynamicRange: MPVPresentationStatus.DynamicRange
+    let policyFallbackReason: MPVPresentationStatus.FallbackReason?
+    let colorConfiguration: MPVRenderColorConfiguration?
 
     init(
         usesExtendedDynamicRange: Bool,
         displaySupportsExtendedDynamicRange: Bool,
         drawableSize: CGSize,
         scale: CGFloat,
-        outputHeadroom: Double
+        outputHeadroom: Double,
+        displayCapabilities: MPVDisplayCapabilities? = nil,
+        configuredDynamicRange: MPVPresentationStatus.DynamicRange? = nil,
+        policyFallbackReason: MPVPresentationStatus.FallbackReason? = nil,
+        colorConfiguration: MPVRenderColorConfiguration? = nil
     ) {
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
         self.displaySupportsExtendedDynamicRange =
@@ -21,6 +29,15 @@ struct MPVRenderSurfaceConfiguration: Sendable {
         self.drawableSize = drawableSize
         self.scale = scale
         self.outputHeadroom = Self.quantizedOutputHeadroom(outputHeadroom)
+        self.displayCapabilities = displayCapabilities ?? MPVDisplayCapabilities(
+            hdrSupport: displaySupportsExtendedDynamicRange ? .supported : .unsupported,
+            currentEDRHeadroom: outputHeadroom,
+            potentialEDRHeadroom: outputHeadroom
+        )
+        self.configuredDynamicRange = configuredDynamicRange
+            ?? (usesExtendedDynamicRange ? .hdr : .sdr)
+        self.policyFallbackReason = policyFallbackReason
+        self.colorConfiguration = colorConfiguration
     }
 
     static func drawableSize(for boundsSize: CGSize, scale: CGFloat) -> CGSize {
@@ -43,6 +60,10 @@ struct MPVRenderSurfaceConfiguration: Sendable {
             || displaySupportsExtendedDynamicRange
             != other.displaySupportsExtendedDynamicRange
             || outputHeadroom != other.outputHeadroom
+            || displayCapabilities != other.displayCapabilities
+            || configuredDynamicRange != other.configuredDynamicRange
+            || policyFallbackReason != other.policyFallbackReason
+            || colorConfiguration != other.colorConfiguration
     }
 
     func requiresGeometryCommit(

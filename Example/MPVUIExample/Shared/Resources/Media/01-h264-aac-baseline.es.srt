@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:04,000
+Bienvenidos a la demostración de subtítulos.
+
+2
+00:00:04,000 --> 00:00:08,000
+Dos idiomas pueden aparecer al mismo tiempo.
+
+3
+00:00:08,000 --> 00:00:12,000
+Elige cada idioma en el menú de pistas.

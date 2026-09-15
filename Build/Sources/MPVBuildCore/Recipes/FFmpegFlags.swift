@@ -34,6 +34,8 @@ enum FFmpegFlags {
         "--enable-muxer=flac", "--enable-muxer=dash", "--enable-muxer=hevc",
         "--enable-muxer=m4v", "--enable-muxer=matroska", "--enable-muxer=mov", "--enable-muxer=mp4",
         "--enable-muxer=mpegts", "--enable-muxer=webm*",
+        // mpv's opt-in AC3/EAC3 decoder wraps packets in IEC 61937 before AO.
+        "--enable-muxer=spdif",
         // ./configure --list-encoders
         "--disable-encoders",
         "--enable-encoder=aac", "--enable-encoder=alac", "--enable-encoder=flac", "--enable-encoder=pcm*",
@@ -42,7 +44,7 @@ enum FFmpegFlags {
         // ./configure --list-protocols
         "--enable-protocols",
         // ./configure --list-demuxers
-        // 用所有的demuxers的话，那avformat就会达到8MB了，指定的话，那就只要4MB。
+        // Enabling all demuxers makes avformat 8 MB; selecting specific demuxers reduces it to 4 MB.
         "--disable-demuxers",
         "--enable-demuxer=aac", "--enable-demuxer=ac3", "--enable-demuxer=aiff", "--enable-demuxer=amr",
         "--enable-demuxer=ape", "--enable-demuxer=asf", "--enable-demuxer=ass", "--enable-demuxer=av1",
@@ -56,19 +58,20 @@ enum FFmpegFlags {
         "--enable-demuxer=ogg", "--enable-demuxer=rm", "--enable-demuxer=rtsp", "--enable-demuxer=rtp",
         "--enable-demuxer=srt", "--enable-demuxer=webvtt",
         "--enable-demuxer=vc1", "--enable-demuxer=wav", "--enable-demuxer=webm_dash_manifest",
+        "--enable-demuxer=image_webp_pipe", "--enable-demuxer=webp_anim",
         // ./configure --list-bsfs
         "--enable-bsfs",
         // ./configure --list-decoders
-        // 用所有的decoders的话，那avcodec就会达到40MB了，指定的话，那就只要20MB。
+        // Enabling all decoders makes avcodec 40 MB; selecting specific decoders reduces it to 20 MB.
         "--disable-decoders",
-        // 视频
+        // Video
         "--enable-decoder=av1", "--enable-decoder=dca", "--enable-decoder=dxv",
         "--enable-decoder=ffv1", "--enable-decoder=ffvhuff", "--enable-decoder=flv",
         "--enable-decoder=h263", "--enable-decoder=h263i", "--enable-decoder=h263p", "--enable-decoder=h264",
         "--enable-decoder=hap", "--enable-decoder=hevc", "--enable-decoder=huffyuv",
         "--enable-decoder=indeo5",
         "--enable-decoder=mjpeg", "--enable-decoder=mjpegb", "--enable-decoder=mpeg*", "--enable-decoder=mts2",
-        "--enable-decoder=prores",
+        "--enable-decoder=prores", "--enable-decoder=prores_raw",
         "--enable-decoder=mpeg4", "--enable-decoder=mpegvideo",
         "--enable-decoder=rv10", "--enable-decoder=rv20", "--enable-decoder=rv30", "--enable-decoder=rv40",
         "--enable-decoder=snow", "--enable-decoder=svq3",
@@ -76,14 +79,15 @@ enum FFmpegFlags {
         "--enable-decoder=wmv1", "--enable-decoder=wmv2", "--enable-decoder=wmv3",
         "--enable-decoder=vc1", "--enable-decoder=vp6", "--enable-decoder=vp6a", "--enable-decoder=vp6f",
         "--enable-decoder=vp7", "--enable-decoder=vp8", "--enable-decoder=vp9",
-        // 音频
+        "--enable-decoder=webp", "--enable-decoder=webp_anim",
+        // Audio
         "--enable-decoder=aac*", "--enable-decoder=ac3*", "--enable-decoder=adpcm*", "--enable-decoder=alac*",
         "--enable-decoder=amr*", "--enable-decoder=ape", "--enable-decoder=cook",
         "--enable-decoder=dca", "--enable-decoder=dolby_e", "--enable-decoder=eac3*", "--enable-decoder=flac",
         "--enable-decoder=mp1*", "--enable-decoder=mp2*", "--enable-decoder=mp3*", "--enable-decoder=opus",
-        "--enable-decoder=pcm*", "--enable-decoder=sonic",
+        "--enable-decoder=pcm*",
         "--enable-decoder=truehd", "--enable-decoder=tta", "--enable-decoder=vorbis", "--enable-decoder=wma*",
-        // 字幕
+        // Subtitles
         "--enable-decoder=ass", "--enable-decoder=ccaption", "--enable-decoder=dvbsub", "--enable-decoder=dvdsub",
         "--enable-decoder=mpl2", "--enable-decoder=movtext",
         "--enable-decoder=pgssub", "--enable-decoder=srt", "--enable-decoder=ssa", "--enable-decoder=subrip",
@@ -103,12 +107,12 @@ enum FFmpegFlags {
         "--enable-filter=rotate",
         "--enable-filter=scale", "--enable-filter=setpts", "--enable-filter=superequalizer",
         "--enable-filter=transpose", "--enable-filter=trim",
-        "--enable-filter=vflip", "--enable-filter=volume",
+        "--enable-filter=v360", "--enable-filter=vflip", "--enable-filter=volume",
         "--enable-filter=w3fdif",
         "--enable-filter=yadif",
         "--enable-filter=avgblur_vulkan", "--enable-filter=blend_vulkan", "--enable-filter=bwdif_vulkan",
         "--enable-filter=chromaber_vulkan", "--enable-filter=flip_vulkan", "--enable-filter=gblur_vulkan",
         "--enable-filter=hflip_vulkan", "--enable-filter=nlmeans_vulkan", "--enable-filter=overlay_vulkan",
-        "--enable-filter=vflip_vulkan", "--enable-filter=xfade_vulkan",
+        "--enable-filter=v360_vulkan", "--enable-filter=vflip_vulkan", "--enable-filter=xfade_vulkan",
     ]
 }

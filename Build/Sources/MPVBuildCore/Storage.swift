@@ -162,7 +162,6 @@ final class FileLock {
 }
 
 struct StageRecord: Codable {
-    let schemaVersion: Int
     let stage: String
     let input: String
     let dependencies: [String: String]
@@ -175,7 +174,7 @@ struct StageRecord: Codable {
         key: String,
         dependencies expectedDependencies: [String: String]
     ) throws -> Bool {
-        guard schemaVersion == 1, complete, stage == expectedStage, input == key, dependencies == expectedDependencies,
+        guard complete, stage == expectedStage, input == key, dependencies == expectedDependencies,
               !products.isEmpty else { return false }
         return try products == tree(directory, excluding: ["record.json"])
     }
@@ -257,7 +256,6 @@ struct ManagedStore: Sendable {
         try require(!products.isEmpty, "Node \(stage)/\(name) produced nothing")
         try write(
             StageRecord(
-                schemaVersion: 1,
                 stage: stage,
                 input: key,
                 dependencies: dependencies,

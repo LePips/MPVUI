@@ -12,14 +12,7 @@ public struct MPVChapter: Identifiable, Equatable, Hashable, Sendable {
     /// The chapter's final timeline position, when known.
     public let endTime: Duration?
 
-    /// Creates a chapter description.
-    ///
-    /// - Parameters:
-    ///   - id: The chapter's zero-based index.
-    ///   - title: An optional display title.
-    ///   - startTime: The first timeline position.
-    ///   - endTime: The final timeline position, when known.
-    public init(
+    init(
         id: Int,
         title: String? = nil,
         startTime: Duration,
@@ -34,6 +27,6 @@ public struct MPVChapter: Identifiable, Equatable, Hashable, Sendable {
     /// The nonnegative chapter duration, when an end time is available.
     public var duration: Duration? {
         guard let endTime else { return nil }
-        return max(.zero, endTime - startTime)
+        return (endTime - startTime).clampPositiveOrZero
     }
 }

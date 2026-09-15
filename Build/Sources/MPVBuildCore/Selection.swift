@@ -27,7 +27,7 @@ struct PackageSelection {
         // A distinct scratch path makes SwiftPM evaluate and resolve the new selection without deleting native caches.
         let stage = graph.runner.logs.appendingPathComponent("selection-package")
         try mkdir(stage)
-        for name in ["Sources", "Tests", "Vendor"] {
+        for name in ["Sources", "Tests"] {
             try fm.createSymbolicLink(at: stage.appendingPathComponent(name), withDestinationURL: graph.root.appendingPathComponent(name))
         }
         let stageLinks = try paths.map { try Generator.localLinks($0, package: stage, identity: fingerprint(index)) }

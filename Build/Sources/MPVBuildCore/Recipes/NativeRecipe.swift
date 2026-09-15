@@ -169,17 +169,22 @@ enum FFmpegRecipe {
             "TMPDIR": "../tmp",
             "PKG_CONFIG_LIBDIR": pkgPaths.joined(separator: ":")
         ]) { _, new in new }
-        var args = FFmpegFlags.configureFlags + [
+        var args = try FFmpegFlags.configureFlags + [
             "--prefix=/usr/local", "--arch=\(c.arch == "x86_64" ? "x86_64" : "aarch64")", "--target-os=darwin",
             "--cc=/usr/bin/clang", "--cxx=/usr/bin/clang++", "--disable-debug", "--enable-stripping", "--enable-gpl",
             "--disable-programs", "--disable-autodetect", "--disable-sdl2", "--disable-large-tests", "--ignore-tests=TESTS",
             "--enable-audiotoolbox", "--enable-videotoolbox",
             "--disable-securetransport",
+            // FFmpeg 9 compiles Vulkan shaders ahead of time with a host tool.
+            "--glslc=\(c.runner.executable("glslc").path)",
         ]
-        args += c.slice.variant == "maccatalyst" || c.arch == "x86_64" ? ["--disable-neon", "--disable-asm"] : [
-            "--enable-neon",
-            "--enable-asm"
-        ]
+        // NASM 3.02 cannot emit a Catalyst LC_BUILD_VERSION. Keep that one
+        // target's previous C fallback; ARM Catalyst uses Clang's assembler.
+        let assemblyEnabled = !(c.arch == "x86_64" && c.slice.variant == "maccatalyst")
+        args += [assemblyEnabled ? "--enable-asm" : "--disable-asm", c.arch == "x86_64" ? "--disable-neon" : "--enable-neon"]
+        if c.arch == "x86_64", assemblyEnabled {
+            try args += ["--x86asmexe=\(c.runner.executable("nasm").path)"]
+        }
         for id in [
             "gmp",
             "gnutls",
@@ -188,10 +193,10 @@ enum FFmpegRecipe {
             "libfribidi",
             "libass",
             "vulkan",
-            "libshaderc",
             "lcms2",
             "libplacebo",
             "libdav1d",
+            "libdovi",
             "libuavs3d",
             "libsmbclient"
         ] {
@@ -207,9 +212,48 @@ enum FFmpegRecipe {
             "--enable-filter=libplacebo"
         ]
         try c.runner.run(build.appendingPathComponent("src/configure").path, args, cwd: build, env: environment)
+        if c.arch == "x86_64", assemblyEnabled {
+            let platforms = ["macos": "macos", "isimulator": "iossimulator", "tvsimulator": "tvossimulator"]
+            guard let platform = platforms[c.slice.id] else { throw BuildError("No NASM platform for \(c.slice.id)") }
+            // FFmpeg preincludes config.asm for every NASM object. Emit the same
+            // platform/minimum OS as Clang, rather than leaving the header untagged.
+            let assemblyConfig = build.appendingPathComponent("config.asm")
+            let contents = try String(contentsOf: assemblyConfig, encoding: .utf8) +
+                "\n%pragma macho build_version \(platform),\(c.slice.minimumOS.replacingOccurrences(of: ".", with: ","))\n"
+            try put(contents, assemblyConfig)
+            try put(contents, c.prefix.appendingPathComponent("config.asm"))
+        }
+        let components = try String(contentsOf: build.appendingPathComponent("config_components.h"), encoding: .utf8)
+        try require(
+            components.contains("#define CONFIG_SPDIF_MUXER 1"),
+            "FFmpeg must provide the SPDIF muxer for mpv compressed-audio output"
+        )
+        for filter in ["avgblur", "blend", "bwdif", "chromaber", "flip", "gblur", "hflip", "nlmeans", "overlay", "v360", "vflip", "xfade"] {
+            try require(
+                components.contains("#define CONFIG_\(filter.uppercased())_VULKAN_FILTER 1"),
+                "FFmpeg lost \(filter)_vulkan; verify the locked host GLSL compiler"
+            )
+        }
+        for component in [
+            "WEBP_DECODER", "WEBP_ANIM_DECODER", "IMAGE_WEBP_PIPE_DEMUXER", "WEBP_ANIM_DEMUXER",
+            "PRORES_RAW_DECODER", "PRORES_RAW_VIDEOTOOLBOX_HWACCEL", "AAC_DECODER",
+            "DOVI_SPLIT_BSF", "V360_FILTER"
+        ] {
+            try require(components.contains("#define CONFIG_\(component) 1"), "FFmpeg lost required component \(component)")
+        }
+        // Retain actual configure results; requested flags alone do not prove availability.
+        try put(components, c.prefix.appendingPathComponent("config_components.h"))
         // configure embeds its invocation. Normalize only the reported string; compilation still uses actual paths.
         let config = build.appendingPathComponent("config.h")
         var text = try String(contentsOf: config, encoding: .utf8)
+        if assemblyEnabled {
+            let assemblyFeature = c.arch == "x86_64" ? "X86ASM" : "NEON"
+            try require(text.contains("#define HAVE_\(assemblyFeature) 1"), "FFmpeg lost \(assemblyFeature) optimizations")
+            try require(
+                text.contains("#define HAVE_\(c.arch == "x86_64" ? "SSE2_EXTERNAL" : "NEON_EXTERNAL") 1"),
+                "FFmpeg did not enable external assembly routines"
+            )
+        }
         let lines = text.components(separatedBy: "\n").map { line in
             line.hasPrefix("#define FFMPEG_CONFIGURATION ") ? line.replacingOccurrences(of: c.prefix.path, with: "/mpvbuild/install")
                 .replacingOccurrences(
@@ -219,6 +263,7 @@ enum FFmpegRecipe {
         }
         text = lines.joined(separator: "\n")
         try put(text, config)
+        try put(text, c.prefix.appendingPathComponent("config.h"))
         try c.runner.run("/usr/bin/make", ["-j\(c.jobs)"], cwd: build, env: environment)
         let install = c.work.appendingPathComponent("install")
         try c.runner.run("/usr/bin/make", ["-j\(c.jobs)", "install", "DESTDIR=" + install.path], cwd: build, env: environment)

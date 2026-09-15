@@ -6,7 +6,8 @@
       "_audio_out_avfoundation",
       "_mp_property_external_surface_size",
       "_ra_ctx_vulkan_moltenvk",
-      "_sub_get_text_snapshot"
+      "_sub_get_text_snapshot",
+      "_video_out_avfoundation"
     ],
     "mpvMembers": [
       "audio_out_ao_avfoundation.m.o",
@@ -14,7 +15,8 @@
       "player_command.c.o",
       "sub_dec_sub.c.o",
       "video_out_vulkan_context.c.o",
-      "video_out_vulkan_context_moltenvk.m.o"
+      "video_out_vulkan_context_moltenvk.m.o",
+      "video_out_vo_avfoundation.m.o"
     ],
     "mpvReferences": [
       "_pl_gpu_finish"
@@ -24,7 +26,16 @@
       "moltenvk",
       "sub-text-intercept",
       "sub-text-snapshot",
-      "MoltenVK resize to %dx%d failed; restored %dx%d"
+      "MoltenVK resize to %dx%d failed; restored %dx%d",
+      "pip-composite-osd",
+      "queue-lead-ms",
+      "AVFoundation AVSampleBufferDisplayLayer",
+      "compressed-lead",
+      "accept-compressed",
+      "native-dovi-profile7",
+      "Hardware decoding recovered after %d errors.",
+      "sub-text-cues",
+      "webp_anim"
     ]
   },
   "dependencies": [
@@ -646,12 +657,11 @@
     "nativePrefix": "native-",
     "repository": "LePips/MPVUI"
   },
-  "recipeProvenance": {
+  "recipeSource": {
     "commit": "288527dffbc6d3e63cce147fc7b520c64a791603",
     "ref": "1.0.0",
     "url": "https://github.com/mpvkit/MPVKit.git"
   },
-  "schemaVersion": 1,
   "slices": [
     {
       "architectures": [
@@ -754,44 +764,74 @@
       "id": "mpv",
       "patches": [
         {
-          "id": "0001-player-add-moltenvk-context",
-          "path": "Build/Patches/mpv/0001-player-add-moltenvk-context.patch",
-          "sha256": "6f3625c0179f9b5665ab8b8b0d3c01a01e6ea0e67ad3e0e32b24a924c6804c07"
+          "id": "0001-moltenvk-embedding",
+          "path": "Build/Patches/mpv/0001-moltenvk-embedding.patch",
+          "sha256": "a945d07e87569a1072326ac4c293749ae1a7ab31ef66807d5065354d37b9f6d2"
         },
         {
-          "id": "0002-enable-avfoundation-ao-tvos",
-          "path": "Build/Patches/mpv/0002-enable-avfoundation-ao-tvos.patch",
-          "sha256": "693e8ace8057ac46c42195949777159c5aa37f9b7ce81f488758481973da9312"
+          "id": "0002-apple-audio-portability",
+          "path": "Build/Patches/mpv/0002-apple-audio-portability.patch",
+          "sha256": "97809dfd274901c00c30c1c69ccb6151113f90dddd9c517155e6c98574949f8f"
         },
         {
-          "id": "0003-mpvui-external-surface-size",
-          "path": "Build/Patches/mpv/0003-mpvui-external-surface-size.patch",
-          "sha256": "e0a4fd31ffe13483c7a5094b7dcdf3f4ecb13c89ff5af286b599f194cb530816"
+          "id": "0003-text-subtitle-interception",
+          "path": "Build/Patches/mpv/0003-text-subtitle-interception.patch",
+          "sha256": "81407324ec8c4c66601f69bcd7ffcf3e9eb120decccc4c4da12a75b39f4dba71"
         },
         {
-          "id": "0004-moltenvk-preserve-8bit-sdr",
-          "path": "Build/Patches/mpv/0004-moltenvk-preserve-8bit-sdr.patch",
-          "sha256": "d3c22c4f4c55f471df81ab9615d61655862caaf6aa70dabe276b23548075cf53"
+          "id": "0004-swift-object-build",
+          "path": "Build/Patches/mpv/0004-swift-object-build.patch",
+          "sha256": "f37a88dbf5434dd39f7c4875ae070387fd82a43623b3dd044adb8f13c77dc997"
         },
         {
-          "id": "0005-mpvui-text-subtitle-interception",
-          "path": "Build/Patches/mpv/0005-mpvui-text-subtitle-interception.patch",
-          "sha256": "2012216f2d31a39bb02cb70e15eac2d5fdc92909635ff9c62efb85d845b855f8"
+          "id": "0005-avfoundation-native-video",
+          "path": "Build/Patches/mpv/0005-avfoundation-native-video.patch",
+          "sha256": "39b15236f9a19e3750df62eebc1b8399d71c71f9924dbedb675d5cfd53cfedbe"
         },
         {
-          "id": "0006-moltenvk-coordinated-surface-resize",
-          "path": "Build/Patches/mpv/0006-moltenvk-coordinated-surface-resize.patch",
-          "sha256": "bb8b5356207e89738123e7903242e3ba986eed5399b88731fd974ad2a1fd1c73"
+          "id": "0006-avfoundation-compressed-audio",
+          "path": "Build/Patches/mpv/0006-avfoundation-compressed-audio.patch",
+          "sha256": "798735b8255cd07039894915710f667dbdc5fedf0e76f70c491e15023011cc85"
         },
         {
-          "id": "0007-swift-frontend-object-output",
-          "path": "Build/Patches/mpv/0007-swift-frontend-object-output.patch",
-          "sha256": "86f13e7840eb9fa3799805321596f6cc1c0c76188009ec6f040a1cb254fd6c22"
+          "id": "0007-native-dolby-vision-compatibility",
+          "path": "Build/Patches/mpv/0007-native-dolby-vision-compatibility.patch",
+          "sha256": "6f3b39d09243d1f52f1294c3008c2bd19648151c1607c8bd33a669a82d343c07"
         },
         {
-          "id": "0008-swift-explicit-include-paths",
-          "path": "Build/Patches/mpv/0008-swift-explicit-include-paths.patch",
-          "sha256": "85935ceec0aedc65a7b2ee168cd899b40660bcbfddd6e2336871bc9b826b535c"
+          "id": "0008-bounded-hardware-decoder-recovery",
+          "path": "Build/Patches/mpv/0008-bounded-hardware-decoder-recovery.patch",
+          "sha256": "ef3c1b6f24aa8b2e1a45eb9c063ce0d06e639834afa51f7103c613301f36ecbb"
+        },
+        {
+          "id": "0009-native-hdr-color-metadata",
+          "path": "Build/Patches/mpv/0009-native-hdr-color-metadata.patch",
+          "sha256": "9a2c93bd3aa2ab1e567442ffddef5e693bc78b1bec575d0a6cfcf0f3c980b13b"
+        },
+        {
+          "id": "0010-apple-rendering-quality",
+          "path": "Build/Patches/mpv/0010-apple-rendering-quality.patch",
+          "sha256": "0fa137ec2b00904d5fa852dccd99df5e0150d79b81d24d590a9a28072043b34a"
+        },
+        {
+          "id": "0011-native-subtitle-image-cache",
+          "path": "Build/Patches/mpv/0011-native-subtitle-image-cache.patch",
+          "sha256": "ea4c6c0114668b6b866f897df496290b258478fb335716a60c49f6448d6c11ef"
+        },
+        {
+          "id": "0012-text-subtitle-queries",
+          "path": "Build/Patches/mpv/0012-text-subtitle-queries.patch",
+          "sha256": "b3a1cc80af98daa3ac55c89b5cbfbe4210b96199cca3b2e9d9fc8b298cad465e"
+        },
+        {
+          "id": "0013-subtitle-roles",
+          "path": "Build/Patches/mpv/0013-subtitle-roles.patch",
+          "sha256": "4d69da025910a97d12bae4fe93cf2262171cb9062d01edc2d483613ad29a704a"
+        },
+        {
+          "id": "0014-webp-animation-duration",
+          "path": "Build/Patches/mpv/0014-webp-animation-duration.patch",
+          "sha256": "e96d8d7afcfe15c49df2add4d3dc0a1684380d2420368b1c139b98e0ac8019d2"
         }
       ],
       "ref": "v0.41.0",
@@ -799,18 +839,38 @@
       "version": "0.41.0"
     },
     {
-      "commit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
       "id": "ffmpeg",
       "patches": [
         {
-          "id": "0001-metal-pixelbuffer-compatibility",
-          "path": "Build/Patches/ffmpeg/0001-metal-pixelbuffer-compatibility.patch",
-          "sha256": "c6a15278b68abbd5f83aee9bdd9877ba93e0291e9f555bb49d93ef13a6066744"
+          "id": "0001-apple-pixelbuffer-compatibility",
+          "path": "Build/Patches/ffmpeg/0001-apple-pixelbuffer-compatibility.patch",
+          "sha256": "bbdbc9f0973163468238ce87046b403939dc0eedd1194a547a1ce8b26f781512"
+        },
+        {
+          "id": "0002-native-dolby-vision",
+          "path": "Build/Patches/ffmpeg/0002-native-dolby-vision.patch",
+          "sha256": "fd30e2988265c0a189dc36b4855f227f2fecab95f4e7de4d04b99f9c307e7b41"
+        },
+        {
+          "id": "0003-native-dolby-vision-compatibility",
+          "path": "Build/Patches/ffmpeg/0003-native-dolby-vision-compatibility.patch",
+          "sha256": "ec615366ac3e7baabd7ce639afaf0083d3fc2c393c48bdc778be46ebde58a4fc"
+        },
+        {
+          "id": "0004-hevc-diagnostic-levels",
+          "path": "Build/Patches/ffmpeg/0004-hevc-diagnostic-levels.patch",
+          "sha256": "7ce3d2ad6f5c3b903f02254d320ac8036f57ca30b84a02fc05ac9ee59391efb1"
+        },
+        {
+          "id": "0005-apple-dynamic-hdr-diagnostics",
+          "path": "Build/Patches/ffmpeg/0005-apple-dynamic-hdr-diagnostics.patch",
+          "sha256": "62d2e6d274347e80a9fc7c711c3ee335955229aac35d810f3a1335f13d38915a"
         }
       ],
-      "ref": "n8.1.2",
+      "ref": "n9.0.1",
       "url": "https://github.com/FFmpeg/FFmpeg",
-      "version": "8.1.2"
+      "version": "9.0.1"
     }
   ],
   "toolchain": {
@@ -866,7 +926,9 @@
     },
     "tools": {
       "gitMinimum": "2.39.0",
+      "glslc": "shaderc v2026.4 unknown hash, 2026-09-11\nspirv-tools v2026.4 v2022.4-1347-gef96ed76\nglslang 11.1.0-1566-ge1b562a8\n\nTarget: SPIR-V 1.0",
       "make": "GNU Make 3.81",
+      "nasm": "NASM version 3.02",
       "meson": "1.12.0",
       "ninja": "1.13.2",
       "pkg-config": "3.0.6",

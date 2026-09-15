@@ -5,9 +5,13 @@ import SwiftUI
 @MainActor
 struct MPVPlayerSurface: PlatformViewRepresentable {
     let player: MPVPlayer
+    var overlay: MPVVideoOverlay?
+    @Environment(\.self)
+    private var environment
 
     func makePlatformView() -> MPVPlatformVideoPlayer {
         let platformView = MPVPlatformVideoPlayer(player: player)
+        updateOverlay(platformView)
         MPVPlayerSurfaceRegistry.shared.register(platformView, for: player)
         platformView.addSubview(
             MPVPlayerSurfaceLifecycleObserver(
@@ -19,7 +23,16 @@ struct MPVPlayerSurface: PlatformViewRepresentable {
     }
 
     func updatePlatformView(_ platformView: MPVPlatformVideoPlayer) {
+        updateOverlay(platformView)
         platformView.updateRenderingConfiguration()
+    }
+
+    private func updateOverlay(_ platformView: MPVPlatformVideoPlayer) {
+        platformView.setVideoOverlay(overlay.map {
+            MPVVideoOverlay(
+                content: AnyView($0.content.environment(\.self, environment))
+            )
+        })
     }
 
     static func dismantlePlatformView(_ platformView: MPVPlatformVideoPlayer) {
@@ -27,6 +40,7 @@ struct MPVPlayerSurface: PlatformViewRepresentable {
         let shouldRestorePreviousSurface = platformView.isActiveRenderingSurface
         MPVPlayerSurfaceRegistry.shared.unregister(platformView, for: player)
         platformView.detach()
+        platformView.swiftUISourceWasDismantled()
 
         guard shouldRestorePreviousSurface else { return }
         DispatchQueue.main.async {

@@ -47,8 +47,7 @@ struct ArtifactPublication {
     }
 }
 
-struct Provenance: Codable {
-    let schemaVersion: Int
+struct ReleaseRecord: Codable {
     let nativeInputFingerprint: String
     let sourceCommit: String
     let sourceRepository: String?
@@ -148,8 +147,7 @@ struct ReleaseManager {
         try require(tests.artifactDigests == artifacts, "Tests refer to different artifact bytes")
         let sourceCommit = try graph.runner.run("git", ["rev-parse", "HEAD"], cwd: graph.root)
         let dirty = try !graph.runner.run("git", ["status", "--porcelain"], cwd: graph.root).isEmpty
-        let provenance = try Provenance(
-            schemaVersion: 1,
+        let releaseRecord = try ReleaseRecord(
             nativeInputFingerprint: index.nativeInputFingerprint,
             sourceCommit: sourceCommit,
             sourceRepository: sourceRepository(),
@@ -183,8 +181,8 @@ struct ReleaseManager {
                 )
             }
             try put(notices, output.appendingPathComponent("SOURCE_NOTICES.txt"))
-            try write(provenance, output.appendingPathComponent("provenance.json"))
-            return ["exact-tested-bytes", "complete-release-inventory", "provenance"]
+            try write(releaseRecord, output.appendingPathComponent("release-record.json"))
+            return ["exact-tested-bytes", "complete-release-inventory", "release-record"]
         }
     }
 
@@ -247,25 +245,25 @@ struct ReleaseManager {
             Data(contentsOf: bundle.appendingPathComponent("SOURCE_NOTICES.txt")) == sourceNotices(),
             "Bundled source notices differ from locked sources"
         )
-        let provenance = try read(Provenance.self, bundle.appendingPathComponent("provenance.json"))
+        let releaseRecord = try read(ReleaseRecord.self, bundle.appendingPathComponent("release-record.json"))
         let sourceRepository = try sourceRepository()
         try require(
-            (provenance.sourceRepository ?? repository) == sourceRepository,
+            (releaseRecord.sourceRepository ?? repository) == sourceRepository,
             "Candidate source repository differs from publication checkout"
         )
         try require(
-            provenance.schemaVersion == 1 && provenance.nativeInputFingerprint == index.nativeInputFingerprint && provenance
+            releaseRecord.nativeInputFingerprint == index.nativeInputFingerprint && releaseRecord
                 .artifacts == Dictionary(uniqueKeysWithValues: index.products.map { (
                     $0.archive,
                     $0.sha256
                 ) }),
-            "Candidate provenance differs from the indexed bytes"
+            "Candidate release record differs from the indexed bytes"
         )
         try require(
-            provenance.sourceCommit == graph.runner.run("git", ["rev-parse", "HEAD"], cwd: graph.root),
+            releaseRecord.sourceCommit == graph.runner.run("git", ["rev-parse", "HEAD"], cwd: graph.root),
             "Publication checkout differs from candidate source commit"
         )
-        try require(!provenance.sourceWasDirty, "Publication requires a candidate made from committed source")
+        try require(!releaseRecord.sourceWasDirty, "Publication requires a candidate made from committed source")
         try require(
             graph.runner.run("git", ["status", "--porcelain"], cwd: graph.root).isEmpty,
             "Publication requires a clean source checkout"
@@ -281,12 +279,12 @@ struct ReleaseManager {
                 try put(
                     "MPVBuild build inputs: " + index
                         .nativeInputFingerprint +
-                        "\n\nImmutable build artifacts and verification provenance. Package adoption is a separate step.\n",
+                        "\n\nImmutable build artifacts and verification records. Package adoption is a separate step.\n",
                     notes
                 )
                 // A separate artifact repository does not contain the package repository's source commit.
-                // Its artifact tag identifies stored assets; provenance retains the actual build repository/commit.
-                let target = repository == sourceRepository ? provenance.sourceCommit : try gh([
+                // Its artifact tag identifies stored assets; the release record retains the actual build repository/commit.
+                let target = repository == sourceRepository ? releaseRecord.sourceCommit : try gh([
                     "api",
                     "repos/\(repository)",
                     "--jq",
@@ -356,7 +354,7 @@ struct ReleaseManager {
                 product: ProductDefinition.all.first { $0.target == artifact.target }!,
                 slices: graph.native.slices
             )
-            try verifyEmbeddedProvenance(extracted, index: index)
+            try verifyEmbeddedBuildRecord(extracted, index: index)
         }
         // Also check unauthenticated consumer URLs, rather than relying on a maintainer's GitHub session.
         // Private GitHub release URLs fail here until a supported authenticated distribution is configured.
@@ -380,17 +378,17 @@ struct ReleaseManager {
         print("Adopted verified artifact release \(id)\(authenticated ? "; authenticated bootstrap, public URL validation pending" : "")")
     }
 
-    func verifyEmbeddedProvenance(_ extracted: URL, index: ArtifactIndex) throws {
-        let provenance = try read(NativeBuildProvenance.self, contained(extracted, index.provenancePath))
+    func verifyEmbeddedBuildRecord(_ extracted: URL, index: ArtifactIndex) throws {
+        let buildRecord = try read(NativeBuildRecord.self, contained(extracted, index.buildRecordPath))
         try require(
-            provenance.schemaVersion == 1 && provenance.nativeInputFingerprint == index.nativeInputFingerprint,
-            "Embedded build provenance mismatch"
+            buildRecord.nativeInputFingerprint == index.nativeInputFingerprint,
+            "Embedded build record mismatch"
         )
-        try require(provenance.nativeLockDigest == fingerprint(graph.native), "Embedded input lock digest mismatch")
+        try require(buildRecord.nativeLockDigest == fingerprint(graph.native), "Embedded input lock digest mismatch")
         for slice in index.products[0].slices {
             for arch in slice.architectures {
                 let key = slice.id + "/" + arch
-                guard let components = provenance.combinedInputs[key] else { throw BuildError("Missing combined library input inventory") }
+                guard let components = buildRecord.combinedInputs[key] else { throw BuildError("Missing combined library input inventory") }
                 let names = ["mpv"] + FFmpegRecipe.libraries + graph.native.dependencies.filter { $0.slices.contains(slice.id) }
                     .flatMap { $0.runtime.map(\.target) }
                 try require(Set(components.keys) == Set(names), "Combined library omits library dependencies")

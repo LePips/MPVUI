@@ -1,0 +1,37 @@
+Subject: [PATCH] swift-object-build
+
+diff --git a/osdep/mac/meson.build b/osdep/mac/meson.build
+index 16605288419c54cb9d89680a6fafd6a2f315487e..29822d2d999ccd506de22d21899202a4f66fc16b 100644
+--- a/osdep/mac/meson.build
++++ b/osdep/mac/meson.build
+@@ -5,13 +5,12 @@ module = join_paths(build_root, 'osdep/mac/swift.swiftmodule')
+ swift_flags = ['-c', '-emit-library', '-static', '-sdk', macos_sdk_path,
+                '-emit-objc-header', '-parse-as-library']
+ 
+-# fallback to old swift frontend build
+-if swift_ver.version_compare('<5.8')
+-    message('Falling back to old swift frontend build')
+-    swift_prog = find_program(run_command(xcrun, '-find', 'swift', check: true).stdout().strip())
+-    swift_flags = ['-frontend', '-c', '-sdk', macos_sdk_path,
+-                   '-enable-objc-interop', '-emit-objc-header', '-parse-as-library']
+-endif
++# Meson inserts output into libmpv.a; require one Mach-O object. Swift 6.3
++# -emit-library -static nests an archive. Call frontend directly.
++message('Using Swift frontend object build')
++swift_prog = find_program(run_command(xcrun, '-find', 'swift', check: true).stdout().strip())
++swift_flags = ['-frontend', '-c', '-sdk', macos_sdk_path,
++               '-enable-objc-interop', '-emit-objc-header', '-parse-as-library']
+ 
+ if swift_ver.version_compare('>=6.0')
+     swift_flags += ['-swift-version', '5']
+@@ -38,9 +37,7 @@ swift_compile = [swift_prog, swift_flags, '-module-name', 'swift',
+                  '-emit-module-path', '@OUTPUT0@', '-import-objc-header', bridge,
+                  '-emit-objc-header-path', '@OUTPUT1@', '-o', '@OUTPUT2@',
+                  '@INPUT@', '-I.', '-I' + source_root, '-I' + source_root / 'include',
+-                 '-I' + libplacebo.get_variable('includedir',
+-                            default_value: source_root / 'subprojects' / 'libplacebo' / 'src' / 'include'),
+-                 '-I' + libavutil.get_variable('includedir')]
++                 ]
+ 
+ swift_targets = custom_target('swift_targets',
+     input: swift_sources,

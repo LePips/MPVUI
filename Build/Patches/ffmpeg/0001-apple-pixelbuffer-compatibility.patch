@@ -1,0 +1,20 @@
+Subject: [PATCH] apple-pixelbuffer-compatibility
+
+diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
+index 2cd22cba1abc318db0aa823aab1c8d381557280b..b37341f5159c414a2fa32bb86f5f698b5aafde54 100644
+--- a/libavcodec/videotoolbox.c
++++ b/libavcodec/videotoolbox.c
+@@ -817,10 +817,11 @@ static CFDictionaryRef videotoolbox_buffer_attributes_create(int width,
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferIOSurfacePropertiesKey, io_surface_properties);
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferWidthKey, w);
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferHeightKey, h);
++    CFDictionarySetValue(buffer_attributes, kCVPixelBufferIOSurfaceCoreAnimationCompatibilityKey, kCFBooleanTrue);
+ #if TARGET_OS_IPHONE
+-    CFDictionarySetValue(buffer_attributes, kCVPixelBufferOpenGLESCompatibilityKey, kCFBooleanTrue);
++    CFDictionarySetValue(buffer_attributes, kCVPixelBufferMetalCompatibilityKey, kCFBooleanTrue);
+ #else
+-    CFDictionarySetValue(buffer_attributes, kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey, kCFBooleanTrue);
++    CFDictionarySetValue(buffer_attributes, kCVPixelBufferMetalCompatibilityKey, kCFBooleanTrue);
+ #endif
+ 
+     CFRelease(io_surface_properties);

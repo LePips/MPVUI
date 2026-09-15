@@ -28,7 +28,17 @@ enum MPVTextSubtitleParser {
                         .automatic
                     }
 
-                return TextSubtitleRegion(text: text, placement: placement)
+                let trackID = fields["track-id"]?.integerValue.flatMap { value in
+                    Int(exactly: value).flatMap { id in
+                        id > 0 ? MPVMediaTrackIdentifier(type: .subtitle, mpvID: id) : nil
+                    }
+                }
+                return TextSubtitleRegion(
+                    text: text,
+                    placement: placement,
+                    trackID: trackID,
+                    role: fields["role"]?.stringValue.flatMap(MPVSubtitleRole.init(rawValue:))
+                )
             } ?? []
         return TextSubtitleSnapshot(regions: regions)
     }

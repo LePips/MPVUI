@@ -1,6 +1,7 @@
 import MPVUI
 import SwiftUI
 
+/// The example player screen with audio session lifecycle handling.
 @MainActor
 public struct ContentView: View {
     @Environment(\.scenePhase)
@@ -14,6 +15,7 @@ public struct ContentView: View {
     @State
     private var resumesPlaybackAfterAudioSessionActivation = false
 
+    /// The player interface and audio session error alert.
     public var body: some View {
         PlayerView(player: player)
             .task(id: scenePhase) {
@@ -49,8 +51,9 @@ public struct ContentView: View {
             }
     }
 
+    /// Creates the example screen with platform-specific player defaults.
     public init() {
-        let configuration = MPVPlayerConfiguration(
+        var configuration = MPVPlayerConfiguration(
             autoPlay: true,
             hardwareDecoding: .automatic,
             hdrPolicy: .automatic,
@@ -59,6 +62,27 @@ public struct ContentView: View {
                 "target-contrast": "inf",
             ]
         )
+        #if os(macOS)
+        // The macOS library includes LuaJIT. Its bundled scripts cannot run
+        // under this example's hardened runtime, and our UI supplies the controls.
+        // iOS/tvOS omit Lua and reject these options during initialization.
+        for option in [
+            "load-scripts", "osc", "ytdl", "load-stats-overlay", "load-console",
+            "load-auto-profiles", "load-select", "load-positioning", "load-commands",
+            "load-context-menu",
+        ] {
+            configuration.additionalOptions[option] = "no"
+        }
+        #endif
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        configuration.videoOutput = .sampleBuffer
+        #endif
+        #if DEBUG && os(macOS)
+        // Exercise the iOS rendering path in the macOS example during validation.
+        if ProcessInfo.processInfo.arguments.contains("--native-video-output") {
+            configuration.videoOutput = .sampleBuffer
+        }
+        #endif
         _player = State(initialValue: MPVPlayer(configuration: configuration))
     }
 
@@ -73,6 +97,11 @@ public struct ContentView: View {
             }
             #endif
         case .background:
+            #if os(iOS)
+            if player.pictureInPicture.isActive || player.pictureInPicture.isTransitioning {
+                return
+            }
+            #endif
             #if os(iOS) || os(tvOS)
             let shouldResume: Bool = switch player.state {
             case .playing, .buffering:

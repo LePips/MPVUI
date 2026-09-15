@@ -1,7 +1,6 @@
 import Foundation
 
 struct ConsumerTestRecord: Codable {
-    let schemaVersion: Int
     let key: String
     let artifactDigests: [String: String]
     let checks: [String]
@@ -45,7 +44,7 @@ struct ConsumerTests {
                 try Archive.extract(archive, to: output.appendingPathComponent("content"), runner: graph.runner)
                 return ["sha256", "safe-extraction"]
             }.appendingPathComponent("content/" + artifact.framework + ".xcframework")
-            try ReleaseManager(graph: graph).verifyEmbeddedProvenance(extracted.deletingLastPathComponent(), index: index)
+            try ReleaseManager(graph: graph).verifyEmbeddedBuildRecord(extracted.deletingLastPathComponent(), index: index)
             paths[artifact.target] = extracted
         }
         return paths
@@ -111,13 +110,15 @@ struct ConsumerTests {
             }
         }
         if !nativeOnly {
-            let fixtureDirectory = graph.root.appendingPathComponent("Tests/Resources")
-            let fixtures = try read([String: String].self, fixtureDirectory.appendingPathComponent("Fixtures.lock.json"))
-            for (name, sha) in fixtures {
-                try require(
-                    digest(fixtureDirectory.appendingPathComponent("Media/" + name)) == sha,
-                    "Mandatory fixture checksum mismatch: \(name)"
-                )
+            for path in ["Example/MPVUIExample/Shared/Resources", "Tests/Resources"] {
+                let fixtureDirectory = graph.root.appendingPathComponent(path)
+                let fixtures = try read([String: String].self, fixtureDirectory.appendingPathComponent("Fixtures.lock.json"))
+                for (name, sha) in fixtures {
+                    try require(
+                        digest(fixtureDirectory.appendingPathComponent("Media/" + name)) == sha,
+                        "Mandatory fixture checksum mismatch: \(path)/Media/\(name)"
+                    )
+                }
             }
             let stage = try stagePackage(paths, index: index, key: attempt)
             checks += try wrapperChecks(stage)
@@ -146,7 +147,6 @@ struct ConsumerTests {
             "Swift sources, fixtures, or test configuration changed during validation"
         )
         let record = ConsumerTestRecord(
-            schemaVersion: 1,
             key: key,
             artifactDigests: Dictionary(uniqueKeysWithValues: index.products.map { ($0.archive, $0.sha256) }),
             checks: checks,

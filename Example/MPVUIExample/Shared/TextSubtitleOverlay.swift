@@ -5,27 +5,66 @@ import SwiftUI
 struct TextSubtitleOverlay: View {
     let snapshot: TextSubtitleSnapshot
     let videoSize: CGSize?
+    var scalesWithVideo = false
+    var bottomClearance: CGFloat = 0
 
     var body: some View {
-        TextSubtitleOverlayContent(
-            snapshot: snapshot,
-            videoSize: videoSize
-        )
-        .mediaCaptionStyle()
+        GeometryReader { geometry in
+            let referenceCanvas = referenceCanvasSize
+            let videoScale = min(
+                geometry.size.width / referenceCanvas.width,
+                geometry.size.height / referenceCanvas.height
+            )
+            let videoFrame = CGSize(
+                width: referenceCanvas.width * videoScale,
+                height: referenceCanvas.height * videoScale
+            )
+            let canvas = scalesWithVideo ? referenceCanvas : videoFrame
+            let scale = scalesWithVideo ? videoScale : 1
+
+            let bottomLetterbox = (geometry.size.height - videoFrame.height) / 2
+            let bottomInset = max(0, bottomClearance - bottomLetterbox) / max(scale, 0.001)
+
+            TextSubtitleOverlayContent(snapshot: snapshot, bottomInset: bottomInset)
+                .frame(width: canvas.width, height: canvas.height)
+                .clipped()
+                .scaleEffect(scale)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(snapshot.text)
         .accessibilityHidden(snapshot.isEmpty)
         .accessibilityIdentifier("textSubtitleOverlay")
     }
+
+    /// Video overlays scale a reference canvas; ordinary overlays lay out at
+    /// the displayed video size so caption fonts and effects retain their point sizes.
+    private var referenceCanvasSize: CGSize {
+        let referenceHeight: CGFloat = 540
+        let fallback = CGSize(width: 960, height: referenceHeight)
+        guard let videoSize,
+              videoSize.width.isFinite, videoSize.height.isFinite,
+              videoSize.width > 0, videoSize.height > 0
+        else { return fallback }
+
+        // PlayerView supplies display dimensions with pixel aspect and rotation applied.
+        // Scale caption size with video height, including portrait footage.
+        let width = referenceHeight * (videoSize.width / videoSize.height)
+        guard width.isFinite, width > 0 else { return fallback }
+        return CGSize(width: width, height: referenceHeight)
+    }
 }
 
 private struct TextSubtitleOverlayContent: View {
-    @Environment(\.mediaCaptionStyle)
-    private var captionStyle
+    @State
+    private var captionStyle = CaptionStyle.current
+    @Environment(\.scenePhase)
+    private var scenePhase
 
     let snapshot: TextSubtitleSnapshot
-    let videoSize: CGSize?
+    let bottomInset: CGFloat
 
     private var basePointSize: CGFloat {
         #if os(tvOS)
@@ -44,17 +83,17 @@ private struct TextSubtitleOverlayContent: View {
             if !snapshot.isEmpty {
                 SubtitleRegionsLayout(
                     regions: snapshot.regions,
-                    videoViewport: videoViewport(in: geometry.size),
-                    automaticBottom: automaticSubtitleBottom(in: geometry),
-                    pointSize: pointSize
+                    pointSize: pointSize,
+                    bottomInset: bottomInset
                 ) {
                     ForEach(Array(snapshot.regions.enumerated()), id: \.offset) { index, _ in
                         let region = snapshot.regions[index]
 
-                        switch region.placement {
+                        switch region.role == .secondary ? .automatic : region.placement {
                         case .automatic:
                             SubtitleRegionText(
                                 text: region.text,
+                                captionStyle: captionStyle,
                                 alignment: .center,
                                 writingDirection: .horizontal,
                                 constrainsHeight: false,
@@ -64,6 +103,7 @@ private struct TextSubtitleOverlayContent: View {
                         case let .webVTT(placement):
                             SubtitleRegionText(
                                 text: region.text,
+                                captionStyle: captionStyle,
                                 alignment: placement.textAlignment.swiftUIValue,
                                 writingDirection: placement.writingDirection,
                                 constrainsHeight: placement.maximumHeight != nil,
@@ -78,50 +118,24 @@ private struct TextSubtitleOverlayContent: View {
             }
         }
         .clipped()
-    }
-
-    private func automaticSubtitleBottom(in geometry: GeometryProxy) -> CGFloat {
-        geometry.size.height - max(24, geometry.size.height * 0.08)
-    }
-
-    private func videoViewport(in containerSize: CGSize) -> CGRect {
-        guard containerSize.width > 0,
-              containerSize.height > 0,
-              containerSize.width.isFinite,
-              containerSize.height.isFinite,
-              let videoSize,
-              videoSize.width > 0,
-              videoSize.height > 0,
-              videoSize.width.isFinite,
-              videoSize.height.isFinite
-        else {
-            return CGRect(origin: .zero, size: containerSize)
+        .task {
+            for await _ in CaptionProfile.updates {
+                guard !Task.isCancelled else { return }
+                captionStyle = .current
+            }
         }
-
-        let sourceAspectRatio = videoSize.width / videoSize.height
-        guard sourceAspectRatio > 0, sourceAspectRatio.isFinite else {
-            return CGRect(origin: .zero, size: containerSize)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                captionStyle = .current
+            }
         }
-
-        let containerAspectRatio = containerSize.width / containerSize.height
-        let viewportSize = sourceAspectRatio > containerAspectRatio
-            ? CGSize(width: containerSize.width, height: containerSize.width / sourceAspectRatio)
-            : CGSize(width: containerSize.height * sourceAspectRatio, height: containerSize.height)
-
-        return CGRect(
-            x: (containerSize.width - viewportSize.width) / 2,
-            y: (containerSize.height - viewportSize.height) / 2,
-            width: viewportSize.width,
-            height: viewportSize.height
-        )
     }
 }
 
 private struct SubtitleRegionsLayout: Layout {
     let regions: [TextSubtitleRegion]
-    let videoViewport: CGRect
-    let automaticBottom: CGFloat
     let pointSize: CGFloat
+    let bottomInset: CGFloat
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -140,33 +154,36 @@ private struct SubtitleRegionsLayout: Layout {
         let count = min(regions.count, subviews.count)
         guard count > 0 else { return }
 
-        let automaticIndices = (0 ..< count).filter {
-            regions[$0].placement == .automatic
+        // Keep the secondary language at the top even if its authored WebVTT
+        // cue asks for bottom placement. Primary WebVTT retains its placement.
+        for role in MPVSubtitleRole.allCases {
+            let indices = (0 ..< count).filter {
+                (regions[$0].role ?? .primary) == role
+                    && (role == .secondary || regions[$0].placement == .automatic)
+            }
+            placeAutomaticRegions(at: indices, role: role, in: bounds, subviews: subviews)
         }
-        placeAutomaticRegions(
-            at: automaticIndices,
-            in: bounds,
-            subviews: subviews
-        )
 
-        let viewport = videoViewport.offsetBy(dx: bounds.minX, dy: bounds.minY)
         for index in 0 ..< count {
-            guard case let .webVTT(placement) = regions[index].placement else { continue }
+            guard regions[index].role != .secondary,
+                  case let .webVTT(placement) = regions[index].placement else { continue }
             placeWebVTTRegion(
                 subviews[index],
                 placement: placement,
-                in: viewport
+                in: bounds
             )
         }
     }
 
     private func placeAutomaticRegions(
         at indices: [Int],
+        role: MPVSubtitleRole,
         in bounds: CGRect,
         subviews: Subviews
     ) {
         guard !indices.isEmpty else { return }
 
+        let automaticBottom = max(bounds.minY, bounds.maxY - max(24, bounds.height * 0.08, bottomInset))
         let horizontalPadding = max(24, bounds.width * 0.08)
         let regionProposal = ProposedViewSize(
             width: max(0, bounds.width - horizontalPadding * 2),
@@ -176,7 +193,9 @@ private struct SubtitleRegionsLayout: Layout {
         let spacing = pointSize * 0.25
         let totalHeight = sizes.reduce(0) { $0 + $1.height }
             + spacing * CGFloat(max(0, sizes.count - 1))
-        var originY = automaticBottom - totalHeight
+        var originY = role == .secondary
+            ? bounds.minY + max(24, bounds.height * 0.08)
+            : automaticBottom - totalHeight
 
         for (offset, index) in indices.enumerated() {
             subviews[index].place(
@@ -206,7 +225,7 @@ private struct SubtitleRegionsLayout: Layout {
             x: placement.horizontalAnchor.unitValue,
             y: placement.verticalAnchor.unitValue
         )
-        let origin = CGPoint(
+        var origin = CGPoint(
             x: viewport.minX
                 + CGFloat(placement.horizontalPosition) * viewport.width
                 - size.width * anchor.x,
@@ -214,6 +233,11 @@ private struct SubtitleRegionsLayout: Layout {
                 + CGFloat(placement.verticalPosition) * viewport.height
                 - size.height * anchor.y
         )
+
+        // Preserve authored placement unless a temporary preview would overlap controls.
+        if bottomInset > 0 {
+            origin.y = max(viewport.minY, min(origin.y, viewport.maxY - bottomInset - size.height))
+        }
 
         subview.place(
             at: origin,
@@ -225,6 +249,7 @@ private struct SubtitleRegionsLayout: Layout {
 
 private struct SubtitleRegionText: View {
     let text: String
+    let captionStyle: CaptionStyle
     let alignment: SwiftUI.TextAlignment
     let writingDirection: WebVTTPlacement.WritingDirection
     let constrainsHeight: Bool
@@ -240,7 +265,7 @@ private struct SubtitleRegionText: View {
     }
 
     private var styledText: some View {
-        CaptionText(presentationText, baseSize: basePointSize)
+        CaptionText(presentationText, baseSize: basePointSize, style: captionStyle)
             .multilineTextAlignment(alignment)
             .lineSpacing(pointSize * 0.12)
             .fixedSize(horizontal: false, vertical: !constrainsHeight)

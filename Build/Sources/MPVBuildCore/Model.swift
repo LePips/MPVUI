@@ -131,8 +131,7 @@ struct Publication: Codable, Sendable { let repository: String
 }
 
 struct NativeLock: Codable, Sendable {
-    let schemaVersion: Int
-    let recipeProvenance: Revision
+    let recipeSource: Revision
     let metadataVersion: String
     let sourceDateEpoch: Int
     let epochPolicy: String
@@ -145,7 +144,6 @@ struct NativeLock: Codable, Sendable {
     let publication: Publication
 
     func validate(root: URL) throws {
-        try require(schemaVersion == 1, "Unsupported native lock schema \(schemaVersion)")
         try require(sourceDateEpoch >= 315_532_800, "Source epoch must be ZIP-representable and explicit")
         try require(
             features.gpl && features.libraryOnly && features.videoToolbox && features.moltenVK && features.avfoundation,

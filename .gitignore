@@ -3,6 +3,7 @@
 
 # Swift Package Manager
 .build/
+__pycache__/
 .build-*/
 .swiftpm/
 
@@ -15,10 +16,10 @@ xcuserdata/
 *.xcresult
 *.dSYM
 
-# Local library artifacts
-/Vendor/MPVKit/Artifacts/
-
 # The example app discovers every file in this folder at runtime.
 # Check in media files explicitly.
 Example/MPVUIExample/Shared/Resources/Media/*
 !Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.mp4
+!Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.en.srt
+!Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.es.srt
+!Example/MPVUIExample/Shared/Resources/Media/02-h264-multitrack.mkv

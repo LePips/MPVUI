@@ -6,6 +6,10 @@ final class MPVRenderTarget: @unchecked Sendable {
     let usesExtendedDynamicRange: Bool
     let displaySupportsExtendedDynamicRange: Bool
     let outputHeadroom: Double
+    let displayCapabilities: MPVDisplayCapabilities
+    let configuredDynamicRange: MPVPresentationStatus.DynamicRange
+    let policyFallbackReason: MPVPresentationStatus.FallbackReason?
+    let colorConfiguration: MPVRenderColorConfiguration?
 
     init(
         layerAddress: Int64,
@@ -14,7 +18,11 @@ final class MPVRenderTarget: @unchecked Sendable {
         drawableHeight: Int,
         usesExtendedDynamicRange: Bool,
         displaySupportsExtendedDynamicRange: Bool,
-        outputHeadroom: Double
+        outputHeadroom: Double,
+        displayCapabilities: MPVDisplayCapabilities? = nil,
+        configuredDynamicRange: MPVPresentationStatus.DynamicRange? = nil,
+        policyFallbackReason: MPVPresentationStatus.FallbackReason? = nil,
+        colorConfiguration: MPVRenderColorConfiguration? = nil
     ) {
         self.layerAddress = layerAddress
         self.layerOwner = layerOwner
@@ -22,7 +30,15 @@ final class MPVRenderTarget: @unchecked Sendable {
         self.drawableHeight = max(0, drawableHeight)
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
         self.displaySupportsExtendedDynamicRange = displaySupportsExtendedDynamicRange
-        self.outputHeadroom = outputHeadroom
+        self.outputHeadroom = outputHeadroom.isFinite ? max(1, outputHeadroom) : 1
+        self.displayCapabilities = displayCapabilities ?? MPVDisplayCapabilities(
+            hdrSupport: displaySupportsExtendedDynamicRange ? .supported : .unsupported,
+            currentEDRHeadroom: self.outputHeadroom
+        )
+        self.configuredDynamicRange = configuredDynamicRange
+            ?? (usesExtendedDynamicRange ? .hdr : .sdr)
+        self.policyFallbackReason = policyFallbackReason
+        self.colorConfiguration = colorConfiguration
     }
 
     func matches(_ other: MPVRenderTarget) -> Bool {
@@ -32,6 +48,10 @@ final class MPVRenderTarget: @unchecked Sendable {
             && usesExtendedDynamicRange == other.usesExtendedDynamicRange
             && displaySupportsExtendedDynamicRange == other.displaySupportsExtendedDynamicRange
             && abs(outputHeadroom - other.outputHeadroom) < 0.01
+            && displayCapabilities == other.displayCapabilities
+            && configuredDynamicRange == other.configuredDynamicRange
+            && policyFallbackReason == other.policyFallbackReason
+            && colorConfiguration == other.colorConfiguration
     }
 
     func matchesSurfaceConfiguration(_ other: MPVRenderTarget) -> Bool {
@@ -39,6 +59,10 @@ final class MPVRenderTarget: @unchecked Sendable {
             && usesExtendedDynamicRange == other.usesExtendedDynamicRange
             && displaySupportsExtendedDynamicRange == other.displaySupportsExtendedDynamicRange
             && abs(outputHeadroom - other.outputHeadroom) < 0.01
+            && displayCapabilities == other.displayCapabilities
+            && configuredDynamicRange == other.configuredDynamicRange
+            && policyFallbackReason == other.policyFallbackReason
+            && colorConfiguration == other.colorConfiguration
     }
 
     func replacingDrawableSize(width: Int, height: Int) -> MPVRenderTarget {
@@ -49,7 +73,11 @@ final class MPVRenderTarget: @unchecked Sendable {
             drawableHeight: height,
             usesExtendedDynamicRange: usesExtendedDynamicRange,
             displaySupportsExtendedDynamicRange: displaySupportsExtendedDynamicRange,
-            outputHeadroom: outputHeadroom
+            outputHeadroom: outputHeadroom,
+            displayCapabilities: displayCapabilities,
+            configuredDynamicRange: configuredDynamicRange,
+            policyFallbackReason: policyFallbackReason,
+            colorConfiguration: colorConfiguration
         )
     }
 }

@@ -5,9 +5,4 @@ public struct MPVMediaTrackIdentifier: Hashable, Sendable {
 
     /// The integer identifier assigned by mpv within that category.
     public let mpvID: Int
-
-    public init(type: MPVTrackType, mpvID: Int) {
-        self.type = type
-        self.mpvID = mpvID
-    }
 }

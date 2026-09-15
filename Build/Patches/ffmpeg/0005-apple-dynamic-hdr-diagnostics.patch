@@ -1,0 +1,337 @@
+diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
+index c103325..b587d99 100644
+--- a/libavcodec/videotoolbox.c
++++ b/libavcodec/videotoolbox.c
+@@ -891,8 +891,9 @@ static int videotoolbox_dovi_is_apple_hevc(const AVDOVIDecoderConfigurationRecor
+         return dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
+     case 8:
+         /* Native HDR bases: known HDR10/HLG only. */
+-        return dovi->dv_bl_signal_compatibility_id == 1 ||
+-               dovi->dv_bl_signal_compatibility_id == 4;
++        return dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE &&
++               (dovi->dv_bl_signal_compatibility_id == 1 ||
++                dovi->dv_bl_signal_compatibility_id == 4);
+     default:
+         return 0;
+     }
+@@ -963,6 +964,21 @@ static void videotoolbox_dovi_tag_output_attachments(AVCodecContext *avctx,
+                               kCFBooleanTrue, kCVAttachmentMode_ShouldPropagate);
+     else
+         CVBufferRemoveAttachment(pixbuf, CFSTR("MPVUI.NativeDolbyVisionProfile7To81"));
++    // Frame-owned effective session configuration survives decode reordering.
++    // This describes the configured native decoder, not an inferred TV signal.
++    const CFStringRef keys[] = {CFSTR("MPVUI.NativeDolbyVisionSessionProfile"),
++                               CFSTR("MPVUI.NativeDolbyVisionSessionCompatibility")};
++    int values[] = {dovi ? dovi->dv_profile : -1,
++                    dovi ? dovi->dv_bl_signal_compatibility_id : -1};
++    for (int i = 0; i < 2; i++) {
++        CFNumberRef value = CFNumberCreate(NULL, kCFNumberIntType, &values[i]);
++        if (value) {
++            CVBufferSetAttachment(pixbuf, keys[i], value, kCVAttachmentMode_ShouldPropagate);
++            CFRelease(value);
++        } else {
++            CVBufferRemoveAttachment(pixbuf, keys[i]);
++        }
++    }
+     if (!dovi || dovi->dv_profile != 8)
+         return; // P5 is IPT; never tag ordinary BT.2020 YCbCr.
+     CFStringRef transfer = dovi->dv_bl_signal_compatibility_id == 4 ?
+@@ -1134,6 +1150,17 @@ static int videotoolbox_start(AVCodecContext *avctx)
+                        "(profile %u, compatibility %u).\n",
+                        dovi->dv_profile, dovi->dv_bl_signal_compatibility_id);
+             } else {
++                if (dovi) {
++                    // Residual-bearing P7 need not map to mpv's DOVI color
++                    // representation. Report the declared unsupported signal
++                    // here so the host cannot mistake an ordinary HEVC base
++                    // decode for native Dolby Vision preservation.
++                    av_log(avctx, AV_LOG_ERROR, "MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED: "
++                           "declared profile=%u compatibility=%u compression=%u "
++                           "cannot use the requested native Dolby Vision policy\n",
++                           dovi->dv_profile, dovi->dv_bl_signal_compatibility_id,
++                           dovi->dv_md_compression);
++                }
+                 videotoolbox->cm_codec_type = kCMVideoCodecType_HEVC;
+             }
+         }
+@@ -1219,6 +1246,21 @@ static int videotoolbox_start(AVCodecContext *avctx)
+                                           &decoder_cb,               // outputCallback
+                                           &videotoolbox->session);   // decompressionSessionOut
+ 
++    if (!status) {
++        const char *hardware = "unknown";
++        if (__builtin_available(macOS 10.9, iOS 17.0, tvOS 17.0, *)) {
++            CFTypeRef value = NULL;
++            OSStatus query = VTSessionCopyProperty(videotoolbox->session,
++                kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++                kCFAllocatorDefault, &value);
++            if (!query && value && CFGetTypeID(value) == CFBooleanGetTypeID())
++                hardware = CFBooleanGetValue(value) ? "yes" : "no";
++            if (value) CFRelease(value);
++        }
++        av_log(avctx, AV_LOG_INFO, "MPVUI_VIDEOTOOLBOX_SESSION: hardware=%s native-dovi=%s\n",
++               hardware, videotoolbox_session_is_dovi(avctx) ? "yes" : "no");
++    }
++
+     if (!status && videotoolbox_session_is_dovi(avctx)) {
+         if (__builtin_available(macOS 11.0, iOS 14.0, tvOS 14.0, *)) {
+             VTSessionSetProperty(videotoolbox->session,
+@@ -1356,6 +1398,16 @@ static int videotoolbox_hevc_decode_params(AVCodecContext *avctx,
+     return videotoolbox_common_decode_slice(avctx, buffer, size);
+ }
+ 
++// FFmpeg's validated side data must describe these exact current bytes.
++// Shared by original passthrough and opt-in conversion. Never edit originals.
++static int videotoolbox_dovi_rpu_matches(const AVFrameSideData *validated,
++                                         const uint8_t *buffer, size_t size)
++{
++    return buffer && size > 2 && validated && validated->data &&
++           validated->size == size - 2 &&
++           !memcmp(validated->data, buffer + 2, size - 2);
++}
++
+ #if CONFIG_LIBDOVI
+ /* Append only complete, validated P8.1 RPU. libdovi mode 2 also accepts
+  * P5/P8; verify bitstream source profile independently of container before
+@@ -1370,8 +1422,7 @@ static int videotoolbox_hevc_append_converted_p7_rpu(AVCodecContext *avctx,
+     // and stale metadata.
+     const AVFrameSideData *validated = av_frame_get_side_data(
+         h->cur_frame->f, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+-    if (!buffer || size <= 2 || !validated || validated->size != size - 2 ||
+-        memcmp(validated->data, buffer + 2, size - 2))
++    if (!videotoolbox_dovi_rpu_matches(validated, buffer, size))
+         return AVERROR_INVALIDDATA;
+     DoviRpuOpaque *rpu = dovi_parse_unspec62_nalu(buffer, size);
+     if (!rpu)
+@@ -1422,13 +1473,13 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+         H2645NAL *nal = &h->pkt.nals[i];
+         if (nal->type != HEVC_NAL_UNSPEC62)
+             continue;
+-        if (nal->raw_size <= 2) {
+-            if (convert_p7)
+-                return AVERROR_INVALIDDATA;
+-            continue;
+-        }
++        const AVFrameSideData *validated = av_frame_get_side_data(
++            h->cur_frame->f, AV_FRAME_DATA_DOVI_RPU_BUFFER);
++        if (nal->raw_size <= 2 || !videotoolbox_dovi_rpu_matches(
++                validated, nal->raw_data, nal->raw_size))
++            return AVERROR_INVALIDDATA;
+         rpu_count++;
+-        if (convert_p7 && rpu_count != 1)
++        if (rpu_count != 1)
+             return AVERROR_INVALIDDATA;
+         int ret;
+ #if CONFIG_LIBDOVI
+@@ -1440,7 +1491,7 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+         if (ret < 0)
+             return ret; // Never submit stripped native DV sample.
+     }
+-    return convert_p7 && rpu_count != 1 ? AVERROR_INVALIDDATA : 0;
++    return rpu_count != 1 ? AVERROR_INVALIDDATA : 0;
+ }
+ 
+ static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
+@@ -1451,6 +1502,11 @@ static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
+     int ret;
+ 
+     ret = videotoolbox_hevc_append_dovi_rpus(avctx);
++    if (ret < 0 && !vtctx->native_dovi_error_reported) {
++        av_log(avctx, AV_LOG_ERROR, "MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED: "
++               "missing, malformed, duplicate, or unconvertible current-frame RPU\n");
++        vtctx->native_dovi_error_reported = true;
++    }
+     if (ret >= 0)
+         ret = ff_videotoolbox_common_end_frame(avctx, frame);
+     vtctx->bitstream_size = 0;
+diff --git a/libavcodec/vt_internal.h b/libavcodec/vt_internal.h
+index b1eb073..77a7407 100644
+--- a/libavcodec/vt_internal.h
++++ b/libavcodec/vt_internal.h
+@@ -45,6 +45,7 @@ typedef struct VTContext {
+     // Current H264 parameters (used to trigger decoder restart on SPS changes).
+     uint8_t                     sps[3];
+     bool                        reconfig_needed;
++    bool                        native_dovi_error_reported;
+ 
+     void *logctx;
+ } VTContext;
+diff --git a/libavutil/hdr_dynamic_metadata.c b/libavutil/hdr_dynamic_metadata.c
+index 7033f06..bbaf493 100644
+--- a/libavutil/hdr_dynamic_metadata.c
++++ b/libavutil/hdr_dynamic_metadata.c
+@@ -236,13 +236,77 @@ int av_dynamic_hdr_plus_from_t35(AVDynamicHDRPlus *s, const uint8_t *data,
+     return 0;
+ }
+ 
++// Validate before size calculation or array traversal. Side data can also be
++// supplied by filters and applications, not only by the bitstream parser.
++static int hdr_plus_rational_valid(AVRational q, int64_t scale, int64_t max)
++{
++    return q.den > 0 && q.num >= 0 &&
++           (int64_t)q.num * scale <= max * q.den;
++}
++
++static int hdr_plus_valid(const AVDynamicHDRPlus *s)
++{
++#define VALID(q, scale, max) hdr_plus_rational_valid((q), (scale), (max))
++    if (s->num_windows < 1 || s->num_windows > 3 ||
++        s->targeted_system_display_actual_peak_luminance_flag > 1 ||
++        s->mastering_display_actual_peak_luminance_flag > 1 ||
++        !VALID(s->targeted_system_display_maximum_luminance, 1, (1 << 27) - 1))
++        return 0;
++    for (int w = 0; w < s->num_windows; w++) {
++        const AVHDRPlusColorTransformParams *p = &s->params[w];
++        if (w && (!VALID(p->window_upper_left_corner_x, 1, 65535) ||
++                  !VALID(p->window_upper_left_corner_y, 1, 65535) ||
++                  !VALID(p->window_lower_right_corner_x, 1, 65535) ||
++                  !VALID(p->window_lower_right_corner_y, 1, 65535) ||
++                  p->overlap_process_option < 0 || p->overlap_process_option > 1))
++            return 0;
++        if (p->num_distribution_maxrgb_percentiles > 15 ||
++            p->tone_mapping_flag > 1 || p->color_saturation_mapping_flag > 1 ||
++            !VALID(p->average_maxrgb, 100000, 131071) ||
++            !VALID(p->fraction_bright_pixels, 1000, 1023))
++            return 0;
++        for (int i = 0; i < 3; i++)
++            if (!VALID(p->maxscl[i], 100000, 131071)) return 0;
++        for (int i = 0; i < p->num_distribution_maxrgb_percentiles; i++)
++            if (p->distribution_maxrgb[i].percentage > 127 ||
++                !VALID(p->distribution_maxrgb[i].percentile, 100000, 131071))
++                return 0;
++        if (p->tone_mapping_flag) {
++            if (p->num_bezier_curve_anchors > 15 ||
++                !VALID(p->knee_point_x, 4095, 4095) ||
++                !VALID(p->knee_point_y, 4095, 4095))
++                return 0;
++            for (int i = 0; i < p->num_bezier_curve_anchors; i++)
++                if (!VALID(p->bezier_curve_anchors[i], 1023, 1023)) return 0;
++        }
++        if (p->color_saturation_mapping_flag &&
++            !VALID(p->color_saturation_weight, 8, 63))
++            return 0;
++    }
++#define VALID_PEAK(name) do { \
++    if (s->name##_actual_peak_luminance_flag) { \
++        int rows = s->num_rows_##name##_actual_peak_luminance; \
++        int cols = s->num_cols_##name##_actual_peak_luminance; \
++        if (rows < 2 || rows > 25 || cols < 2 || cols > 25) return 0; \
++        for (int i = 0; i < rows; i++) \
++            for (int j = 0; j < cols; j++) \
++                if (!VALID(s->name##_actual_peak_luminance[i][j], 15, 15)) return 0; \
++    } \
++} while (0)
++    VALID_PEAK(targeted_system_display);
++    VALID_PEAK(mastering_display);
++#undef VALID_PEAK
++#undef VALID
++    return 1;
++}
++
+ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t *size)
+ {
+     uint8_t *buf;
+     size_t size_bits, size_bytes;
+     PutBitContext pbc, *pb = &pbc;
+ 
+-    if (!s)
++    if (!s || !hdr_plus_valid(s))
+         return AVERROR(EINVAL);
+     if ((!data || *data) && !size)
+        return AVERROR(EINVAL);
+@@ -314,8 +378,8 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+ 
+     init_put_bits(pb, buf, size_bytes);
+ 
+-    // application_mode is set to Application Version 1
+-    put_bits(pb, 8, 1);
++    // Preserve the decoded application version.
++    put_bits(pb, 8, s->application_version);
+ 
+     // Payload as per CTA-861-H p.253-254
+     put_bits(pb, 2, s->num_windows);
+@@ -334,7 +398,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+         put_bits(pb, 1, s->params[w].overlap_process_option);
+     }
+ 
+-    put_bits(pb, 27, s->targeted_system_display_maximum_luminance.num * luminance_den /
++    put_bits(pb, 27, (int64_t)s->targeted_system_display_maximum_luminance.num * luminance_den /
+         s->targeted_system_display_maximum_luminance.den);
+     put_bits(pb, 1, s->targeted_system_display_actual_peak_luminance_flag);
+     if (s->targeted_system_display_actual_peak_luminance_flag) {
+@@ -342,22 +406,22 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+         put_bits(pb, 5, s->num_cols_targeted_system_display_actual_peak_luminance);
+         for (int i = 0; i < s->num_rows_targeted_system_display_actual_peak_luminance; i++) {
+             for (int j = 0; j < s->num_cols_targeted_system_display_actual_peak_luminance; j++)
+-                put_bits(pb, 4, s->targeted_system_display_actual_peak_luminance[i][j].num * peak_luminance_den /
++                put_bits(pb, 4, (int64_t)s->targeted_system_display_actual_peak_luminance[i][j].num * peak_luminance_den /
+                     s->targeted_system_display_actual_peak_luminance[i][j].den);
+         }
+     }
+ 
+     for (int w = 0; w < s->num_windows; w++) {
+         for (int i = 0; i < 3; i++)
+-            put_bits(pb, 17, s->params[w].maxscl[i].num * rgb_den / s->params[w].maxscl[i].den);
+-        put_bits(pb, 17, s->params[w].average_maxrgb.num * rgb_den / s->params[w].average_maxrgb.den);
++            put_bits(pb, 17, (int64_t)s->params[w].maxscl[i].num * rgb_den / s->params[w].maxscl[i].den);
++        put_bits(pb, 17, (int64_t)s->params[w].average_maxrgb.num * rgb_den / s->params[w].average_maxrgb.den);
+         put_bits(pb, 4, s->params[w].num_distribution_maxrgb_percentiles);
+         for (int i = 0; i < s->params[w].num_distribution_maxrgb_percentiles; i++) {
+             put_bits(pb, 7, s->params[w].distribution_maxrgb[i].percentage);
+-            put_bits(pb, 17, s->params[w].distribution_maxrgb[i].percentile.num * rgb_den /
++            put_bits(pb, 17, (int64_t)s->params[w].distribution_maxrgb[i].percentile.num * rgb_den /
+                 s->params[w].distribution_maxrgb[i].percentile.den);
+         }
+-        put_bits(pb, 10, s->params[w].fraction_bright_pixels.num * fraction_pixel_den /
++        put_bits(pb, 10, (int64_t)s->params[w].fraction_bright_pixels.num * fraction_pixel_den /
+             s->params[w].fraction_bright_pixels.den);
+     }
+ 
+@@ -367,7 +431,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+         put_bits(pb, 5, s->num_cols_mastering_display_actual_peak_luminance);
+         for (int i = 0; i < s->num_rows_mastering_display_actual_peak_luminance; i++) {
+             for (int j = 0; j < s->num_cols_mastering_display_actual_peak_luminance; j++)
+-                put_bits(pb, 4, s->mastering_display_actual_peak_luminance[i][j].num * peak_luminance_den /
++                put_bits(pb, 4, (int64_t)s->mastering_display_actual_peak_luminance[i][j].num * peak_luminance_den /
+                     s->mastering_display_actual_peak_luminance[i][j].den);
+         }
+     }
+@@ -375,17 +439,18 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+     for (int w = 0; w < s->num_windows; w++) {
+         put_bits(pb, 1, s->params[w].tone_mapping_flag);
+         if (s->params[w].tone_mapping_flag) {
+-            put_bits(pb, 12, s->params[w].knee_point_x.num * knee_point_den / s->params[w].knee_point_x.den);
+-            put_bits(pb, 12, s->params[w].knee_point_y.num * knee_point_den / s->params[w].knee_point_y.den);
++            put_bits(pb, 12, (int64_t)s->params[w].knee_point_x.num * knee_point_den / s->params[w].knee_point_x.den);
++            put_bits(pb, 12, (int64_t)s->params[w].knee_point_y.num * knee_point_den / s->params[w].knee_point_y.den);
+             put_bits(pb, 4, s->params[w].num_bezier_curve_anchors);
+             for (int i = 0; i < s->params[w].num_bezier_curve_anchors; i++)
+-                put_bits(pb, 10, s->params[w].bezier_curve_anchors[i].num * bezier_anchor_den /
++                put_bits(pb, 10, (int64_t)s->params[w].bezier_curve_anchors[i].num * bezier_anchor_den /
+                     s->params[w].bezier_curve_anchors[i].den);
+-            put_bits(pb, 1, s->params[w].color_saturation_mapping_flag);
+-            if (s->params[w].color_saturation_mapping_flag)
+-                put_bits(pb, 6, s->params[w].color_saturation_weight.num * saturation_weight_den /
+-                    s->params[w].color_saturation_weight.den);
+         }
++        // Saturation mapping is independent of tone mapping (ST 2094-40).
++        put_bits(pb, 1, s->params[w].color_saturation_mapping_flag);
++        if (s->params[w].color_saturation_mapping_flag)
++            put_bits(pb, 6, (int64_t)s->params[w].color_saturation_weight.num * saturation_weight_den /
++                s->params[w].color_saturation_weight.den);
+     }
+ 
+     flush_put_bits(pb);
+diff --git a/libavutil/hdr_dynamic_metadata.h b/libavutil/hdr_dynamic_metadata.h
+index 5100ed6..e2d1389 100644
+--- a/libavutil/hdr_dynamic_metadata.h
++++ b/libavutil/hdr_dynamic_metadata.h
+@@ -357,7 +357,7 @@ int av_dynamic_hdr_plus_from_t35(AVDynamicHDRPlus *s, const uint8_t *data,
+ 
+ /**
+  * Serialize dynamic HDR10+ metadata to a user data registered ITU-T T.35 buffer,
+- * excluding the first 48 bytes of the header, and beginning with the application mode.
++ * excluding the first 48 bits of the header, and beginning with the application mode.
+  * @param s A pointer containing the decoded AVDynamicHDRPlus structure.
+  * @param[in,out] data A pointer to pointer to a byte buffer to be filled with the
+  *                     serialized metadata.

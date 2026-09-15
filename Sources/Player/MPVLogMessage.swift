@@ -1,12 +1,9 @@
 /// A copied mpv diagnostic message.
 public struct MPVLogMessage: Equatable, Sendable {
+    /// The mpv component that emitted the message.
     public let prefix: String
-    public let level: String
+    /// The message severity.
+    public let level: MPVPlayerConfiguration.LogLevel
+    /// The copied diagnostic text.
     public let message: String
-
-    public init(prefix: String, level: String, message: String) {
-        self.prefix = prefix
-        self.level = level
-        self.message = message
-    }
 }

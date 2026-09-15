@@ -68,7 +68,7 @@ enum ExampleDisplayFormat {
     }
 
     static func decimal(_ duration: Duration?, suffix: String = "") -> String {
-        decimal(duration?.seconds, suffix: suffix)
+        decimal(Double(duration?.components.seconds ?? 0), suffix: suffix)
     }
 
     static func playbackState(_ state: MPVPlaybackState) -> String {

@@ -42,13 +42,9 @@ public enum MPVTransferFunction: Equatable, Hashable, Sendable {
     /// A transfer function not recognized by this MPVUI version.
     case other(String)
 
-    /// Creates a transfer function from the value reported by mpv.
-    ///
-    /// Common spelling variants for PQ, HLG, BT.709, and BT.1886 are
-    /// normalized. Unknown nonempty values are preserved in ``other(_:)``.
-    ///
-    /// - Parameter mpvValue: The value of an mpv transfer/gamma property.
-    public init(mpvValue: String?) {
+    /// Parses an mpv transfer/gamma value, normalizing known spelling variants.
+    /// Missing or blank values become ``unknown``; unrecognized values use ``other(_:)``.
+    init(mpvValue: String?) {
         guard let value = mpvValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty
         else {
@@ -120,10 +116,7 @@ public enum MPVTransferFunction: Equatable, Hashable, Sendable {
         }
     }
 
-    /// Whether this transfer function represents an HDR signal.
-    ///
-    /// Wide-gamut primaries do not imply HDR. Only PQ and HLG transfer
-    /// functions are classified as HDR.
+    /// Whether the transfer function is PQ or HLG, the supported HDR signals.
     public var isHDR: Bool {
         switch self {
         case .pq, .hlg:

@@ -1,0 +1,156 @@
+diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
+--- a/video/out/avfoundation_color.h
++++ b/video/out/avfoundation_color.h
+@@ -231,6 +231,8 @@
+     for (size_t y = 0; y < height; y++) {
+         for (size_t x = 0; x < width; x++) {
+             const uint8_t *bgra = base + y * stride + x * 4;
++            // NSMutableData starts zeroed; transparent canvas needs no color math.
++            if (!bgra[3]) continue;
+             double rgb[3];
+             avf_subtitle_nits(color, bgra, rgb);
+             avf_from_nits(color->transfer, rgb, color->kr, color->kb);
+@@ -244,4 +246,64 @@
+     return [CIImage imageWithBitmapData:pixels bytesPerRow:width * 4 * sizeof(float)
+                                  size:CGSizeMake(width, height) format:kCIFormatRGBAf colorSpace:cs];
+ }
++
++// Owned by the VO thread. The caller keeps the source bitmap immutable until
++// invalidation; retaining it prevents address reuse from aliasing another cue.
++struct avf_subtitle_image_cache {
++    CIImage *image;
++    CVPixelBufferRef source;
++    CGColorSpaceRef color_space;
++    struct avf_overlay_color color;
++};
++
++static inline void avf_subtitle_image_cache_clear(struct avf_subtitle_image_cache *cache)
++{
++    [cache->image release];
++    if (cache->source) CVPixelBufferRelease(cache->source);
++    if (cache->color_space) CGColorSpaceRelease(cache->color_space);
++    *cache = (struct avf_subtitle_image_cache){0};
++}
++
++static inline bool avf_overlay_color_equal(const struct avf_overlay_color *a,
++                                            const struct avf_overlay_color *b)
++{
++    // Compare semantic fields: the C structure can contain padding bytes.
++    if (a->transfer != b->transfer || a->white_nits != b->white_nits ||
++        a->kr != b->kr || a->kb != b->kb)
++        return false;
++    for (int row = 0; row < 3; row++) {
++        for (int col = 0; col < 3; col++) {
++            if (a->rgb_matrix[row][col] != b->rgb_matrix[row][col]) return false;
++        }
++    }
++    return true;
++}
++
++// Returns a borrowed image, valid until the next cache change. Repeated video
++// frames reuse the converted float canvas while the cue and output color agree.
++static inline CIImage *avf_cached_subtitle_image(struct avf_subtitle_image_cache *cache,
++                                                CVPixelBufferRef sub, CGColorSpaceRef cs,
++                                                const struct avf_overlay_color *color)
++{
++    if (!sub || !cs || !color) {
++        avf_subtitle_image_cache_clear(cache);
++        return nil;
++    }
++    if (cache->image && cache->source == sub &&
++        CFEqual(cache->color_space, cs) &&
++        avf_overlay_color_equal(&cache->color, color))
++        return cache->image;
++
++    // Retain inputs before clearing: callers may reuse the cache's own source.
++    CVPixelBufferRetain(sub);
++    CGColorSpaceRetain(cs);
++    struct avf_overlay_color next_color = *color;
++    avf_subtitle_image_cache_clear(cache);
++    cache->source = sub;
++    cache->color_space = cs;
++    cache->color = next_color;
++    cache->image = [avf_subtitle_image(sub, cs, &next_color) retain];
++    if (!cache->image) avf_subtitle_image_cache_clear(cache);
++    return cache->image;
++}
+ #endif
+diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+--- a/video/out/vo_avfoundation.m
++++ b/video/out/vo_avfoundation.m
+@@ -328,8 +328,8 @@
+     CVPixelBufferPoolRef outputPool;
+     int output_pool_w, output_pool_h;
+     OSType output_pool_format;
+-    CGImageRef cachedSubtitleImage;
+     CVPixelBufferRef cachedSubtitleBuffer;
++    struct avf_subtitle_image_cache subtitleImageCache;
+     int subtitle_x0, subtitle_y0, subtitle_x1, subtitle_y1;
+     bool has_subtitle;
+ 
+@@ -2403,7 +2403,6 @@
+         bounds.x1 = MPMAX(bounds.x1, p->subtitle_x1);
+         bounds.y1 = MPMAX(bounds.y1, p->subtitle_y1);
+     }
+-    p->cachedSubtitleImage = CGBitmapContextCreateImage(cg);
+     CGContextRelease(cg);
+     CVPixelBufferUnlockBaseAddress(buf, 0);
+     p->cachedSubtitleBuffer = buf;
+@@ -2466,6 +2465,7 @@
+ 
+ static void release_ci_compositor(struct priv *p)
+ {
++    avf_subtitle_image_cache_clear(&p->subtitleImageCache);
+     [p->ciContext release];
+     p->ciContext = nil;
+     [p->mtlDevice release];
+@@ -2519,7 +2519,7 @@
+         return nil;
+     }
+     struct avf_overlay_color color = get_overlay_color(vo, videoBuffer);
+-    return avf_subtitle_image(sub, cs, &color);
++    return avf_cached_subtitle_image(&p->subtitleImageCache, sub, cs, &color);
+ }
+ 
+ static CVPixelBufferRef composite_yuv_frame(struct vo *vo, CVPixelBufferRef videoBuffer,
+@@ -3453,10 +3453,7 @@
+ 
+ static void clear_subtitle_cache(struct priv *p)
+ {
+-    if (p->cachedSubtitleImage) {
+-        CGImageRelease(p->cachedSubtitleImage);
+-        p->cachedSubtitleImage = NULL;
+-    }
++    avf_subtitle_image_cache_clear(&p->subtitleImageCache);
+     if (p->cachedSubtitleBuffer) {
+         CVPixelBufferRelease(p->cachedSubtitleBuffer);
+         p->cachedSubtitleBuffer = NULL;
+@@ -3511,15 +3508,7 @@
+         p->timebase = NULL;
+     }
+ 
+-    if (p->cachedSubtitleImage) {
+-        CGImageRelease(p->cachedSubtitleImage);
+-        p->cachedSubtitleImage = NULL;
+-    }
+-
+-    if (p->cachedSubtitleBuffer) {
+-        CVPixelBufferRelease(p->cachedSubtitleBuffer);
+-        p->cachedSubtitleBuffer = NULL;
+-    }
++    clear_subtitle_cache(p);
+ 
+     if (p->outputPool) {
+         CVPixelBufferPoolRelease(p->outputPool);
+@@ -3544,10 +3533,7 @@
+ 
+     if (p->video_format_attachments) CFRelease(p->video_format_attachments);
+     p->video_format_attachments = NULL;
+-    [p->ciContext release];
+-    p->ciContext = nil;
+-    [p->mtlDevice release];
+-    p->mtlDevice = nil;
++    release_ci_compositor(p);
+ 
+     [p->displayLayer release];
+     p->displayLayer = nil;

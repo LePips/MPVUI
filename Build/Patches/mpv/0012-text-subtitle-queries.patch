@@ -1,0 +1,210 @@
+Subject: [PATCH] Query complete text subtitle tracks and notify paused cue updates
+
+diff --git a/player/command.c b/player/command.c
+index 54ac221..d1841a4 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -6433,6 +6433,86 @@ static void cmd_show_progress(void *p)
+     mp_wakeup_core(mpctx);
+ }
+ 
++// Read the source on a worker, using its own demuxer and subtitle decoder.
++// In particular, unselected embedded tracks must not depend on playback's
++// packet cache or seek preroll. Cancellation also interrupts network reads.
++static void cmd_sub_text_cues(void *p)
++{
++    struct mp_cmd_ctx *cmd = p;
++    struct MPContext *mpctx = cmd->mpctx;
++    struct track *track = mp_track_by_tid(mpctx, STREAM_SUB, cmd->args[0].v.i);
++    cmd->success = false;
++    if (!track || !track->stream || !track->demuxer || mpctx->stop_play)
++        return;
++    const char *codec = track->stream->codec->codec;
++    if (!codec || !(strcmp(codec, "subrip") == 0 || strcmp(codec, "srt") == 0 ||
++                   strcmp(codec, "webvtt") == 0 || strcmp(codec, "webvtt-webm") == 0 ||
++                   strcmp(codec, "ttml") == 0 || strcmp(codec, "mov_text") == 0 ||
++                   strcmp(codec, "text") == 0))
++        return;
++    if (!track->demuxer->seekable || track->demuxer->partially_seekable ||
++        (!track->demuxer->fully_read &&
++         (!isfinite(track->demuxer->duration) || track->demuxer->duration < 0)) ||
++        strcmp(track->demuxer->desc->name, "timeline") == 0)
++        return;
++
++    codec = talloc_strdup(cmd, codec);
++    char *url = talloc_strdup(cmd, track->demuxer->filename);
++    int stream_index = track->stream->index;
++    bool rebase = !track->is_external && mpctx->opts->rebase_start_time;
++    struct demuxer_params params = {
++        .is_top_level = true,
++        .stream_flags = track->demuxer->stream_origin,
++        .force_format = talloc_strdup(cmd, track->demuxer->desc->name),
++    };
++    struct mpv_global *global = mpctx->global;
++    mp_core_unlock(mpctx);
++
++    struct demuxer *demux = demux_open_url(url, &params, cmd->abort->cancel, global);
++    struct dec_sub *sub = NULL;
++    if (!demux || !demux->seekable || demux->partially_seekable ||
++        stream_index >= demux_get_num_stream(demux))
++        goto done;
++    struct sh_stream *sh = demux_get_stream(demux, stream_index);
++    if (!sh || sh->type != STREAM_SUB || strcmp(sh->codec->codec, codec) != 0)
++        goto done;
++    if (rebase)
++        demux_set_ts_offset(demux, -demux->start_time);
++    demuxer_select_track(demux, sh, MP_NOPTS_VALUE, true);
++    struct track isolated_track = {.stream = sh};
++    sub = sub_create(global, &isolated_track,
++                     talloc_zero(NULL, struct attachment_list), 0);
++    if (!sub || !sub_can_preload(sub))
++        goto done;
++    demux_start_thread(demux);
++    sub_preload(sub);
++    if (mp_cancel_test(cmd->abort->cancel))
++        goto done;
++    struct sub_text_snapshot *cues = sub_get_text_cues(sub, cmd);
++    node_init(&cmd->result, MPV_FORMAT_NODE_ARRAY, NULL);
++    for (int n = 0; n < cues->num_regions; n++) {
++        struct sub_text_region *cue = &cues->regions[n];
++        struct mpv_node *entry = node_array_add(&cmd->result, MPV_FORMAT_NODE_MAP);
++        node_map_add_double(entry, "start", cue->start);
++        node_map_add_double(entry, "end", cue->end);
++        node_map_add_string(entry, "text", cue->text);
++        if (cue->webvtt_settings) {
++            node_map_add_string(entry, "format", "webvtt");
++            node_map_add_string(entry, "settings", cue->webvtt_settings);
++        }
++    }
++    cmd->success = true;
++done:
++    sub_destroy(sub);
++    if (demux) {
++        demux_stop_thread(demux);
++        demux_free(demux);
++    }
++    mp_core_lock(mpctx);
++    if (mp_cancel_test(cmd->abort->cancel))
++        cmd->success = false;
++}
++
+ static void cmd_track_add(void *p)
+ {
+     struct mp_cmd_ctx *cmd = p;
+@@ -7378,6 +7458,12 @@ const struct mp_cmd_def mp_cmds[] = {
+     { "show-progress", cmd_show_progress, .allow_auto_repeat = true,
+         .is_noisy = true },
+ 
++    { "sub-text-cues", cmd_sub_text_cues,
++        {{"id", OPT_INT(v.i)}},
++        .spawn_thread = true,
++        .can_abort = true,
++        .abort_on_playback_end = true,
++    },
+     { "sub-add", cmd_track_add,
+         {
+             {"url", OPT_STRING(v.s)},
+diff --git a/player/sub.c b/player/sub.c
+index b5dcb0c..5abfd27 100644
+--- a/player/sub.c
++++ b/player/sub.c
+@@ -33,6 +33,7 @@
+ #include "video/mp_image.h"
+ 
+ #include "core.h"
++#include "command.h"
+ 
+ // 0: primary sub, 1: secondary sub, -1: not selected
+ static int get_order(struct MPContext *mpctx, struct track *track)
+@@ -126,6 +127,11 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
+     bool sub_updated = false;
+     sub_read_packets(dec_sub, video_pts, mpctx->paused, &packets_read, &sub_updated);
+ 
++    // Paused seeks and track switches can decode cues after PLAYBACK_RESTART.
++    // There may be no subsequent video tick to notify property observers.
++    if (sub_updated || track->redraw_subs)
++        mp_notify_property(mpctx, "sub-text-snapshot");
++
+     double osd_pts = osd_get_force_video_pts(mpctx->osd);
+ 
+     // Check if we need to update subtitles for these special cases. Always
+diff --git a/sub/dec_sub.c b/sub/dec_sub.c
+index 97313e3..22cede0 100644
+--- a/sub/dec_sub.c
++++ b/sub/dec_sub.c
+@@ -470,6 +470,19 @@ struct sub_text_snapshot *sub_get_text_snapshot(struct dec_sub *sub,
+     return snapshot;
+ }
+ 
++// The caller owns an independent, fully preloaded decoder. This does not
++// change playback position, visibility, selected tracks, or the live decoder.
++struct sub_text_snapshot *sub_get_text_cues(struct dec_sub *sub, void *ta_parent)
++{
++    struct sub_text_snapshot *snapshot =
++        talloc_zero(ta_parent, struct sub_text_snapshot);
++    mp_mutex_lock(&sub->lock);
++    if (sub->sd->driver->get_text_snapshot)
++        sub->sd->driver->get_text_snapshot(sub->sd, MP_NOPTS_VALUE, snapshot);
++    mp_mutex_unlock(&sub->lock);
++    return snapshot;
++}
++
+ char *sub_ass_get_extradata(struct dec_sub *sub)
+ {
+     char *data = NULL;
+diff --git a/sub/dec_sub.h b/sub/dec_sub.h
+index 14fc362..9b7875a 100644
+--- a/sub/dec_sub.h
++++ b/sub/dec_sub.h
+@@ -34,6 +34,8 @@ struct sd_times {
+ };
+ 
+ struct sub_text_region {
++    double start;
++    double end;
+     char *text;
+     // NULL: automatic placement. Non-NULL, even empty: raw WebVTT cue
+     // settings.
+@@ -64,6 +66,7 @@ struct sub_bitmaps *sub_get_bitmaps(struct dec_sub *sub, struct mp_osd_res dim,
+ char *sub_get_text(struct dec_sub *sub, double pts, enum sd_text_type type);
+ struct sub_text_snapshot *sub_get_text_snapshot(struct dec_sub *sub,
+                                                 void *ta_parent, double pts);
++struct sub_text_snapshot *sub_get_text_cues(struct dec_sub *sub, void *ta_parent);
+ char *sub_ass_get_extradata(struct dec_sub *sub);
+ struct sd_times sub_get_times(struct dec_sub *sub, double pts);
+ void sub_reset(struct dec_sub *sub);
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+index cc209fd..3510884 100644
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -1049,16 +1049,16 @@ static void get_text_snapshot(struct sd *sd, double pts,
+     struct sd_ass_priv *ctx = sd->priv;
+     ASS_Track *track = ctx->ass_track;
+ 
+-    if (!ctx->is_converted || pts == MP_NOPTS_VALUE ||
+-        sd->opts->sub_forced_events_only)
++    bool all = pts == MP_NOPTS_VALUE;
++    if (!ctx->is_converted || (!all && sd->opts->sub_forced_events_only))
+         return;
+ 
+-    long long ipts = find_timestamp(sd, pts);
++    long long ipts = all ? 0 : find_timestamp(sd, pts);
+ 
+     for (int n = 0; n < track->n_events; n++) {
+         ASS_Event *event = &track->events[n];
+-        if (ipts < event->Start || ipts >= event->Start + event->Duration ||
+-            !event->Text)
++        if ((!all && (ipts < event->Start || ipts >= event->Start + event->Duration)) ||
++            event->Duration <= 0 || !event->Text)
+             continue;
+ 
+         bstr text = {0};
+@@ -1070,6 +1070,8 @@ static void get_text_snapshot(struct sd *sd, double pts,
+ 
+         const char *settings = find_webvtt_settings(ctx, event);
+         struct sub_text_region region = {
++            .start = event->Start / 1000.0,
++            .end = (event->Start + event->Duration) / 1000.0,
+             .text = bstrto0(snapshot, text),
+             .webvtt_settings = settings ? talloc_strdup(snapshot, settings) : NULL,
+         };

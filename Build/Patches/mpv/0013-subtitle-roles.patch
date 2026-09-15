@@ -1,0 +1,23 @@
+Subject: [PATCH] Preserve subtitle track identity and live selection role
+
+diff --git a/player/command.c b/player/command.c
+--- a/player/command.c
++++ b/player/command.c
+@@ -3443,6 +3443,9 @@
+                     struct mpv_node *entry =
+                         node_array_add(&node, MPV_FORMAT_NODE_MAP);
+                     node_map_add_string(entry, "text", region->text);
++                    node_map_add_int64(entry, "track-id", track->user_tid);
++                    node_map_add_string(entry, "role",
++                                        order == 0 ? "primary" : "secondary");
+                     if (region->webvtt_settings) {
+                         node_map_add_string(entry, "format", "webvtt");
+                         node_map_add_string(entry, "settings",
+@@ -6496,6 +6499,7 @@
+         node_map_add_double(entry, "start", cue->start);
+         node_map_add_double(entry, "end", cue->end);
+         node_map_add_string(entry, "text", cue->text);
++        node_map_add_int64(entry, "track-id", cmd->args[0].v.i);
+         if (cue->webvtt_settings) {
+             node_map_add_string(entry, "format", "webvtt");
+             node_map_add_string(entry, "settings", cue->webvtt_settings);

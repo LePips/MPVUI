@@ -6,5 +6,5 @@
 *.webm binary
 *.zip binary
 
-# Unified patches contain space-only context lines by design.
+# Unified atches contain space-only context lines by design.
 Build/Patches/**/*.patch whitespace=-blank-at-eol
