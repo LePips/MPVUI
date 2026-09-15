@@ -67,21 +67,16 @@ let package = Package(
             publicHeadersPath: "include",
             linkerSettings: [.linkedFramework("AppKit", .when(platforms: [.macOS]))]
         ),
-        .target(
-            name: "MPVUITestResources",
-            path: "Example/MPVUIExample/Shared/Resources",
-            resources: [.copy("Media"), .copy("Fixtures.lock.json")]
-        ),
         .testTarget(
             name: "MPVUITests",
             dependencies: [
                 "MPVUI",
                 "Libmpv-GPL",
-                "MPVUITestResources",
             ],
             path: "Tests",
-            resources: [.copy("Resources/Media"), .copy("Resources/Fixtures.lock.json")]
+            plugins: [.plugin(name: "GenerateTestMedia")]
         ),
+        .plugin(name: "GenerateTestMedia", capability: .buildTool()),
     ] + binaryTargets,
     swiftLanguageModes: [.v6]
 )

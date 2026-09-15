@@ -112,7 +112,7 @@ struct MPVMacPictureInPictureTests {
             sourceWindow.orderOut(nil)
             sourceWindow.contentView = nil
         }
-        player.load(TestPaths.media("01-h264-aac-baseline.mp4"))
+        player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
         pip.start()
         try #require(await waitUntil { pip.isActive || pip.lastError != nil })
@@ -184,7 +184,7 @@ struct MPVMacPictureInPictureTests {
             sourceWindow.contentView = nil
         }
         try #require(pip.isSupported)
-        player.load(TestPaths.media("01-h264-aac-baseline.mp4"))
+        player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
         pip.start()
         try #require(await waitUntil { pip.isActive || lastFailure != nil })
@@ -222,7 +222,7 @@ struct MPVMacPictureInPictureTests {
             sourceWindow.contentView = nil
         }
         try #require(pip.isSupported)
-        player.load(TestPaths.media("01-h264-aac-baseline.mp4"))
+        player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
         let layer = surface.metalLayer
         let initialLifecycle = await player.lifecycleDiagnostics()

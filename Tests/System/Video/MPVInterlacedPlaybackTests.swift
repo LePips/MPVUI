@@ -9,8 +9,6 @@ import Testing
 struct MPVInterlacedPlaybackTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_INTERLACE_VALIDATION"] == "1"))
     func `automatic deinterlacing retains field cadence`() async throws {
-        let root = TestPaths.repositoryRoot
-            .appendingPathComponent(".build/interlaced-validation")
         let cases: [(String, Double, MPVDeinterlacePolicy)] = [
             ("480i-bottom-59.94", 60000.0 / 1001, .init(mode: .automatic)),
             ("576i-top-50", 50, .init(mode: .automatic)),
@@ -18,8 +16,7 @@ struct MPVInterlacedPlaybackTests {
             ("576i-top-50", 50, .init(mode: .forced, algorithm: .yadif, fieldOrder: .topFirst)),
         ]
         for (name, expectedCadence, policy) in cases {
-            let source = root.appendingPathComponent(name + ".mkv")
-            try #require(FileManager.default.fileExists(atPath: source.path))
+            let source = try TestPaths.testMedia(name + ".mkv")
             let player = MPVPlayer(configuration: .init(
                 hardwareDecoding: .disabled, hdrPolicy: .disabled, deinterlace: policy
             ))

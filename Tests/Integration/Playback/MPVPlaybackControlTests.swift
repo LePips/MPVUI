@@ -12,7 +12,7 @@ struct MPVPlaybackControlTests {
     func `chapter controls navigate authored boundaries in both directions`() async throws {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
-        try await fixture.loadPaused(TestPaths.media("02-h264-multitrack.mkv"))
+        try await fixture.loadPaused(TestPaths.multitrackMedia)
         #expect(fixture.player.mediaInformation.chapters.map(\.title) == ["Opening", "Middle", "Ending"])
         fixture.player.nextChapter()
         try await eventually("next chapter begins at four seconds") { abs(fixture.player.position.seconds - 4) < 0.2 }

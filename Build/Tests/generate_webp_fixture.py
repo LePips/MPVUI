@@ -4,14 +4,15 @@
 Requires cwebp and img2webp. Regeneration may change bytes across encoder versions;
 review the decoded frames and durations with MPVNativeVideoFormatTests.
 """
-import hashlib
-import json
+import argparse
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MEDIA = ROOT / "Tests/Resources/Media"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, default=ROOT / ".build/test-media")
+MEDIA = parser.parse_args().output
 MEDIA.mkdir(parents=True, exist_ok=True)
 
 with tempfile.TemporaryDirectory(prefix="webp-fixture-") as directory:
@@ -32,9 +33,3 @@ with tempfile.TemporaryDirectory(prefix="webp-fixture-") as directory:
     for frame, duration in zip(frames, (250, 500, 750)):
         command += ["-d", str(duration), str(frame)]
     subprocess.run(command + ["-o", str(MEDIA / "webp-animation.webp")], check=True)
-
-manifest = MEDIA.parent / "Fixtures.lock.json"
-fixtures = json.loads(manifest.read_text())
-for name in ("webp-still.webp", "webp-animation.webp"):
-    fixtures[name] = hashlib.sha256((MEDIA / name).read_bytes()).hexdigest()
-manifest.write_text(json.dumps(dict(sorted(fixtures.items())), indent=2) + "\n")

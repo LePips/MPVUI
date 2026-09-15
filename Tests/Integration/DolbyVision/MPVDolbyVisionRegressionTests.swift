@@ -11,17 +11,14 @@ import Testing
 
 private let dolbyVisionFixture = TestPaths.dolbyVisionMedia
 
-/// Uses the optional local Profile 5 sample for decoder and color regressions.
-/// Set MPVUI_DOLBY_VISION_FIXTURE to supply the sample in another checkout.
+/// Uses optional local Profile 5 charts for color regressions.
+/// MPVUI_DOLBY_VISION_FIXTURE may point to another copy of the Profile 5 clip.
 /// Buffer delivery alone cannot validate Dolby Vision: unvalidated Profile 5
 /// frames must never reach AVFoundation, where they appear pink/green/purple.
-@Suite(.tags(.integration, .dolbyVision), .serialized, .disabled(
-    if: !FileManager.default.fileExists(atPath: dolbyVisionFixture.path),
-    "Provide the local Profile 5 sample or MPVUI_DOLBY_VISION_FIXTURE."
-))
+@Suite(.tags(.integration, .dolbyVision), .serialized)
 struct MPVDolbyVisionRegressionTests {
     @MainActor
-    @Test
+    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
     func `software profile 5 falls back without public logging and restores native for SDR`() async throws {
         let host = Host(hardwareDecoding: .disabled, startTime: .seconds(1), playbackRate: 1.5)
         defer { host.close() }
@@ -82,9 +79,9 @@ struct MPVDolbyVisionRegressionTests {
     }
 
     @MainActor
-    @Test
+    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
     func `hardware profile 5 requires real dolby vision session and RPU or falls back`() async throws {
-        let host = Host(hardwareDecoding: .videoToolbox, startTime: .seconds(5), logLevel: .debug)
+        let host = Host(hardwareDecoding: .videoToolbox, startTime: .seconds(25), logLevel: .debug)
         defer { host.close() }
         let player = host.player
         let layer = player.sampleBufferDisplayLayer
@@ -94,7 +91,7 @@ struct MPVDolbyVisionRegressionTests {
                 || layer.sampleBufferRenderer.displayedPixelBuffer() != nil)
         }
         #expect(player.isPaused)
-        #expect(abs(player.position.seconds - 5) < 0.15)
+        #expect(abs(player.position.seconds - 25) < 0.15)
         #expect(player.lastError == nil)
         if player.videoOutput == .sampleBuffer {
             let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
@@ -129,21 +126,21 @@ struct MPVDolbyVisionRegressionTests {
             let image = try await host.screenshot(named: "hardware-fallback")
             let actual = try pixels(image)
             #expect(actual.meanBrightness > 0.02)
-            expectCoastalColors(actual)
+            expectChartColors(actual)
         }
     }
 
     @MainActor
-    @Test
-    func `software fallback colors match GPU and known coastal frame`() async throws {
-        let fallback = Host(hardwareDecoding: .disabled, startTime: .seconds(5))
+    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
+    func `software fallback colors match GPU and known chart patches`() async throws {
+        let fallback = Host(hardwareDecoding: .disabled, startTime: .seconds(25))
         defer { fallback.close() }
         fallback.player.load(dolbyVisionFixture)
         try await eventually("software fallback color frame") {
             fallback.player.videoOutput == .metal && fallback.player.state == .paused
         }
         let fallbackImage = try await fallback.screenshot(named: "software-fallback")
-        let reference = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .seconds(5))
+        let reference = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .seconds(25))
         defer { reference.close() }
         reference.player.load(dolbyVisionFixture)
         try await eventually("direct gpu-next color frame") { reference.player.state == .paused }
@@ -156,21 +153,23 @@ struct MPVDolbyVisionRegressionTests {
         )
         #expect(actual.meanBrightness > 0.02, "A black screenshot cannot validate color.")
         #expect(gpuDifference < 0.02, "Fallback must render the same colors as direct gpu-next.")
-        expectCoastalColors(actual)
+        expectChartColors(actual)
         #expect(fallback.player.lastError == nil)
         #expect(reference.player.lastError == nil)
     }
 
-    private func expectCoastalColors(_ actual: Pixels) {
-        // The known five-second frame has green vegetation and blue sea. These
-        // broad channel relationships reject the original pink/purple cast even
-        // if both renderer paths accidentally regress together. They avoid
-        // prescribing a particular tone map or exact HDR display luminance.
-        let hills = actual.meanRGB(x: 32 ..< 56, y: 30 ..< 40)
-        let sea = actual.meanRGB(x: 110 ..< 130, y: 55 ..< 70)
-        print("DOLBY_VISION coastal colors: hills=\(hills), sea=\(sea)")
-        #expect(hills[1] > hills[0] * 1.1 && hills[1] > hills[2] * 1.05)
-        #expect(sea[2] > sea[0] * 2 && sea[1] > sea[0] * 1.8 && sea[2] > sea[1] * 1.05)
+    private func expectChartColors(_ actual: Pixels) {
+        // At 25 seconds, the 1920x1080 chart has red/green/blue patch centers at
+        // (182, 470), (439, 470), (696, 470). Sample inside each patch after the
+        // 160x90 readback. Channel dominance rejects an IPT-as-YUV color cast
+        // even if both renderers regress together, without fixing a tone map.
+        for (channel, x) in [12 ..< 18, 33 ..< 39, 55 ..< 61].enumerated() {
+            let color = actual.meanRGB(x: x, y: 36 ..< 42)
+            #expect(color[channel] > 0.2, "Chart primary must be visible: \(color)")
+            for other in 0 ..< 3 where other != channel {
+                #expect(color[channel] > color[other] * 2, "Chart primary has the wrong hue: \(color)")
+            }
+        }
     }
 
     private struct Pixels {

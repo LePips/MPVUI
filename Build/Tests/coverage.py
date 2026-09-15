@@ -21,6 +21,8 @@ def input_digest(root):
     inputs = [root / "Package.swift"]
     for folder in ("Sources", "Tests", "Example/MPVUIExample/Shared/Resources"):
         inputs.extend(path for path in (root / folder).rglob("*") if path.is_file())
+    inputs.extend((root / "Plugins").rglob("*.swift"))
+    inputs.extend((root / "Build/Tests").rglob("*.py"))
     digest = hashlib.sha256()
     for path in sorted(inputs):
         digest.update(str(path.relative_to(root)).encode())

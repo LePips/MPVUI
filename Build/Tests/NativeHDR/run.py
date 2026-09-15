@@ -10,6 +10,10 @@ import subprocess
 import tempfile
 import io
 import tarfile
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prepare_test_media import prepare
 
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -44,6 +48,9 @@ if ffmpeg is None:
     ffmpeg = max(candidates, key=lambda p: p.stat().st_mtime).parents[1] if candidates else None
 if ffmpeg is None:
     raise SystemExit("Build the native macOS slice first, or pass --ffmpeg-prefix")
+
+media = root / ".build/native-hdr-media"
+prepare(media, groups=("native-dovi",))
 
 with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
     work = Path(tmp)
@@ -117,7 +124,5 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         subprocess.run(command, check=True)
         arguments = [str(output)]
         if name == "dovi":
-            fixture = Path(__file__).parent / "profile5.rpu"
-            assert hashlib.sha256(fixture.read_bytes()).hexdigest() == "c050c039ca9712429efea6a63ee9967379524a7d2c5c26fc35bb7799ca21d808"
-            arguments.append(str(fixture))
+            arguments.append(str(media / "profile5.rpu"))
         subprocess.run(arguments, check=True)

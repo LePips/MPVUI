@@ -24,7 +24,7 @@ struct MPVSemanticSubtitleIntegrationTests {
             #expect(mpv_set_option_string(handle, name, value) >= 0)
         }
         try #require(mpv_initialize(handle) >= 0)
-        try #require(runCommand(handle, ["loadfile", TestPaths.media("02-h264-multitrack.mkv").path]) >= 0)
+        try #require(runCommand(handle, ["loadfile", TestPaths.multitrackMedia.path]) >= 0)
         try #require(waitForEvent(handle, id: MPV_EVENT_FILE_LOADED, timeout: 10))
         let track = try #require(waitForSubtitleTracks(handle, minimumCount: 3, timeout: 5)?.first { $0.title == "Overlapping cues" })
         let timeline = try #require(MPVTextSubtitleTimeline.snapshots(from: commandValue(handle, ["sub-text-cues", String(track.mpvID)])))
@@ -82,7 +82,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         defer { surface.detach()
             window.contentView = nil
         }
-        player.load(TestPaths.media("02-h264-multitrack.mkv"), autoPlay: false)
+        player.load(TestPaths.multitrackMedia, autoPlay: false)
         try #require(try await waitForPlayer(player) { !$0.subtitleTracks.isEmpty && $0.state == .paused })
         let track = try #require(player.subtitleTracks.first { $0.title == "Overlapping cues" })
         player.disableTrack(.subtitle)

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Create neutral six-second field-motion fixtures for the opt-in Swift tests."""
+import argparse
 import json
 import pathlib
 import subprocess
 
 root = pathlib.Path(__file__).resolve().parents[3]
-output = root / ".build" / "interlaced-validation"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=pathlib.Path, default=root / ".build/interlaced-validation")
+output = parser.parse_args().output
 output.mkdir(parents=True, exist_ok=True)
 cases = [
     ("480i-bottom-59.94", "720x480", "60000/1001", "bff", "smpte170m"),

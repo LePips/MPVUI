@@ -16,6 +16,8 @@ struct ConsumerTests {
             let tests: [String: String]
             let manifest: String
             let examples: [String: String]
+            let fixtureGenerators: [String: String]
+            let plugins: [String: String]
             let verifier: String
             let toolchain: ToolchainLock
             let nativeOnly: Bool
@@ -28,6 +30,8 @@ struct ConsumerTests {
             tests: tree(graph.root.appendingPathComponent("Tests")),
             manifest: digest(graph.root.appendingPathComponent("Package.swift")),
             examples: tree(graph.root.appendingPathComponent("Example")),
+            fixtureGenerators: tree(graph.root.appendingPathComponent("Build/Tests")).filter { $0.key.hasSuffix(".py") },
+            plugins: tree(graph.root.appendingPathComponent("Plugins")),
             verifier: digest(graph.codeRoot.appendingPathComponent("ConsumerTests.swift")),
             toolchain: graph.native.toolchain,
             nativeOnly: nativeOnly,
@@ -54,7 +58,8 @@ struct ConsumerTests {
         let stage = try graph.store.path("work/tests/\(key)/\(remote ? "remote-package" : "package")")
         try remove(stage)
         try mkdir(stage)
-        for name in ["Sources", "Tests", "Example"] {
+        for name in ["Sources", "Tests", "Example", "Plugins", "Build/Tests"] {
+            try mkdir(stage.appendingPathComponent(name).deletingLastPathComponent())
             try fm.copyItem(
                 at: graph.root.appendingPathComponent(name),
                 to: stage.appendingPathComponent(name)
@@ -110,16 +115,8 @@ struct ConsumerTests {
             }
         }
         if !nativeOnly {
-            for path in ["Example/MPVUIExample/Shared/Resources", "Tests/Resources"] {
-                let fixtureDirectory = graph.root.appendingPathComponent(path)
-                let fixtures = try read([String: String].self, fixtureDirectory.appendingPathComponent("Fixtures.lock.json"))
-                for (name, sha) in fixtures {
-                    try require(
-                        digest(fixtureDirectory.appendingPathComponent("Media/" + name)) == sha,
-                        "Mandatory fixture checksum mismatch: \(path)/Media/\(name)"
-                    )
-                }
-            }
+            // The staged package's plugin generates and verifies its own media;
+            // source-tree fixtures and maintainer caches are not prerequisites.
             let stage = try stagePackage(paths, index: index, key: attempt)
             checks += try wrapperChecks(stage)
             let devices = try simulators()

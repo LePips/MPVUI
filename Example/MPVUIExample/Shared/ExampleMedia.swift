@@ -62,7 +62,7 @@ extension ExampleMedia {
             return isRegularFile == true
         }
         let subtitleURLs = resourceURLs.filter(isSubtitle)
-        let mediaURLs = resourceURLs.filter { !isSubtitle($0) }
+        let mediaURLs = resourceURLs.filter { mediaExtensions.contains($0.pathExtension.lowercased()) }
 
         let sidecarsByMedia = Dictionary(grouping: subtitleURLs) { subtitleURL in
             matchingMedia(for: subtitleURL, among: mediaURLs)
@@ -86,6 +86,13 @@ extension ExampleMedia {
                     $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending
                 }
     }
+
+    // Attribution and other documentation travel with the fixtures but are not playable.
+    private static let mediaExtensions: Set<String> = [
+        "3gp", "aac", "ac3", "aiff", "alac", "avi", "eac3", "flac", "flv",
+        "m2ts", "m4a", "m4v", "mka", "mkv", "mov", "mp3", "mp4", "mpeg",
+        "mpg", "mts", "ogg", "ogv", "opus", "ts", "vob", "wav", "webm", "webp",
+    ]
 
     private static let subtitleExtensions: Set<String> = [
         "ass", "idx", "lrc", "mks", "sami", "smi", "srt", "ssa", "sub",

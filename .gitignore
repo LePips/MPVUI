@@ -16,10 +16,10 @@ xcuserdata/
 *.xcresult
 *.dSYM
 
-# The example app discovers every file in this folder at runtime.
-# Check in media files explicitly.
+# Add example media locally; only the folder instructions are checked in.
 Example/MPVUIExample/Shared/Resources/Media/*
-!Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.mp4
-!Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.en.srt
-!Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.es.srt
-!Example/MPVUIExample/Shared/Resources/Media/02-h264-multitrack.mkv
+!Example/MPVUIExample/Shared/Resources/Media/README.md
+
+# All generated test media belongs in .build or plugin output, never in Git.
+Tests/Resources/Media/
+Build/Tests/NativeHDR/*.rpu

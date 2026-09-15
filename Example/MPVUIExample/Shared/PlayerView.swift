@@ -84,7 +84,8 @@ struct PlayerView: View {
         self.player = player
         self.mediaCatalog = mediaCatalog
         _playbackSource = State(
-            initialValue: mediaCatalog.first.map(PlaybackSource.bundled)
+            initialValue: mediaCatalog.first
+                .map(PlaybackSource.bundled)
                 ?? .unavailable
         )
     }
@@ -341,16 +342,8 @@ struct PlayerView: View {
         case let .bundled(media):
             resourceError = nil
             player.load(media.url)
-            // The baseline fixture demonstrates both roles immediately.
-            if media.fileName == "01-h264-aac-baseline.mp4" {
-                for (suffix, role) in [(".en.srt", MPVSubtitleRole.primary), (".es.srt", .secondary)] {
-                    if let sidecar = media.sidecars.first(where: { $0.fileName.hasSuffix(suffix) }) {
-                        player.loadExternalSubtitle(sidecar.url, selecting: role)
-                    }
-                }
-            }
         case .unavailable:
-            resourceError = "No media files were found in the bundled Media resources."
+            resourceError = "Add media to Shared/Resources/Media, then rebuild the example."
         }
     }
 

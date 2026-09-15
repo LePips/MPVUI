@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Generate the shared chapter, track-selection and subtitle-seeking sample."""
+"""Generate the test-only chapter, track-selection and subtitle-seeking sample."""
 
-import hashlib
+import argparse
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-RESOURCES = ROOT / "Example/MPVUIExample/Shared/Resources"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, default=ROOT / ".build/test-media")
+output_directory = parser.parse_args().output
+output_directory.mkdir(parents=True, exist_ok=True)
 NAME = "02-h264-multitrack.mkv"
 
 with tempfile.TemporaryDirectory(prefix="multitrack-fixture-") as directory:
@@ -84,11 +87,7 @@ with tempfile.TemporaryDirectory(prefix="multitrack-fixture-") as directory:
     assert [(float(c["start_time"]), c["tags"]["title"]) for c in chapters] == [
         (0, "Opening"), (4, "Middle"), (8, "Ending"),
     ], "Chapter names or boundaries changed"
-    destination = RESOURCES / "Media" / NAME
+    destination = output_directory / NAME
     destination.write_bytes(output.read_bytes())
 
-manifest = RESOURCES / "Fixtures.lock.json"
-fixtures = json.loads(manifest.read_text())
-fixtures[NAME] = hashlib.sha256(destination.read_bytes()).hexdigest()
-manifest.write_text(json.dumps(dict(sorted(fixtures.items())), indent=2) + "\n")
-print(f"Generated {NAME}: {destination.stat().st_size} bytes, SHA-256 {fixtures[NAME]}")
+print(f"Generated {destination}: {destination.stat().st_size} bytes")

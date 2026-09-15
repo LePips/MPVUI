@@ -847,7 +847,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
 
         let layer = surface.metalLayer
 
-        let mediaURL = TestPaths.media("02-h264-multitrack.mkv")
+        let mediaURL = TestPaths.multitrackMedia
         try #require(FileManager.default.fileExists(atPath: mediaURL.path))
 
         player.load(mediaURL, autoPlay: true)
@@ -1035,12 +1035,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         #expect(player.lastError == nil)
     }
 
-    @Test(
-        .enabled(
-            if: FileManager.default.fileExists(atPath: TestPaths.dolbyVisionMedia.path),
-            "Requires the local Dolby Vision sample or MPVUI_DOLBY_VISION_FIXTURE."
-        )
-    )
+    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
     @MainActor
     func `hdr surface survives repeated window resizes`() async throws {
         let player = MPVPlayer(

@@ -217,7 +217,10 @@ def run_benchmarks(args):
     with measurement_lock():
         before = source_identity(root)
         environment = environment_identity(root, developer, xcode_build, suites)
-        media = (args.media or root / "Example/MPVUIExample/Shared/Resources/Media/01-h264-aac-baseline.mp4").resolve()
+        if "playback" in suites and args.media is None:
+            subprocess.run([sys.executable, str(root / "Build/Tests/prepare_test_media.py"),
+                            "--group", "baseline"], check=True)
+        media = (args.media or root / ".build/test-media/01-h264-aac-baseline.mp4").resolve()
         if "playback" in suites and not media.is_file():
             raise ValueError(f"Media does not exist: {media}")
         media_sha = sha256(media) if "playback" in suites else None
