@@ -2,26 +2,35 @@ import CoreGraphics
 
 /// The display and color contract shared by every native player surface.
 struct MPVRenderSurfaceConfiguration: Sendable {
-    let usesExtendedDynamicRange: Bool
+
+    // MARK: - Boolean options
+
     let displaySupportsExtendedDynamicRange: Bool
-    let drawableSize: CGSize
-    let scale: CGFloat
+    let usesExtendedDynamicRange: Bool
+
+    // MARK: - Numeric options
+
     let outputHeadroom: Double
-    let displayCapabilities: MPVDisplayCapabilities
-    let configuredDynamicRange: MPVPresentationStatus.DynamicRange
-    let policyFallbackReason: MPVPresentationStatus.FallbackReason?
+    let scale: CGFloat
+
+    // MARK: - Display and color
+
     let colorConfiguration: MPVRenderColorConfiguration?
+    let configuredDynamicRange: MPVPresentationStatus.DynamicRange
+    let displayCapabilities: MPVDisplayCapabilities
+    let drawableSize: CGSize
+    let policyFallbackReason: MPVPresentationStatus.FallbackReason?
 
     init(
-        usesExtendedDynamicRange: Bool,
+        colorConfiguration: MPVRenderColorConfiguration? = nil,
+        configuredDynamicRange: MPVPresentationStatus.DynamicRange? = nil,
+        displayCapabilities: MPVDisplayCapabilities? = nil,
         displaySupportsExtendedDynamicRange: Bool,
         drawableSize: CGSize,
-        scale: CGFloat,
         outputHeadroom: Double,
-        displayCapabilities: MPVDisplayCapabilities? = nil,
-        configuredDynamicRange: MPVPresentationStatus.DynamicRange? = nil,
         policyFallbackReason: MPVPresentationStatus.FallbackReason? = nil,
-        colorConfiguration: MPVRenderColorConfiguration? = nil
+        scale: CGFloat,
+        usesExtendedDynamicRange: Bool
     ) {
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
         self.displaySupportsExtendedDynamicRange =

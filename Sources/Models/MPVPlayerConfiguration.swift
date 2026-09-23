@@ -1,27 +1,21 @@
-/// Playback defaults and output options for ``MPVPlayer``.
+/// Immutable playback defaults and output options for ``MPVPlayer``.
+///
+/// Runtime controls such as volume and playback rate use the player's methods.
+/// Other settings require a new player.
 ///
 /// Pass the configuration to the player initializer on the main actor:
 ///
 /// ```swift
 /// let configuration = MPVPlayerConfiguration(
 ///     autoPlay: false,
-///     volume: 75,
-///     videoOutput: .sampleBuffer
+///     videoOutput: .sampleBuffer,
+///     volume: 75
 /// )
 /// let player = MPVPlayer(configuration: configuration)
 /// ```
 public struct MPVPlayerConfiguration: Equatable, Sendable {
-    /// The preferred video presentation backend.
-    public enum VideoOutput: String, CaseIterable, Equatable, Sendable {
-        /// Full gpu-next rendering through Metal/MoltenVK.
-        case metal
 
-        /// Native AVFoundation output with iOS PiP; requires the native-output Libmpv build.
-        /// AVFoundation handles color conversion, bypassing gpu-next shaders and tone mapping.
-        /// Unsupported native Dolby Vision falls back to Metal for that file;
-        /// ``MPVPlayer/videoOutput`` reports the active backend.
-        case sampleBuffer
-    }
+    // MARK: - Types
 
     /// The hardware-decoding strategy requested from mpv.
     public enum HardwareDecoding: String, CaseIterable, Equatable, Sendable {
@@ -86,113 +80,111 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         case trace
     }
 
-    /// The default playback volume, 100 percent.
-    public static let defaultVolume = 100.0
+    /// The preferred video presentation backend.
+    public enum VideoOutput: String, CaseIterable, Equatable, Sendable {
+        /// Full gpu-next rendering through Metal/MoltenVK.
+        case metal
 
-    /// The default playback rate, normal speed.
-    public static let defaultPlaybackRate = 1.0
+        /// Native AVFoundation output with iOS PiP; requires the native-output Libmpv build.
+        /// AVFoundation handles color conversion, bypassing gpu-next shaders and tone mapping.
+        /// Unsupported native Dolby Vision falls back to Metal for that file;
+        /// ``MPVPlayer/videoOutput`` reports the active backend.
+        case sampleBuffer
+    }
 
-    /// The slowest playback rate accepted by mpv.
-    public static let minimumPlaybackRate = 0.01
-
-    /// The fastest playback rate accepted by mpv.
-    public static let maximumPlaybackRate = 100.0
-
-    /// The default network cache duration, ten seconds.
-    public static let defaultNetworkCacheSeconds: Duration = .seconds(10)
-
-    /// The default initial buffer duration, one second.
-    public static let defaultInitialBufferSeconds: Duration = .seconds(1)
+    // MARK: - Defaults
 
     /// The default player configuration.
     public static let `default` = Self()
 
+    /// The default initial buffer duration, one second.
+    public static let defaultInitialBufferSeconds: Duration = .seconds(1)
+
+    /// The default network cache duration, ten seconds.
+    public static let defaultNetworkCacheSeconds: Duration = .seconds(10)
+
+    /// The default playback rate, normal speed.
+    public static let defaultPlaybackRate = 1.0
+
+    /// The default playback volume, 100 percent.
+    public static let defaultVolume = 100.0
+
+    /// The fastest playback rate accepted by mpv.
+    public static let maximumPlaybackRate = 100.0
+
+    /// The slowest playback rate accepted by mpv.
+    public static let minimumPlaybackRate = 0.01
+
+    // MARK: - Boolean options
+
     /// Whether loading a source should begin playback automatically.
-    public var autoPlay: Bool
+    public let autoPlay: Bool
 
     /// Whether playback should restart after reaching the end of the media.
-    public var loop: Bool
+    public let loop: Bool
 
-    private var storedStartTime: Duration?
-
-    /// Initial position, or `nil` for the default. Negative values become zero.
-    public var startTime: Duration? {
-        get { storedStartTime }
-        set { storedStartTime = newValue?.clampPositiveOrZero }
-    }
-
-    private var storedVolume: Double
-
-    /// Volume clamped to `0...100`; NaN uses ``defaultVolume``.
-    public var volume: Double {
-        get { storedVolume }
-        set { storedVolume = Self.normalizedVolume(newValue) }
-    }
-
-    private var storedPlaybackRate: Double
+    // MARK: - Numeric options
 
     /// Speed multiplier clamped to `0.01...100`. Nonpositive or non-finite values
     /// use ``defaultPlaybackRate``.
-    public var playbackRate: Double {
-        get { storedPlaybackRate }
-        set { storedPlaybackRate = Self.normalizedPlaybackRate(newValue) }
-    }
-
-    /// The requested hardware-decoding strategy.
-    public var hardwareDecoding: HardwareDecoding
-
-    /// The video backend. Use `.sampleBuffer` for iOS picture in picture.
-    public var videoOutput: VideoOutput
-
-    /// Desired HDR behavior for either backend. Presentation status reports
-    /// unsupported policies and any backend fallback required to enforce SDR.
-    public var hdrPolicy: HDRPolicy
-
-    /// SDR gamut and precision, independent of the HDR policy.
-    public var sdrOutput: MPVSDROutputPolicy
-
-    /// Ownership of display conversion and SDR reference viewing behavior.
-    public var colorManagement: MPVColorManagement
-
-    /// Renderer cost/quality defaults and optional explicit overrides.
-    public var renderingQuality: MPVRenderingQuality
-
-    /// Interlace detection, processing and field-order policy.
-    public var deinterlace: MPVDeinterlacePolicy
-
-    /// Strict reproduction eligibility or explicitly lossy Profile 7 compatibility.
-    public var dolbyVisionPolicy: MPVDolbyVisionPolicy
-
-    /// How native Dolby Vision conflicts with subtitles and geometry features.
-    public var nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy
-
-    private var storedSubtitleLuminance: Double
+    public let playbackRate: Double
 
     /// Reference white in nits for native HDR subtitles and overlay graphics.
     /// Values are clamped to `1...1000`; non-finite values use 203 nits.
-    public var subtitleLuminance: Double {
-        get { storedSubtitleLuminance }
-        set { storedSubtitleLuminance = Self.normalizedSubtitleLuminance(newValue) }
-    }
+    public let subtitleLuminance: Double
 
-    private var storedNetworkCacheSeconds: Duration
+    /// Volume clamped to `0...100`; NaN uses ``defaultVolume``.
+    public let volume: Double
 
-    /// Desired network cache duration, clamped to zero or greater.
-    public var networkCacheSeconds: Duration {
-        get { storedNetworkCacheSeconds }
-        set { storedNetworkCacheSeconds = newValue.clampPositiveOrZero }
-    }
-
-    private var storedInitialBufferSeconds: Duration
+    // MARK: - Timing options
 
     /// Buffered duration required before initial playback, clamped to zero or greater.
-    public var initialBufferSeconds: Duration {
-        get { storedInitialBufferSeconds }
-        set { storedInitialBufferSeconds = newValue.clampPositiveOrZero }
-    }
+    public let initialBufferSeconds: Duration
+
+    /// Desired network cache duration, clamped to zero or greater.
+    public let networkCacheSeconds: Duration
+
+    /// Initial position, or `nil` for the default. Negative values become zero.
+    public let startTime: Duration?
+
+    // MARK: - Policies
+
+    /// Audio decoding, spatialization, and session settings applied when creating the player.
+    /// ``additionalOptions`` can override these defaults.
+    public let audio: MPVAudioConfiguration
+
+    /// Ownership of display conversion and SDR reference viewing behavior.
+    public let colorManagement: MPVColorManagement
+
+    /// Interlace detection, processing and field-order policy.
+    public let deinterlace: MPVDeinterlacePolicy
+
+    /// Strict reproduction eligibility or explicitly lossy Profile 7 compatibility.
+    public let dolbyVisionPolicy: MPVDolbyVisionPolicy
+
+    /// The requested hardware-decoding strategy.
+    public let hardwareDecoding: HardwareDecoding
+
+    /// Desired HDR behavior for either backend. Presentation status reports
+    /// unsupported policies and any backend fallback required to enforce SDR.
+    public let hdrPolicy: HDRPolicy
 
     /// The minimum severity of forwarded mpv log messages.
-    public var logLevel: LogLevel
+    public let logLevel: LogLevel
+
+    /// How native Dolby Vision conflicts with subtitles and geometry features.
+    public let nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy
+
+    /// Renderer cost/quality defaults and optional explicit overrides.
+    public let renderingQuality: MPVRenderingQuality
+
+    /// SDR gamut and precision, independent of the HDR policy.
+    public let sdrOutput: MPVSDROutputPolicy
+
+    /// The video backend. Use `.sampleBuffer` for iOS picture in picture.
+    public let videoOutput: VideoOutput
+
+    // MARK: - Additional options
 
     /// Extra mpv options applied last. MPVUI's reserved options cannot be overridden.
     ///
@@ -200,62 +192,68 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// and `sub-font` to the font's internal family name. MPVUI ships no fonts.
     /// These options affect mpv-rendered subtitles; style text from
     /// ``MPVPlayer/textSubtitleStream()`` in your own UI.
-    public var additionalOptions: [String: String]
+    public let additionalOptions: [String: String]
+
+    // MARK: - Initialization
 
     /// Creates a configuration using the normalization rules documented on each property.
     public init(
+        additionalOptions: [String: String] = [:],
+        audio: MPVAudioConfiguration = .init(),
         autoPlay: Bool = true,
-        loop: Bool = false,
-        startTime: Duration? = nil,
-        volume: Double = 100,
-        playbackRate: Double = 1,
-        hardwareDecoding: HardwareDecoding = .automatic,
-        videoOutput: VideoOutput = .metal,
-        hdrPolicy: HDRPolicy = .automatic,
-        subtitleLuminance: Double = 203,
-        sdrOutput: MPVSDROutputPolicy = .automatic,
         colorManagement: MPVColorManagement = .init(),
-        renderingQuality: MPVRenderingQuality = .init(),
         deinterlace: MPVDeinterlacePolicy = .init(),
         dolbyVisionPolicy: MPVDolbyVisionPolicy = .strict,
-        nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy = .preserveDolbyVision,
-        networkCacheSeconds: Duration = .seconds(10),
+        hardwareDecoding: HardwareDecoding = .automatic,
+        hdrPolicy: HDRPolicy = .automatic,
         initialBufferSeconds: Duration = .seconds(1),
         logLevel: LogLevel = .warning,
-        additionalOptions: [String: String] = [:]
+        loop: Bool = false,
+        nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy = .preserveDolbyVision,
+        networkCacheSeconds: Duration = .seconds(10),
+        playbackRate: Double = 1,
+        renderingQuality: MPVRenderingQuality = .init(),
+        sdrOutput: MPVSDROutputPolicy = .automatic,
+        startTime: Duration? = nil,
+        subtitleLuminance: Double = 203,
+        videoOutput: VideoOutput = .metal,
+        volume: Double = 100
     ) {
+        self.additionalOptions = additionalOptions
+        self.audio = audio
         self.autoPlay = autoPlay
-        self.loop = loop
-        storedStartTime = startTime?.clampPositiveOrZero
-        storedVolume = Self.normalizedVolume(volume)
-        storedPlaybackRate = Self.normalizedPlaybackRate(playbackRate)
-        self.hardwareDecoding = hardwareDecoding
-        self.videoOutput = videoOutput
-        self.hdrPolicy = hdrPolicy
-        self.sdrOutput = sdrOutput
         self.colorManagement = colorManagement
-        self.renderingQuality = renderingQuality
         self.deinterlace = deinterlace
         self.dolbyVisionPolicy = dolbyVisionPolicy
-        self.nativeVideoFeaturePolicy = nativeVideoFeaturePolicy
-        storedSubtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)
-        storedNetworkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
-        storedInitialBufferSeconds = initialBufferSeconds.clampPositiveOrZero
+        self.hardwareDecoding = hardwareDecoding
+        self.hdrPolicy = hdrPolicy
+        self.initialBufferSeconds = initialBufferSeconds.clampPositiveOrZero
         self.logLevel = logLevel
-        self.additionalOptions = additionalOptions
+        self.loop = loop
+        self.nativeVideoFeaturePolicy = nativeVideoFeaturePolicy
+        self.networkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
+        self.playbackRate = Self.normalizedPlaybackRate(playbackRate)
+        self.renderingQuality = renderingQuality
+        self.sdrOutput = sdrOutput
+        self.startTime = startTime?.clampPositiveOrZero
+        self.subtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)
+        self.videoOutput = videoOutput
+        self.volume = Self.normalizedVolume(volume)
     }
 
-    private static func normalizedVolume(_ value: Double) -> Double {
-        guard !value.isNaN else { return defaultVolume }
-        return clamp(value, to: 0 ... 100)
+    // MARK: - Normalization
+
+    private static func normalizedPlaybackRate(_ value: Double) -> Double {
+        guard value.isFinite, value > 0 else { return defaultPlaybackRate }
+        return clamp(value, to: minimumPlaybackRate ... maximumPlaybackRate)
     }
 
     private static func normalizedSubtitleLuminance(_ value: Double) -> Double {
         value.isFinite ? clamp(value, to: 1 ... 1000) : 203
     }
 
-    private static func normalizedPlaybackRate(_ value: Double) -> Double {
-        guard value.isFinite, value > 0 else { return defaultPlaybackRate }
-        return clamp(value, to: minimumPlaybackRate ... maximumPlaybackRate)
+    private static func normalizedVolume(_ value: Double) -> Double {
+        guard !value.isNaN else { return defaultVolume }
+        return clamp(value, to: 0 ... 100)
     }
 }

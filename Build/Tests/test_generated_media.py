@@ -43,6 +43,16 @@ class GeneratedMediaContractTests(unittest.TestCase):
                                      (codec, "48000", 2))
                     self.assertAlmostEqual(float(info["format"]["duration"]), seconds, delta=0.04)
 
+    def test_pcm_spatial_fixtures_preserve_all_speaker_channels(self):
+        for layout, count in (("mono", 1), ("stereo", 2), ("surround51", 6), ("surround71", 8)):
+            with self.subTest(layout=layout):
+                stream, = self.probe(f"pcm-{layout}.mka")["streams"]
+                self.assertEqual((stream["codec_name"], stream["sample_rate"], stream["channels"]),
+                                 ("pcm_s16le", "48000", count))
+        for codec in ("ac3", "eac3"):
+            stream, = self.probe(f"{codec}-surround51.mka")["streams"]
+            self.assertEqual((stream["codec_name"], stream["channels"]), (codec, 6))
+
     def test_subtitle_tracks_contain_bitmap_packets_and_have_finite_duration(self):
         info = self.probe("subtitle-formats.mkv")
         self.assertEqual([s["codec_name"] for s in info["streams"]],

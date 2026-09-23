@@ -63,8 +63,11 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
     @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox])
     func `native statistics and decoder session`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: hardwareDecoding,
-            videoOutput: .sampleBuffer, logLevel: .none, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: hardwareDecoding,
+            logLevel: .none,
+            videoOutput: .sampleBuffer
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
@@ -129,8 +132,11 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
 
         init(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) {
             player = MPVPlayer(configuration: .init(
-                autoPlay: false, hardwareDecoding: hardwareDecoding,
-                videoOutput: .sampleBuffer, logLevel: .none, additionalOptions: ["ao": "null"]
+                additionalOptions: ["ao": "null"],
+                autoPlay: false,
+                hardwareDecoding: hardwareDecoding,
+                logLevel: .none,
+                videoOutput: .sampleBuffer
             ))
             surface = MPVPlatformVideoPlayer(player: player)
             window = NSWindow(

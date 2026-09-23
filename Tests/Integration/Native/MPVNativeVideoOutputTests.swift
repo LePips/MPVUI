@@ -18,8 +18,10 @@ struct MPVNativeVideoOutputTests {
     @MainActor @Test
     func `animated WebP reaches the Apple sample buffer output`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null", "keep-open": "yes"]
+            additionalOptions: ["ao": "null", "keep-open": "yes"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         try fixture.player.load(TestPaths.testMedia("webp-animation.webp"), autoPlay: true)
@@ -35,8 +37,10 @@ struct MPVNativeVideoOutputTests {
     @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox])
     func `native frames and seek`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: hardwareDecoding,
-            videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: hardwareDecoding,
+            videoOutput: .sampleBuffer
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         #if os(macOS)

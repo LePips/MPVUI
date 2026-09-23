@@ -86,12 +86,12 @@ struct MPVHDRSurfacePolicyTests {
         sourceHDR: Bool = true
     ) -> MPVHDRSurfacePolicy {
         .init(
-            policy: policy,
-            native: native,
-            supportsLayerPolicy: layerPolicy,
-            supportsMetalHDR: metalHDR,
             displaySupportsHDR: displayHDR,
-            sourceIsHDR: sourceHDR
+            native: native,
+            policy: policy,
+            sourceIsHDR: sourceHDR,
+            supportsLayerPolicy: layerPolicy,
+            supportsMetalHDR: metalHDR
         )
     }
 }

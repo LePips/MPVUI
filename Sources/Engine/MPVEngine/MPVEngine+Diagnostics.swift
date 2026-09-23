@@ -115,6 +115,13 @@ extension MPVEngine {
     func refreshPlaybackDiagnostics() {
         guard handle != nil else { return }
         var result = playbackDiagnostics
+        result.audio = MPVAudioStatusParser.parse(
+            output: getString("current-ao"), codec: getString("audio-codec-name"),
+            sourceChannels: getString("current-tracks/audio/demux-channels"),
+            outputChannels: getString("audio-out-params/channels"),
+            outputFormat: getString("audio-out-params/format"),
+            native: getNode("avfoundation-audio-spatialization")
+        )
         result.decoderDroppedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("decoder-frame-drop-count"))
         result.outputDroppedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("frame-drop-count"))
         result.mistimedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("mistimed-frame-count"))

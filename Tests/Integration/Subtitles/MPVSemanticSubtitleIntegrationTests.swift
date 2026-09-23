@@ -128,9 +128,11 @@ struct MPVSemanticSubtitleIntegrationTests {
     @MainActor
     func `public subtitle roles preserve identity controls and selection across reloads`() async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, videoOutput: .sampleBuffer,
             // The shared baseline also has example sidecars; this test supplies its own.
-            additionalOptions: ["ao": "null", "sub-auto": "no"]
+            additionalOptions: ["ao": "null", "sub-auto": "no"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         let recorder = SemanticSubtitleRecorder()
         let observation = record(player.textSubtitleStream(), in: recorder)
@@ -470,8 +472,9 @@ struct MPVSemanticSubtitleIntegrationTests {
     func `public streams independently receive update clear and replay`() async throws {
         let player = MPVPlayer(
             configuration: .init(
-                autoPlay: false, hdrPolicy: .disabled,
-                additionalOptions: ["sub-auto": "no"]
+                additionalOptions: ["sub-auto": "no"],
+                autoPlay: false,
+                hdrPolicy: .disabled
             )
         )
         let firstRecorder = SemanticSubtitleRecorder()

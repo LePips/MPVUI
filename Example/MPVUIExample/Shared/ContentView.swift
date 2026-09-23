@@ -53,15 +53,7 @@ public struct ContentView: View {
 
     /// Creates the example screen with platform-specific player defaults.
     public init() {
-        var configuration = MPVPlayerConfiguration(
-            autoPlay: true,
-            hardwareDecoding: .automatic,
-            hdrPolicy: .automatic,
-            logLevel: .info,
-            additionalOptions: [
-                "target-contrast": "inf",
-            ]
-        )
+        var additionalOptions = ["target-contrast": "inf"]
         #if os(macOS)
         // The macOS library includes LuaJIT. Its bundled scripts cannot run
         // under this example's hardened runtime, and our UI supplies the controls.
@@ -71,18 +63,27 @@ public struct ContentView: View {
             "load-auto-profiles", "load-select", "load-positioning", "load-commands",
             "load-context-menu",
         ] {
-            configuration.additionalOptions[option] = "no"
+            additionalOptions[option] = "no"
         }
-        #endif
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        configuration.videoOutput = .sampleBuffer
         #endif
         #if DEBUG && os(macOS)
         // Exercise the iOS rendering path in the macOS example during validation.
-        if ProcessInfo.processInfo.arguments.contains("--native-video-output") {
-            configuration.videoOutput = .sampleBuffer
-        }
+        let videoOutput: MPVPlayerConfiguration.VideoOutput =
+            ProcessInfo.processInfo.arguments.contains("--native-video-output") ? .sampleBuffer : .metal
+        #elseif os(iOS) && !targetEnvironment(macCatalyst)
+        let videoOutput: MPVPlayerConfiguration.VideoOutput = .sampleBuffer
+        #else
+        let videoOutput: MPVPlayerConfiguration.VideoOutput = .metal
         #endif
+        let configuration = MPVPlayerConfiguration(
+            additionalOptions: additionalOptions,
+            audio: .init(audioSession: .hostManaged),
+            autoPlay: true,
+            hardwareDecoding: .automatic,
+            hdrPolicy: .automatic,
+            logLevel: .info,
+            videoOutput: videoOutput
+        )
         _player = State(initialValue: MPVPlayer(configuration: configuration))
     }
 

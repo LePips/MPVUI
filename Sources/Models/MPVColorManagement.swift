@@ -10,8 +10,11 @@ public enum MPVSDROutputPolicy: String, CaseIterable, Equatable, Sendable {
     case highPrecision
 }
 
-/// The display conversion contract. Changes require a new player configuration.
+/// Display color conversion settings applied when creating a player.
 public struct MPVColorManagement: Equatable, Sendable {
+
+    // MARK: - Types
+
     /// The profile or calibration used for display color conversion.
     public enum DisplayProfile: Equatable, Sendable {
         /// ColorSync converts the accurately tagged layer to the current display.
@@ -60,27 +63,30 @@ public struct MPVColorManagement: Equatable, Sendable {
         case legacyDisplay
     }
 
-    /// The requested display conversion profile.
-    public var displayProfile: DisplayProfile
-    /// The requested SDR viewing behavior.
-    public var sdrViewing: SDRViewing
-    private var storedReferenceWhite: Double
+    // MARK: - Numeric options
+
     /// SDR reference white used in HDR mapping, in cd/m². This describes the
     /// rendering model; it does not set or measure physical screen luminance.
-    public var referenceWhite: Double {
-        get { storedReferenceWhite }
-        set { storedReferenceWhite = Self.normalizeReferenceWhite(newValue) }
-    }
+    /// Clamped to `10...1000` and rounded; non-finite values use 203.
+    public let referenceWhite: Double
+
+    // MARK: - Policies
+
+    /// The requested display conversion profile.
+    public let displayProfile: DisplayProfile
+
+    /// The requested SDR viewing behavior.
+    public let sdrViewing: SDRViewing
 
     /// Creates color settings with reference white clamped to 10...1000 cd/m².
     public init(
         displayProfile: DisplayProfile = .automatic,
-        sdrViewing: SDRViewing = .reference,
-        referenceWhite: Double = 203
+        referenceWhite: Double = 203,
+        sdrViewing: SDRViewing = .reference
     ) {
         self.displayProfile = displayProfile
+        self.referenceWhite = Self.normalizeReferenceWhite(referenceWhite)
         self.sdrViewing = sdrViewing
-        storedReferenceWhite = Self.normalizeReferenceWhite(referenceWhite)
     }
 
     private static func normalizeReferenceWhite(_ value: Double) -> Double {

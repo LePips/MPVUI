@@ -14,7 +14,8 @@ import Observation
 @MainActor
 @Observable
 public final class MPVPlayer {
-    /// The configuration used to create the underlying mpv client.
+    /// Immutable settings used to create the underlying mpv client.
+    /// Runtime controls update the player's state, leaving these defaults unchanged.
     public let configuration: MPVPlayerConfiguration
 
     /// The video output currently in use. Unsupported native formats fall back

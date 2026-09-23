@@ -1,5 +1,8 @@
 /// Playback observations. Missing instrumentation is nil, never an inferred zero.
 public struct MPVPlaybackDiagnostics: Equatable, Sendable {
+    /// The current audio output, channel layouts, and Spatial Audio observations.
+    public var audio: MPVAudioStatus = .init()
+
     /// Timing observations for one renderer pass.
     public struct RenderPass: Equatable, Sendable {
         /// The renderer's name for this pass.

@@ -63,6 +63,8 @@ MPVUI_RUN_NATIVE_AUDIO_TESTS=1 swift test --no-parallel --filter MPVNativeAudioI
 MPVUI_RUN_INTERLACE_VALIDATION=1 swift test --no-parallel --filter MPVInterlacedPlaybackTests
 ```
 
-Audio tests use the real route with playback muted. Check HDR appearance, display switching, and PiP on physical devices.
+Audio tests use the real route with playback muted. They check channel layouts, spatialization eligibility, Dolby seeking, and PCM fallback. Confirm audible Spatial Audio and head tracking on physical devices with compatible headphones.
+
+Check HDR appearance, display switching, and PiP on physical devices.
 
 Use `Build/benchmark --help` for performance runs and [RenderingValidation/generate.py](Build/Tests/RenderingValidation/generate.py) for optional rendering charts.

@@ -339,10 +339,11 @@ private final class NativeFormatFixture {
 
     init(options: [String: String]) {
         playback = PlaybackFixture(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer,
+            additionalOptions: options.merging(["ao": "null"]) { _, new in new },
+            autoPlay: false,
+            hardwareDecoding: .disabled,
             logLevel: .verbose,
-            additionalOptions: options.merging(["ao": "null"]) { _, new in new }
+            videoOutput: .sampleBuffer
         ))
         player.logHandler = { [weak self] message in
             guard let self, message.prefix.contains("avfoundation") else { return }

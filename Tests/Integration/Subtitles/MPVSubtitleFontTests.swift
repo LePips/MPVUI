@@ -44,14 +44,17 @@ struct MPVSubtitleFontTests {
             """
         )
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, videoOutput: videoOutput,
-            logLevel: .verbose, additionalOptions: [
+            additionalOptions: [
                 "ao": "null", "osd-level": "0", "sub-auto": "no",
                 "sub-fonts-dir": fonts.directory.path,
                 "sub-font": fonts.fallback.family,
                 // Only the files supplied by this client may satisfy font selection.
                 "sub-font-provider": "none",
-            ]
+            ],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            logLevel: .verbose,
+            videoOutput: videoOutput
         ))
         defer { fixture.close() }
         let player = fixture.player

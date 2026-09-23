@@ -198,9 +198,15 @@ struct MPVPerformanceBenchmarkTests {
             options["sid"] = "no"
         }
         let player = MPVPlayer(configuration: .init(
-            autoPlay: true, loop: true, hardwareDecoding: .disabled, videoOutput: backend,
-            hdrPolicy: .disabled, sdrOutput: .compatibility8Bit,
-            renderingQuality: .init(preset: .balanced), logLevel: .none, additionalOptions: options
+            additionalOptions: options,
+            autoPlay: true,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            logLevel: .none,
+            loop: true,
+            renderingQuality: .init(preset: .balanced),
+            sdrOutput: .compatibility8Bit,
+            videoOutput: backend
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(

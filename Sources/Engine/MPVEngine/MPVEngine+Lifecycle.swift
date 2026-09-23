@@ -120,6 +120,9 @@ extension MPVEngine {
             // content. The trailing comma retains mpv's normal audio-output
             // autoprobing as a fallback if AVFoundation cannot open the route.
             try setInitialOption("ao", value: "avfoundation,")
+            for (name, value) in configuration.audio.mpvOptions {
+                try setInitialOption(name, value: value)
+            }
 
             try setInitialOption("hwdec", value: configuration.hardwareDecoding.rawValue)
             renderingResolution = MPVRenderingOptions.resolve(

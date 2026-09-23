@@ -1,14 +1,8 @@
-/// Deinterlacing preserves temporal field motion by producing one frame per field.
+/// Deinterlacing settings applied when creating a player.
+/// Produces one frame per field to preserve temporal motion.
 public struct MPVDeinterlacePolicy: Equatable, Sendable {
-    /// When deinterlacing should be applied.
-    public enum Mode: String, CaseIterable, Sendable {
-        /// Leaves deinterlacing disabled.
-        case disabled
-        /// Deinterlaces frames identified as interlaced.
-        case automatic
-        /// Applies deinterlacing regardless of interlace tags.
-        case forced
-    }
+
+    // MARK: - Types
 
     /// The filter used to reconstruct progressive frames.
     public enum Algorithm: String, CaseIterable, Sendable {
@@ -30,27 +24,44 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
         case bottomFirst = "bff"
     }
 
-    /// When to enable deinterlacing.
-    public var mode: Mode
-    /// The requested deinterlacing filter.
-    public var algorithm: Algorithm
-    /// The requested field order or automatic detection.
-    public var fieldOrder: FieldOrder
+    /// When deinterlacing should be applied.
+    public enum Mode: String, CaseIterable, Sendable {
+        /// Leaves deinterlacing disabled.
+        case disabled
+        /// Deinterlaces frames identified as interlaced.
+        case automatic
+        /// Applies deinterlacing regardless of interlace tags.
+        case forced
+    }
+
+    // MARK: - Boolean options
+
     /// Run idet before an explicitly selected software filter to recover bad field tags.
     /// Detection itself requires software-accessible pixels, including progressive video.
-    public var analyzeFieldOrder: Bool
+    public let analyzeFieldOrder: Bool
+
+    // MARK: - Policies
+
+    /// The requested deinterlacing filter.
+    public let algorithm: Algorithm
+
+    /// The requested field order or automatic detection.
+    public let fieldOrder: FieldOrder
+
+    /// When to enable deinterlacing.
+    public let mode: Mode
 
     /// Creates a deinterlacing policy, disabled by default.
     public init(
-        mode: Mode = .disabled,
         algorithm: Algorithm = .automatic,
+        analyzeFieldOrder: Bool = false,
         fieldOrder: FieldOrder = .automatic,
-        analyzeFieldOrder: Bool = false
+        mode: Mode = .disabled
     ) {
-        self.mode = mode
         self.algorithm = algorithm
-        self.fieldOrder = fieldOrder
         self.analyzeFieldOrder = analyzeFieldOrder
+        self.fieldOrder = fieldOrder
+        self.mode = mode
     }
 }
 

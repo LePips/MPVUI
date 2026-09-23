@@ -5,12 +5,12 @@ struct MPVHDRSurfacePolicy {
     let fallbackReason: MPVPresentationStatus.FallbackReason?
 
     init(
-        policy: MPVPlayerConfiguration.HDRPolicy,
-        native: Bool,
-        supportsLayerPolicy: Bool,
-        supportsMetalHDR: Bool,
         displaySupportsHDR: Bool,
-        sourceIsHDR: Bool
+        native: Bool,
+        policy: MPVPlayerConfiguration.HDRPolicy,
+        sourceIsHDR: Bool,
+        supportsLayerPolicy: Bool,
+        supportsMetalHDR: Bool
     ) {
         if native {
             usesExtendedDynamicRange = false // AVFoundation owns conversion.

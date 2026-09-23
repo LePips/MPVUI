@@ -13,8 +13,10 @@ struct MPVSampleBufferPictureInPictureControllerTests {
     @Test(arguments: [CGSize(width: 640, height: 360), CGSize(width: 390, height: 844)])
     func `PiP preserves inline text size and wrapping`(inlineSize: CGSize) async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = UIWindow(frame: CGRect(origin: .zero, size: inlineSize))
@@ -84,8 +86,10 @@ struct MPVSampleBufferPictureInPictureControllerTests {
     @Test(arguments: [false, true])
     func `PiP preserves subtitle interception with and without overlays`(intercepts: Bool) async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
@@ -249,10 +253,10 @@ struct MPVSampleBufferPictureInPictureControllerTests {
     @Test
     func `native skip completes only after the display clock reaches a paused seek`() async throws {
         let player = MPVPlayer(configuration: .init(
+            additionalOptions: ["ao": "null"],
             autoPlay: false,
             hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            videoOutput: .sampleBuffer
         ))
         let frame = CGRect(x: 0, y: 0, width: 320, height: 180)
         let surface = MPVPlatformVideoPlayer(player: player)

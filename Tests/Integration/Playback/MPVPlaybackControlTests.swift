@@ -27,7 +27,10 @@ struct MPVPlaybackControlTests {
     @Test
     func `audio delay survives renderer recreation as a native runtime property`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, videoOutput: .sampleBuffer, logLevel: .info, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            logLevel: .info,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()

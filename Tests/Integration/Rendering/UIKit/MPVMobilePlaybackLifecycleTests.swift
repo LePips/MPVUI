@@ -20,14 +20,14 @@ struct MPVMobilePlaybackLifecycleTests {
         let player = MPVPlayer(
             configuration: .init(
                 autoPlay: false,
-                loop: true,
-                playbackRate: 0.1,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .disabled,
+                logLevel: .debug,
+                loop: true,
+                playbackRate: 0.1,
                 // This scenario verifies 8-bit SDR resize behavior. Automatic
                 // SDR legitimately selects float16 on a wide-gamut display.
-                sdrOutput: .compatibility8Bit,
-                logLevel: .debug
+                sdrOutput: .compatibility8Bit
             )
         )
         let subtitleSnapshots = MobileSubtitleSnapshotRecorder()

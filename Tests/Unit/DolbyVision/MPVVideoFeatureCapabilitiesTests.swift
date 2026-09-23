@@ -73,8 +73,9 @@ struct MPVVideoFeatureCapabilitiesTests {
     @Test
     func `configured feature policy defers decision until native DV is identified`() {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, videoOutput: .sampleBuffer,
-            nativeVideoFeaturePolicy: .preferFeatures
+            autoPlay: false,
+            nativeVideoFeaturePolicy: .preferFeatures,
+            videoOutput: .sampleBuffer
         ))
         #expect(player.requestVideoFeatures([.bakedOverlays]).outcome == .awaitingVideoMetadata)
         player.updateDolbyVisionStatus(MPVDolbyVisionStatus(sourceProfile: 8))
@@ -87,8 +88,9 @@ struct MPVVideoFeatureCapabilitiesTests {
     @Test
     func `requesting only PiP subtitles never switches to a backend without PiP`() {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, videoOutput: .sampleBuffer,
-            nativeVideoFeaturePolicy: .preferFeatures
+            autoPlay: false,
+            nativeVideoFeaturePolicy: .preferFeatures,
+            videoOutput: .sampleBuffer
         ))
         player.updateDolbyVisionStatus(MPVDolbyVisionStatus(sourceProfile: 5, nativeValidation: .validated))
         let result = player.requestVideoFeatures([.pictureInPictureSubtitles])

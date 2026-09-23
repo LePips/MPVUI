@@ -7,7 +7,7 @@ import Testing
 struct MPVRenderingOptionsTests {
     @Test
     func `automatic uses power state and explicit overrides`() {
-        let requested = MPVRenderingQuality(preset: .automatic, scaling: .lanczos, antiringing: 9)
+        let requested = MPVRenderingQuality(antiringing: 9, preset: .automatic, scaling: .lanczos)
         let battery = MPVRenderingOptions.resolve(requested, backend: .metal, lowPowerMode: true)
         #expect(battery.preset == .battery)
         #expect(battery.options["scale"] == "lanczos")
@@ -58,7 +58,7 @@ struct MPVRenderingOptionsTests {
 
     @Test
     func `explicit field order and detection use double rate software graph`() {
-        let policy = MPVDeinterlacePolicy(mode: .forced, algorithm: .yadif, fieldOrder: .bottomFirst, analyzeFieldOrder: true)
+        let policy = MPVDeinterlacePolicy(algorithm: .yadif, analyzeFieldOrder: true, fieldOrder: .bottomFirst, mode: .forced)
         let result = MPVRenderingOptions.deinterlaceOptions(policy)
         #expect(result["deinterlace"] == "no")
         #expect(result["vf"] == "lavfi=[idet,yadif=mode=send_field:parity=bff:deint=all]")

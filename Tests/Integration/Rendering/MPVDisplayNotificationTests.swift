@@ -14,7 +14,10 @@ struct MPVDisplayNotificationTests {
     func `display notifications coalesce into one live color update`() async throws {
         let center = NotificationCenter()
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, videoOutput: .metal, hdrPolicy: .always, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hdrPolicy: .always,
+            videoOutput: .metal
         ), notificationCenter: center)
         defer { fixture.close() }
         fixture.surface.edrHeadroomOverrideForTesting = (2, 2)
@@ -45,7 +48,9 @@ struct MPVDisplayNotificationTests {
     func `fullscreen notifications commit only the owning windows final geometry`(entering: Bool) async throws {
         let center = NotificationCenter()
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, videoOutput: .metal, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            videoOutput: .metal
         ), notificationCenter: center)
         defer { fixture.close() }
         try await fixture.loadPaused()

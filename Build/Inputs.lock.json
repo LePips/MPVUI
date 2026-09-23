@@ -832,6 +832,11 @@
           "id": "0014-webp-animation-duration",
           "path": "Build/Patches/mpv/0014-webp-animation-duration.patch",
           "sha256": "e96d8d7afcfe15c49df2add4d3dc0a1684380d2420368b1c139b98e0ac8019d2"
+        },
+        {
+          "id": "0015-apple-spatial-audio",
+          "path": "Build/Patches/mpv/0015-apple-spatial-audio.patch",
+          "sha256": "2a19ffc239b4a9e72fc7e8c637a813e91b5cfbd7455663b6264792fdca59b2e2"
         }
       ],
       "ref": "v0.41.0",

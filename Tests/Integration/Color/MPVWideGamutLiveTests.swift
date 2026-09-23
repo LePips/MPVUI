@@ -23,8 +23,9 @@ struct MPVWideGamutLiveTests {
             (.calibratedLUT(lut), .libplaceboCalibratedLUT),
         ] {
             let player = MPVPlayer(configuration: .init(
-                autoPlay: false, hdrPolicy: .disabled,
-                colorManagement: .init(displayProfile: mode)
+                autoPlay: false,
+                colorManagement: .init(displayProfile: mode),
+                hdrPolicy: .disabled
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = makeWindow(surface)

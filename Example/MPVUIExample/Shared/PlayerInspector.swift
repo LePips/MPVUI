@@ -277,6 +277,21 @@ struct PlayerInspector: View {
 
     private var diagnosticsSection: some View {
         Section("Playback Diagnostics") {
+            InspectorDisclosureGroup("Audio and Spatial Audio") {
+                InspectorRow("Audio Output", value: diagnostics.audio.output ?? "Unknown")
+                InspectorRow("Native Audio Path", value: diagnostics.audio.nativePath ?? "Unknown")
+                InspectorRow("Source Channels", value: diagnostics.audio.sourceChannels ?? "Unknown")
+                InspectorRow("Output Channels", value: diagnostics.audio.outputChannels ?? "Unknown")
+                InspectorRow("Output Format", value: diagnostics.audio.outputFormat ?? "Unknown")
+                InspectorRow("Stereo Spatialization Allowed", value: yesNo(diagnostics.audio.allowsStereoSpatialization))
+                InspectorRow("Surround Spatialization Allowed", value: yesNo(diagnostics.audio.allowsMultichannelSpatialization))
+                InspectorRow("Route Spatial Audio Enabled", value: yesNo(diagnostics.audio.routeSpatialAudioEnabled))
+                Text(
+                    "Choose Fixed or Head Tracked in the system AirPods controls. These observations do not confirm Atmos or active head tracking. Compressed audio's two-channel carrier is not its surround layout; route enablement is unavailable on macOS."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             InspectorDisclosureGroup("Timing and frame delivery") {
                 InspectorRow("Decoder Drops", value: count(diagnostics.decoderDroppedFrames))
                 InspectorRow("Output Drops", value: count(diagnostics.outputDroppedFrames))

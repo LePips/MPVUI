@@ -1,33 +1,10 @@
 import Foundation
 
 /// GPU rendering choices. Presets are workload choices, not measured battery-life guarantees.
-/// Configure before creating the player; changes require a new player/load.
+/// Configure before creating the player; changes require a new player.
 public struct MPVRenderingQuality: Equatable, Sendable {
-    /// A base set of GPU rendering options.
-    public enum Preset: String, CaseIterable, Sendable {
-        /// Selects battery in Low Power Mode, otherwise balanced, when the renderer is created.
-        case automatic
-        /// Uses lower-cost rendering options.
-        case battery
-        /// Balances rendering cost and filtering quality.
-        case balanced
-        /// Uses more demanding scaling and filtering options.
-        case highQuality
-    }
 
-    /// A filter for resizing video or chroma planes.
-    public enum Scaling: String, CaseIterable, Sendable {
-        /// Bilinear interpolation.
-        case bilinear
-        /// Bicubic interpolation.
-        case bicubic
-        /// Lanczos scaling.
-        case lanczos
-        /// Elliptical weighted-average Lanczos scaling.
-        case ewaLanczos = "ewa_lanczos"
-        /// A sharper elliptical weighted-average Lanczos filter.
-        case ewaLanczosSharp = "ewa_lanczossharp"
-    }
+    // MARK: - Types
 
     /// A method for reducing output quantization artifacts.
     public enum Dithering: String, CaseIterable, Sendable {
@@ -41,24 +18,6 @@ public struct MPVRenderingQuality: Equatable, Sendable {
         case fruit
         /// Diffuses quantization error into neighboring pixels.
         case errorDiffusion = "error-diffusion"
-    }
-
-    /// A curve for mapping brightness into the output range.
-    public enum ToneMapping: String, CaseIterable, Sendable {
-        /// Lets mpv choose the tone-mapping curve.
-        case automatic = "auto"
-        /// Uses spline tone mapping.
-        case spline
-        /// Uses Mobius tone mapping.
-        case mobius
-        /// Uses Reinhard tone mapping.
-        case reinhard
-        /// Uses Hable tone mapping.
-        case hable
-        /// Clips brightness outside the output range.
-        case clip
-        /// Uses the BT.2390 tone-mapping curve.
-        case bt2390 = "bt.2390"
     }
 
     /// A method for fitting colors into the output gamut.
@@ -91,6 +50,50 @@ public struct MPVRenderingQuality: Equatable, Sendable {
         case disabled = "no"
     }
 
+    /// A base set of GPU rendering options.
+    public enum Preset: String, CaseIterable, Sendable {
+        /// Selects battery in Low Power Mode, otherwise balanced, when the renderer is created.
+        case automatic
+        /// Uses lower-cost rendering options.
+        case battery
+        /// Balances rendering cost and filtering quality.
+        case balanced
+        /// Uses more demanding scaling and filtering options.
+        case highQuality
+    }
+
+    /// A filter for resizing video or chroma planes.
+    public enum Scaling: String, CaseIterable, Sendable {
+        /// Bilinear interpolation.
+        case bilinear
+        /// Bicubic interpolation.
+        case bicubic
+        /// Lanczos scaling.
+        case lanczos
+        /// Elliptical weighted-average Lanczos scaling.
+        case ewaLanczos = "ewa_lanczos"
+        /// A sharper elliptical weighted-average Lanczos filter.
+        case ewaLanczosSharp = "ewa_lanczossharp"
+    }
+
+    /// A curve for mapping brightness into the output range.
+    public enum ToneMapping: String, CaseIterable, Sendable {
+        /// Lets mpv choose the tone-mapping curve.
+        case automatic = "auto"
+        /// Uses spline tone mapping.
+        case spline
+        /// Uses Mobius tone mapping.
+        case mobius
+        /// Uses Reinhard tone mapping.
+        case reinhard
+        /// Uses Hable tone mapping.
+        case hable
+        /// Clips brightness outside the output range.
+        case clip
+        /// Uses the BT.2390 tone-mapping curve.
+        case bt2390 = "bt.2390"
+    }
+
     /// A creative input LUT. Display calibration belongs to ``MPVColorManagement``.
     /// Conversion LUTs are deliberately excluded because they replace output color management.
     public struct LUT: Equatable, Sendable {
@@ -102,69 +105,89 @@ public struct MPVRenderingQuality: Equatable, Sendable {
             case normalized
         }
 
-        /// The local LUT file URL.
-        public var url: URL
         /// The color encoding expected by the LUT.
-        public var domain: Domain
+        public let domain: Domain
+        /// The local LUT file URL.
+        public let url: URL
+
         /// Creates a creative LUT with the specified input encoding.
-        public init(url: URL, domain: Domain = .native) {
-            self.url = url
+        public init(domain: Domain = .native, url: URL) {
             self.domain = domain
+            self.url = url
         }
     }
 
-    /// The base preset used before applying overrides.
-    public var preset: Preset
-    /// The video scaling filter; nil uses the preset.
-    public var scaling: Scaling?
-    /// The chroma scaling filter; nil uses the preset.
-    public var chromaScaling: Scaling?
-    /// Clamped to 0...1 by the resolver; nil uses the preset.
-    public var antiringing: Double?
-    /// Chroma antiringing strength, clamped to 0...1; nil uses the preset.
-    public var chromaAntiringing: Double?
+    // MARK: - Boolean options
+
     /// Whether to reduce color banding; nil uses the preset.
-    public var debanding: Bool?
+    public let debanding: Bool?
+
+    // MARK: - Numeric options
+
+    /// Clamped to 0...1 by the resolver; nil uses the preset.
+    public let antiringing: Double?
+
+    /// Chroma antiringing strength, clamped to 0...1; nil uses the preset.
+    public let chromaAntiringing: Double?
+
+    // MARK: - Policies
+
+    /// The chroma scaling filter; nil uses the preset.
+    public let chromaScaling: Scaling?
+
     /// Output dithering; nil uses the preset.
-    public var dithering: Dithering?
-    /// The tone-mapping curve; nil uses the preset.
-    public var toneMapping: ToneMapping?
+    public let dithering: Dithering?
+
     /// The gamut-mapping method; nil uses the preset.
-    public var gamutMapping: GamutMapping?
+    public let gamutMapping: GamutMapping?
+
     /// Peak brightness detection; nil uses the preset.
-    public var peakDetection: PeakDetection?
-    /// Local mpv shader files, applied in order.
-    public var shaders: [URL]
+    public let peakDetection: PeakDetection?
+
+    /// The base preset used before applying overrides.
+    public let preset: Preset
+
+    /// The video scaling filter; nil uses the preset.
+    public let scaling: Scaling?
+
+    /// The tone-mapping curve; nil uses the preset.
+    public let toneMapping: ToneMapping?
+
+    // MARK: - Resources
+
     /// An optional creative input LUT.
-    public var lut: LUT?
+    public let lut: LUT?
+
+    /// Local mpv shader files, applied in order.
+    public let shaders: [URL]
 
     /// Creates rendering settings with optional preset overrides.
     public init(
-        preset: Preset = .automatic,
-        scaling: Scaling? = nil,
-        chromaScaling: Scaling? = nil,
         antiringing: Double? = nil,
         chromaAntiringing: Double? = nil,
+        chromaScaling: Scaling? = nil,
         debanding: Bool? = nil,
         dithering: Dithering? = nil,
-        toneMapping: ToneMapping? = nil,
         gamutMapping: GamutMapping? = nil,
+        lut: LUT? = nil,
         peakDetection: PeakDetection? = nil,
+        preset: Preset = .automatic,
+        scaling: Scaling? = nil,
         shaders: [URL] = [],
-        lut: LUT? = nil
+        toneMapping: ToneMapping? = nil
     ) {
-        self.preset = preset
-        self.scaling = scaling
-        self.chromaScaling = chromaScaling
         self.antiringing = antiringing
         self.chromaAntiringing = chromaAntiringing
+        self.chromaScaling = chromaScaling
         self.debanding = debanding
         self.dithering = dithering
-        self.toneMapping = toneMapping
         self.gamutMapping = gamutMapping
-        self.peakDetection = peakDetection
-        self.shaders = shaders
         self.lut = lut
+        self.peakDetection = peakDetection
+        self.preset = preset
+        self.scaling = scaling
+        self.shaders = shaders
+        self.toneMapping = toneMapping
     }
 }
 

@@ -8,8 +8,9 @@ struct MPVNativeFailureRecoveryTests {
     @Test
     func `invalid native options report initialization failure without retrying on layout`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null", "mpvui-invalid-option": "yes"]
+            additionalOptions: ["ao": "null", "mpvui-invalid-option": "yes"],
+            autoPlay: false,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         try await eventually("invalid option is reported") { fixture.player.lastError != nil }

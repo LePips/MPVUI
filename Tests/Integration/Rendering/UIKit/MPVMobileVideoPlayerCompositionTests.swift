@@ -9,8 +9,8 @@ import UIKit
 struct MPVMobileVideoPlayerCompositionTests {
     @Test
     func `SwiftUI updates overlays then transfers ownership when its player changes`() async throws {
-        let first = MPVPlayer(configuration: .init(autoPlay: false, videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]))
-        let second = MPVPlayer(configuration: .init(autoPlay: false, videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]))
+        let first = MPVPlayer(configuration: .init(additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: .sampleBuffer))
+        let second = MPVPlayer(configuration: .init(additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: .sampleBuffer))
         var appeared: [String] = []
         let video = MPVVideoPlayer(player: first)
             .videoOverlay { Text("Discarded").onAppear { appeared.append("discarded") } }

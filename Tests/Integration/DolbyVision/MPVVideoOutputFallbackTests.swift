@@ -17,8 +17,10 @@ struct MPVVideoOutputFallbackTests {
     @Test
     func `feature fallback reload preserves a real item with simulated native DV evidence`() async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         let host = Host(player: player)
         defer { host.close() }
@@ -56,10 +58,10 @@ struct MPVVideoOutputFallbackTests {
     @Test
     func `display headroom updates retain the native handle and paused position`() async throws {
         let player = MPVPlayer(configuration: .init(
+            additionalOptions: ["ao": "null"],
             autoPlay: false,
             hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            videoOutput: .sampleBuffer
         ))
         let host = Host(player: player)
         defer { host.close() }
@@ -90,9 +92,9 @@ struct MPVVideoOutputFallbackTests {
     @Test
     func `display switch suspends the clock and preserves a user pause during blackout`() async throws {
         let player = MPVPlayer(configuration: .init(
+            additionalOptions: ["ao": "null"],
             hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            videoOutput: .sampleBuffer
         ))
         let host = Host(player: player)
         defer { host.close() }
@@ -125,8 +127,8 @@ struct MPVVideoOutputFallbackTests {
     func `unsupported native SDR policy selects Metal with a structured reason`() {
         let player = MPVPlayer(configuration: .init(
             autoPlay: false,
-            videoOutput: .sampleBuffer,
-            hdrPolicy: .sdr
+            hdrPolicy: .sdr,
+            videoOutput: .sampleBuffer
         ))
         player.updateSampleBufferOutput(
             displayCapabilities: .unknown,
@@ -142,8 +144,10 @@ struct MPVVideoOutputFallbackTests {
     @Test
     func `fallback preserves paused playback and the next load restores native output`() async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         let host = Host(player: player)
         defer { host.close() }
@@ -205,8 +209,10 @@ struct MPVVideoOutputFallbackTests {
     @Test
     func `next load after an unhosted fallback does not reopen the previous source`() async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
         ))
         player.load(URL(fileURLWithPath: "/mpvui-previous-source-must-not-open.mp4"))
         player.handleNativeVideoOutputUnavailable("Test unavailable output before attachment")

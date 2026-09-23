@@ -22,6 +22,7 @@ See [credits and licenses](Patches/AVFOUNDATION_CREDITS.md), [rendering](RENDERI
 | [0012-text-subtitle-queries](Patches/mpv/0012-text-subtitle-queries.patch) | Query complete text-subtitle tracks with cue times, cancellation, and paused updates. |
 | [0013-subtitle-roles](Patches/mpv/0013-subtitle-roles.patch) | Include track identities and primary or secondary roles in text-subtitle snapshots. |
 | [0014-webp-animation-duration](Patches/mpv/0014-webp-animation-duration.patch) | Include the final animated WebP frame in duration estimates. |
+| [0015-apple-spatial-audio](Patches/mpv/0015-apple-spatial-audio.patch) | Add Spatial Audio settings and diagnostics, preserve session ownership and pause state, and fall back to PCM for audio processing. |
 
 ## FFmpeg
 

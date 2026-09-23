@@ -337,15 +337,15 @@ public final class MPVPlatformVideoPlayer: PlatformView {
             // Brightness/metadata polling must not turn an in-flight resize
             // into a discrete geometry request or restart its final boundary.
             newConfiguration = MPVRenderSurfaceConfiguration(
-                usesExtendedDynamicRange: newConfiguration.usesExtendedDynamicRange,
+                colorConfiguration: newConfiguration.colorConfiguration,
+                configuredDynamicRange: newConfiguration.configuredDynamicRange,
+                displayCapabilities: newConfiguration.displayCapabilities,
                 displaySupportsExtendedDynamicRange: newConfiguration.displaySupportsExtendedDynamicRange,
                 drawableSize: previous.drawableSize,
-                scale: previous.scale,
                 outputHeadroom: newConfiguration.outputHeadroom,
-                displayCapabilities: newConfiguration.displayCapabilities,
-                configuredDynamicRange: newConfiguration.configuredDynamicRange,
                 policyFallbackReason: newConfiguration.policyFallbackReason,
-                colorConfiguration: newConfiguration.colorConfiguration
+                scale: previous.scale,
+                usesExtendedDynamicRange: newConfiguration.usesExtendedDynamicRange
             )
         }
         let requiresColorUpdate = surfaceConfiguration.map {
@@ -832,12 +832,12 @@ private extension MPVPlatformVideoPlayer {
         let preservesHDRWhileOpening = player.state == .loading
             && surfaceConfiguration?.usesExtendedDynamicRange == true
         let policy = MPVHDRSurfacePolicy(
-            policy: player.configuration.hdrPolicy,
-            native: player.videoOutput == .sampleBuffer,
-            supportsLayerPolicy: supportsLayerPolicy,
-            supportsMetalHDR: supportsMetalHDR,
             displaySupportsHDR: supportsHDR,
-            sourceIsHDR: player.mediaInformation.hdr.isHDRContent || preservesHDRWhileOpening
+            native: player.videoOutput == .sampleBuffer,
+            policy: player.configuration.hdrPolicy,
+            sourceIsHDR: player.mediaInformation.hdr.isHDRContent || preservesHDRWhileOpening,
+            supportsLayerPolicy: supportsLayerPolicy,
+            supportsMetalHDR: supportsMetalHDR
         )
         let capabilities = MPVDisplayCapabilities(
             hdrSupport: supportsHDR ? .supported : .unsupported,
@@ -858,15 +858,15 @@ private extension MPVPlatformVideoPlayer {
             supportsCalibratedICC: supportsCalibratedICC
         )
         return MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: policy.usesExtendedDynamicRange,
+            colorConfiguration: colorConfiguration,
+            configuredDynamicRange: policy.dynamicRange,
+            displayCapabilities: capabilities,
             displaySupportsExtendedDynamicRange: supportsHDR,
             drawableSize: drawableSize(for: scale),
-            scale: scale,
             outputHeadroom: policy.usesExtendedDynamicRange ? currentHeadroom : 1,
-            displayCapabilities: capabilities,
-            configuredDynamicRange: policy.dynamicRange,
             policyFallbackReason: policy.fallbackReason,
-            colorConfiguration: colorConfiguration
+            scale: scale,
+            usesExtendedDynamicRange: policy.usesExtendedDynamicRange
         )
     }
 

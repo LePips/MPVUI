@@ -13,12 +13,14 @@ struct MPVInterlacedPlaybackTests {
             ("480i-bottom-59.94", 60000.0 / 1001, .init(mode: .automatic)),
             ("576i-top-50", 50, .init(mode: .automatic)),
             ("1080i-top-59.94", 60000.0 / 1001, .init(mode: .automatic)),
-            ("576i-top-50", 50, .init(mode: .forced, algorithm: .yadif, fieldOrder: .topFirst)),
+            ("576i-top-50", 50, .init(algorithm: .yadif, fieldOrder: .topFirst, mode: .forced)),
         ]
         for (name, expectedCadence, policy) in cases {
             let source = try TestPaths.testMedia(name + ".mkv")
             let player = MPVPlayer(configuration: .init(
-                hardwareDecoding: .disabled, hdrPolicy: .disabled, deinterlace: policy
+                deinterlace: policy,
+                hardwareDecoding: .disabled,
+                hdrPolicy: .disabled
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(

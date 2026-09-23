@@ -4,12 +4,37 @@ import Metal
 
 /// Immutable CoreGraphics profiles can be shared with the engine queue.
 struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
+
+    // MARK: - Boolean options
+
     let usesExtendedDynamicRange: Bool
+
+    // MARK: - Numeric options
+
     let outputHeadroom: Double
-    let status: MPVRenderColorStatus
+
+    // MARK: - Display and color
+
+    let iccIntent: MPVColorManagement.RenderingIntent
     let layerColorSpace: CGColorSpace
     let pixelFormat: MTLPixelFormat
-    let iccIntent: MPVColorManagement.RenderingIntent
+    let status: MPVRenderColorStatus
+
+    init(
+        iccIntent: MPVColorManagement.RenderingIntent,
+        layerColorSpace: CGColorSpace,
+        outputHeadroom: Double,
+        pixelFormat: MTLPixelFormat,
+        status: MPVRenderColorStatus,
+        usesExtendedDynamicRange: Bool
+    ) {
+        self.iccIntent = iccIntent
+        self.layerColorSpace = layerColorSpace
+        self.outputHeadroom = outputHeadroom
+        self.pixelFormat = pixelFormat
+        self.status = status
+        self.usesExtendedDynamicRange = usesExtendedDynamicRange
+    }
 
     /// All target settings are committed while the native renderer is suspended.
     /// Explicitly clear ICC state when automatic system conversion owns output.
@@ -69,8 +94,10 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
                 fallback = .invalidCalibrationLUT
             } else if let systemDisplayProfile {
                 return Self(
-                    usesExtendedDynamicRange: false,
+                    iccIntent: .relativeColorimetric,
+                    layerColorSpace: systemDisplayProfile,
                     outputHeadroom: 1,
+                    pixelFormat: .bgra8Unorm,
                     status: MPVRenderColorStatus(
                         conversionOwner: .libplaceboCalibratedLUT,
                         precision: .unorm8,
@@ -81,9 +108,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
                         referenceWhite: management.referenceWhite,
                         sdrViewing: management.sdrViewing
                     ),
-                    layerColorSpace: systemDisplayProfile,
-                    pixelFormat: .bgra8Unorm,
-                    iccIntent: .relativeColorimetric
+                    usesExtendedDynamicRange: false
                 )
             } else {
                 fallback = .currentDisplayProfileUnavailable
@@ -98,8 +123,10 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
                 fallback = .invalidRGBDisplayProfile
             } else if let systemDisplayProfile {
                 return Self(
-                    usesExtendedDynamicRange: false,
+                    iccIntent: intent,
+                    layerColorSpace: systemDisplayProfile,
                     outputHeadroom: 1,
+                    pixelFormat: .bgra8Unorm,
                     status: MPVRenderColorStatus(
                         conversionOwner: .libplaceboCalibratedICC,
                         precision: .unorm8,
@@ -108,9 +135,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
                         referenceWhite: management.referenceWhite,
                         sdrViewing: management.sdrViewing
                     ),
-                    layerColorSpace: systemDisplayProfile,
-                    pixelFormat: .bgra8Unorm,
-                    iccIntent: intent
+                    usesExtendedDynamicRange: false
                 )
             } else {
                 fallback = .currentDisplayProfileUnavailable
@@ -118,17 +143,17 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
         }
         if native {
             return Self(
-                usesExtendedDynamicRange: false,
+                iccIntent: .relativeColorimetric,
+                layerColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
                 outputHeadroom: 1,
+                pixelFormat: .bgra8Unorm,
                 status: MPVRenderColorStatus(
                     conversionOwner: .avFoundation,
                     precision: .sourceManaged,
                     displayProfileName: displayProfileName,
                     fallbackReason: fallback ?? (configuration.sdrOutput == .automatic ? nil : .nativeManagesPrecision)
                 ),
-                layerColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-                pixelFormat: .bgra8Unorm,
-                iccIntent: .relativeColorimetric
+                usesExtendedDynamicRange: false
             )
         }
         let wide = usesExtendedDynamicRange || (supportsWideGamut && configuration.sdrOutput != .compatibility8Bit)
@@ -138,8 +163,10 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
         let spaceName = wide ? CGColorSpace.extendedLinearDisplayP3
             : (float ? CGColorSpace.extendedLinearSRGB : CGColorSpace.sRGB)
         return Self(
-            usesExtendedDynamicRange: usesExtendedDynamicRange,
+            iccIntent: .relativeColorimetric,
+            layerColorSpace: CGColorSpace(name: spaceName)!,
             outputHeadroom: usesExtendedDynamicRange ? headroom : 1,
+            pixelFormat: float ? .rgba16Float : .bgra8Unorm,
             status: MPVRenderColorStatus(
                 conversionOwner: .colorSync,
                 precision: float ? .float16 : .unorm8,
@@ -150,9 +177,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
                 sdrViewing: management.sdrViewing,
                 fallbackReason: fallback
             ),
-            layerColorSpace: CGColorSpace(name: spaceName)!,
-            pixelFormat: float ? .rgba16Float : .bgra8Unorm,
-            iccIntent: .relativeColorimetric
+            usesExtendedDynamicRange: usesExtendedDynamicRange
         )
     }
 }

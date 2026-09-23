@@ -11,6 +11,97 @@ import Testing
 ))
 @MainActor
 struct MPVNativeAudioIntegrationTests {
+    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, ["ac3", "eac3"])
+    func `configured Dolby policy preserves surround source layout`(
+        policy: MPVAudioConfiguration.DolbyDecoding,
+        codec: String
+    ) async throws {
+        let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("\(codec)-surround51.mka"))
+        try await audio.wait("surround audio starts") { audio.number("audio-pts") > 0.2 }
+        #expect(audio.number("current-tracks/audio/demux-channel-count") == 6)
+        let native = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+        #expect(native["allows-multichannel"] == .bool(true))
+        if policy == .automatic {
+            #expect(native["path"] == .string("avplayer"))
+            #expect(audio.string("audio-out-params/format") == "spdif-\(codec)")
+        } else {
+            #expect(native["path"] == .string("sample-buffer"))
+            #expect(audio.number("audio-out-params/channel-count") == 6)
+            #expect(!audio.string("audio-out-params/format").contains("spdif"))
+        }
+    }
+
+    @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "surround51", "surround71"])
+    func `PCM keeps speaker layouts and reads back Apple spatialization policy`(policy: String, layout: String) async throws {
+        let audio = try Session(options: ["ao-avfoundation-spatial-audio": policy])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("pcm-\(layout).mka"))
+        try await audio.wait("PCM native renderer") { audio.number("audio-pts") > 0.2 }
+        let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+        #expect(fields["path"] == .string("sample-buffer"))
+        #expect(fields["allows-stereo"] == .bool(policy == "all"))
+        #expect(fields["allows-multichannel"] == .bool(policy != "no"))
+        #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
+        let count = ["mono": 1.0, "stereo": 2.0, "surround51": 6.0, "surround71": 8.0][layout]!
+        #expect(audio.number("audio-out-params/channel-count") == count)
+    }
+
+    @Test(arguments: ["all", "multichannel", "no"], ["ac3-short.mka", "eac3-short.mka"])
+    func `Dolby item spatialization survives seek recreation`(policy: String, fixture: String) async throws {
+        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "ao-avfoundation-spatial-audio": policy])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia(fixture))
+        try await audio.wait("native Dolby item") { audio.number("audio-pts") > 0.2 }
+        for seek in [false, true] {
+            if seek {
+                let starts = audio.nativeClockStarts
+                try await audio.pauseAndSeek(to: 1.5)
+                try audio.set("pause", "no")
+                try await audio.wait("recreated native Dolby item") {
+                    audio.nativeClockStarts > starts && audio.number("audio-pts") > 1.7
+                }
+            }
+            let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+            #expect(fields["path"] == .string("avplayer"))
+            #expect(fields["allows-stereo"] == .bool(policy == "all"))
+            #expect(fields["allows-multichannel"] == .bool(policy != "no"))
+        }
+    }
+
+    @Test(arguments: ["speed", "pitch", "volume", "af"], [false, true])
+    func `Dolby recovers to PCM for audio processing`(option: String, duringPlayback: Bool) async throws {
+        let value = option == "volume" ? "150" : option == "af" ? "lavfi=[volume=0.5]" : "1.25"
+        var options = ["audio-spdif": "ac3,eac3"]
+        if !duringPlayback {
+            options[option] = value
+        }
+        // Muted even when amplification is the setting under test.
+        options["mute"] = "yes"
+        let audio = try Session(options: options)
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("eac3-short.mka"))
+        var previousPosition: Double?
+        if duringPlayback {
+            try await audio.wait("compressed start") { audio.nativeClockStarts > 0 }
+            previousPosition = audio.number("time-pos")
+            try audio.set(option, value)
+        }
+        try await audio.wait("processing uses spatializable PCM") {
+            audio.string("current-ao") == "avfoundation"
+                && !audio.string("audio-out-params/format").contains("spdif")
+                && audio.number("audio-pts") > 0.2
+        }
+        #expect(audio.node("avfoundation-audio-spatialization")?.mapValue?["allows-stereo"] == .bool(true))
+        if let previousPosition {
+            #expect(
+                abs(audio.number("time-pos") - previousPosition) < 2,
+                "PCM recovery must resume near the audible position, not the buffered read head"
+            )
+        }
+    }
+
     @Test
     func `pcm keeps default buffering and supports transport`() async throws {
         let audio = try Session()
@@ -171,6 +262,7 @@ struct MPVNativeAudioIntegrationTests {
                     "terminal": "no",
                     "pause": "yes"
                 ]
+                defaults.merge(MPVAudioConfiguration().mpvOptions) { _, new in new }
                 defaults.merge(options) { _, new in new }
                 for (name, value) in defaults {
                     try #require(mpv_set_option_string(h, name, value) >= 0, "\(name)=\(value)")

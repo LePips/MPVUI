@@ -3,13 +3,13 @@
   "dependencies" : [
 
   ],
-  "nativeInputFingerprint" : "0a687b169b29c9c12ca0d1e475fd8d78f837807913cb1f808395fb8af2d91296",
+  "nativeInputFingerprint" : "ba3794878ec87e2fef6b691601caa867746731a1d19dd7e06dab5db0bc03a09a",
   "products" : [
     {
       "archive" : "Libmpv.xcframework.zip",
       "framework" : "Libmpv",
       "module" : "Libmpv",
-      "sha256" : "f8e00735f869eff2cac977c4300ace3729c3b47a8725e201d55ae6d4a5218274",
+      "sha256" : "6f0d7feed77fc2cf2917d21604bff478faf1dd91a7fb86071b1d53a43785c3b1",
       "slices" : [
         {
           "architectures" : [
@@ -106,8 +106,8 @@
         }
       ],
       "target" : "Libmpv-GPL",
-      "url" : "https://github.com/LePips/MPVUI/releases/download/0.2.0/Libmpv.xcframework.zip"
+      "url" : "https://github.com/LePips/MPVUI/releases/download/0.3.0/Libmpv.xcframework.zip"
     }
   ],
-  "releaseID" : "0.2.0"
+  "releaseID" : "0.3.0"
 }

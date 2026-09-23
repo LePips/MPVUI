@@ -21,8 +21,9 @@ final class PlaybackFixture {
 
     init(
         configuration: MPVPlayerConfiguration = .init(
-            autoPlay: false, videoOutput: .sampleBuffer,
-            additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            videoOutput: .sampleBuffer
         ),
         notificationCenter: NotificationCenter = .default
     ) {

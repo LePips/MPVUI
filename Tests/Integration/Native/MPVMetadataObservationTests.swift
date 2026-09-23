@@ -116,9 +116,12 @@ struct MPVMetadataObservationTests {
     @MainActor @Test
     func `paused player metadata follows filter formats and video track availability`() async throws {
         let player = MPVPlayer(configuration: .init(
-            autoPlay: false, hardwareDecoding: .disabled, hdrPolicy: .disabled,
-            sdrOutput: .compatibility8Bit, logLevel: .none,
-            additionalOptions: ["ao": "null", "vf": "format=fmt=nv12"]
+            additionalOptions: ["ao": "null", "vf": "format=fmt=nv12"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            logLevel: .none,
+            sdrOutput: .compatibility8Bit
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(

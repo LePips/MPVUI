@@ -85,12 +85,9 @@ struct MPVHDRModelTests {
 
     @Test
     func `native subtitle luminance is normalized and desired policies keep compatibility`() {
-        var configuration = MPVPlayerConfiguration(subtitleLuminance: .nan)
-        #expect(configuration.subtitleLuminance == 203)
-        configuration.subtitleLuminance = 1500
-        #expect(configuration.subtitleLuminance == 1000)
-        configuration.subtitleLuminance = -1
-        #expect(configuration.subtitleLuminance == 1)
+        #expect(MPVPlayerConfiguration(subtitleLuminance: .nan).subtitleLuminance == 203)
+        #expect(MPVPlayerConfiguration(subtitleLuminance: 1500).subtitleLuminance == 1000)
+        #expect(MPVPlayerConfiguration(subtitleLuminance: -1).subtitleLuminance == 1)
         #expect(MPVPlayerConfiguration.HDRPolicy.sdr == .disabled)
         #expect(MPVPlayerConfiguration.HDRPolicy.hdrWhenAvailable == .always)
     }

@@ -57,16 +57,16 @@ struct MPVRenderColorConfigurationTests {
     @Test
     func `reference viewing is explicit and normalized`() {
         let legacy = resolve(.init(
-            sdrOutput: .compatibility8Bit,
-            colorManagement: .init(sdrViewing: .legacyDisplay)
+            colorManagement: .init(sdrViewing: .legacyDisplay),
+            sdrOutput: .compatibility8Bit
         ))
         #expect(Dictionary(uniqueKeysWithValues: legacy.options)["sdr-adjust-gamma"] == "no")
         let reference = resolve(.init(colorManagement: .init(referenceWhite: 100)), hdr: true)
         #expect(Dictionary(uniqueKeysWithValues: reference.options)["target-peak"] == "200")
-        var config = MPVColorManagement(referenceWhite: .nan)
-        #expect(config.referenceWhite == 203)
-        config.referenceWhite = 0
-        #expect(config.referenceWhite == 10)
+        #expect(MPVColorManagement(referenceWhite: .nan).referenceWhite == 203)
+        #expect(MPVColorManagement(referenceWhite: 0).referenceWhite == 10)
+        #expect(MPVColorManagement(referenceWhite: 1500).referenceWhite == 1000)
+        #expect(MPVColorManagement(referenceWhite: 100.6).referenceWhite == 101)
     }
 
     @Test

@@ -31,9 +31,9 @@ struct MPVPlayerStateTests {
     func `player reflects configuration before surface attachment`() {
         let configuration = MPVPlayerConfiguration(
             autoPlay: false,
-            volume: 42,
+            hdrPolicy: .disabled,
             playbackRate: 1.5,
-            hdrPolicy: .disabled
+            volume: 42
         )
         let player = MPVPlayer(configuration: configuration)
 

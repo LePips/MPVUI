@@ -4,20 +4,23 @@ import Testing
 @Suite(.tags(.unit))
 struct MPVModelTests {
     @Test
-    func `changing timing configuration keeps negative durations out of native options`() {
-        var configuration = MPVPlayerConfiguration()
-        configuration.startTime = .seconds(-1)
-        configuration.networkCacheSeconds = .seconds(-10)
-        configuration.initialBufferSeconds = .seconds(-2)
+    func `timing configuration keeps negative durations out of native options`() {
+        let configuration = MPVPlayerConfiguration(
+            initialBufferSeconds: .seconds(-2),
+            networkCacheSeconds: .seconds(-10),
+            startTime: .seconds(-1)
+        )
         #expect(configuration.startTime == .zero)
         #expect(configuration.networkCacheSeconds == .zero)
         #expect(configuration.initialBufferSeconds == .zero)
-        configuration.startTime = nil
-        configuration.networkCacheSeconds = .seconds(30)
-        configuration.initialBufferSeconds = .seconds(3)
-        #expect(configuration.startTime == nil)
-        #expect(configuration.networkCacheSeconds == .seconds(30))
-        #expect(configuration.initialBufferSeconds == .seconds(3))
+        let positive = MPVPlayerConfiguration(
+            initialBufferSeconds: .seconds(3),
+            networkCacheSeconds: .seconds(30),
+            startTime: nil
+        )
+        #expect(positive.startTime == nil)
+        #expect(positive.networkCacheSeconds == .seconds(30))
+        #expect(positive.initialBufferSeconds == .seconds(3))
     }
 
     @Test
@@ -56,26 +59,13 @@ struct MPVModelTests {
         #expect(MPVBufferStatus(progress: .nan).progress == 0)
     }
 
-    @Test
-    func `configuration clamps volume and invalid playback rate`() {
-        var configuration = MPVPlayerConfiguration(volume: 120, playbackRate: 0)
-        #expect(configuration.volume == 100)
-        #expect(configuration.playbackRate == MPVPlayerConfiguration.defaultPlaybackRate)
+    @Test(arguments: [(120.0, 100.0), (-1, 0), (.nan, 100), (.infinity, 100), (-.infinity, 0), (75, 75)])
+    func `configuration normalizes initial volume`(value: Double, expected: Double) {
+        #expect(MPVPlayerConfiguration(volume: value).volume == expected)
+    }
 
-        configuration.volume = -1
-        configuration.playbackRate = 1.5
-        #expect(configuration.volume == 0)
-        #expect(configuration.playbackRate == 1.5)
-
-        configuration.volume = .nan
-        configuration.playbackRate = -.infinity
-        #expect(configuration.volume == MPVPlayerConfiguration.defaultVolume)
-        #expect(configuration.playbackRate == MPVPlayerConfiguration.defaultPlaybackRate)
-
-        configuration.playbackRate = 1000
-        #expect(configuration.playbackRate == MPVPlayerConfiguration.maximumPlaybackRate)
-
-        configuration.playbackRate = 0.001
-        #expect(configuration.playbackRate == MPVPlayerConfiguration.minimumPlaybackRate)
+    @Test(arguments: [(0.0, 1.0), (-1, 1), (.nan, 1), (.infinity, 1), (-.infinity, 1), (1000, 100), (0.001, 0.01), (1.5, 1.5)])
+    func `configuration normalizes initial playback rate`(value: Double, expected: Double) {
+        #expect(MPVPlayerConfiguration(playbackRate: value).playbackRate == expected)
     }
 }

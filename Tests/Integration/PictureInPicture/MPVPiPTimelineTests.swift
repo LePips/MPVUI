@@ -11,7 +11,9 @@ struct MPVPiPTimelineTests {
         .VideoOutput) async throws
     {
         let fixture = PlaybackFixture(configuration: .init(
-            autoPlay: false, videoOutput: backend, additionalOptions: ["ao": "null"]
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            videoOutput: backend
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()

@@ -811,8 +811,8 @@ struct MPVPlatformVideoPlayerAppKitTests {
             configuration: .init(
                 autoPlay: false,
                 hdrPolicy: .disabled,
-                sdrOutput: .compatibility8Bit,
-                logLevel: .debug
+                logLevel: .debug,
+                sdrOutput: .compatibility8Bit
             )
         )
         let nativeSurfaceConfigurations = NativeSurfaceConfigurationLogRecorder()

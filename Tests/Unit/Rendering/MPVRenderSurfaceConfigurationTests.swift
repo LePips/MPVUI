@@ -5,21 +5,21 @@ import Testing
 @Suite(.tags(.unit))
 struct MPVRenderSurfaceConfigurationTests {
     private let sdr = MPVRenderSurfaceConfiguration(
-        usesExtendedDynamicRange: false,
         displaySupportsExtendedDynamicRange: false,
         drawableSize: CGSize(width: 640, height: 360),
+        outputHeadroom: 1,
         scale: 2,
-        outputHeadroom: 1
+        usesExtendedDynamicRange: false
     )
 
     @Test
     func `scale changes require geometry but not renderer reconfiguration`() {
         let changed = MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: false,
             displaySupportsExtendedDynamicRange: false,
             drawableSize: sdr.drawableSize,
+            outputHeadroom: 1,
             scale: 1,
-            outputHeadroom: 1
+            usesExtendedDynamicRange: false
         )
 
         #expect(!changed.requiresRendererReconfiguration(comparedTo: sdr))
@@ -29,11 +29,11 @@ struct MPVRenderSurfaceConfigurationTests {
     @Test
     func `drawable size changes require geometry but not renderer reconfiguration`() {
         let changed = MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: false,
             displaySupportsExtendedDynamicRange: false,
             drawableSize: CGSize(width: 1280, height: 720),
+            outputHeadroom: 1,
             scale: sdr.scale,
-            outputHeadroom: 1
+            usesExtendedDynamicRange: false
         )
 
         #expect(!changed.requiresRendererReconfiguration(comparedTo: sdr))
@@ -54,25 +54,25 @@ struct MPVRenderSurfaceConfigurationTests {
     func `color and output contract changes require renderer reconfiguration`() {
         for changed in [
             MPVRenderSurfaceConfiguration(
-                usesExtendedDynamicRange: true,
                 displaySupportsExtendedDynamicRange: false,
                 drawableSize: sdr.drawableSize,
+                outputHeadroom: 1,
                 scale: 2,
-                outputHeadroom: 1
+                usesExtendedDynamicRange: true
             ),
             MPVRenderSurfaceConfiguration(
-                usesExtendedDynamicRange: false,
                 displaySupportsExtendedDynamicRange: true,
                 drawableSize: sdr.drawableSize,
+                outputHeadroom: 1,
                 scale: 2,
-                outputHeadroom: 1
+                usesExtendedDynamicRange: false
             ),
             MPVRenderSurfaceConfiguration(
-                usesExtendedDynamicRange: false,
                 displaySupportsExtendedDynamicRange: false,
                 drawableSize: sdr.drawableSize,
+                outputHeadroom: 2,
                 scale: 2,
-                outputHeadroom: 2
+                usesExtendedDynamicRange: false
             ),
         ] {
             #expect(changed.requiresRendererReconfiguration(comparedTo: sdr))
@@ -82,22 +82,22 @@ struct MPVRenderSurfaceConfigurationTests {
     @Test
     func `output headroom quantization prevents cumulative threshold drift`() {
         var previous = MPVRenderSurfaceConfiguration(
-            usesExtendedDynamicRange: true,
             displaySupportsExtendedDynamicRange: true,
             drawableSize: sdr.drawableSize,
+            outputHeadroom: 2,
             scale: sdr.scale,
-            outputHeadroom: 2
+            usesExtendedDynamicRange: true
         )
         var decisions: [Bool] = []
         var normalizedHeadrooms: [Double] = []
 
         for headroom in [2.004, 2.008, 2.012, 2.016] {
             let sampled = MPVRenderSurfaceConfiguration(
-                usesExtendedDynamicRange: true,
                 displaySupportsExtendedDynamicRange: true,
                 drawableSize: sdr.drawableSize,
+                outputHeadroom: headroom,
                 scale: sdr.scale,
-                outputHeadroom: headroom
+                usesExtendedDynamicRange: true
             )
             decisions.append(
                 sampled.requiresRendererReconfiguration(comparedTo: previous)

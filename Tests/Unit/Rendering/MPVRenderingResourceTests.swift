@@ -12,7 +12,7 @@ struct MPVRenderingResourceTests {
         let second = try files.write("second.glsl", contents: "//!HOOK OUTPUT\n")
         let lut = try files.write("grade.cube", contents: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
         let result = MPVRenderingOptions.resolve(
-            .init(shaders: [first, second], lut: .init(url: lut, domain: domain)),
+            .init(lut: .init(domain: domain, url: lut), shaders: [first, second]),
             backend: .metal, lowPowerMode: false
         )
         #expect(result.shaderPaths == [first.path, second.path])
@@ -29,7 +29,7 @@ struct MPVRenderingResourceTests {
         let missing = files.url.appendingPathComponent("missing.glsl")
         let remote = try #require(URL(string: "https://example.invalid/grade.cube"))
         let result = MPVRenderingOptions.resolve(
-            .init(shaders: [missing, valid], lut: .init(url: remote)),
+            .init(lut: .init(url: remote), shaders: [missing, valid]),
             backend: .metal, lowPowerMode: false
         )
         #expect(result.shaderPaths == [valid.path])
@@ -47,7 +47,7 @@ struct MPVRenderingResourceTests {
     @Test(arguments: [Double.nan, .infinity, -.infinity])
     func `nonfinite antiringing uses preset defaults`(value: Double) {
         let result = MPVRenderingOptions.resolve(
-            .init(preset: .highQuality, antiringing: value, chromaAntiringing: value),
+            .init(antiringing: value, chromaAntiringing: value, preset: .highQuality),
             backend: .metal, lowPowerMode: true
         )
         #expect(result.preset == .highQuality)

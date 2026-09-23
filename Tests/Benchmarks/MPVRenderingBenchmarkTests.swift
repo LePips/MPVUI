@@ -25,9 +25,11 @@ struct MPVRenderingBenchmarkTests {
             let repetition = sampleIndex / presets.count
             let preset = presets[(sampleIndex % presets.count + repetition) % presets.count]
             let player = MPVPlayer(configuration: .init(
-                autoPlay: true, hardwareDecoding: .disabled,
-                hdrPolicy: .disabled, sdrOutput: .compatibility8Bit,
-                renderingQuality: .init(preset: preset)
+                autoPlay: true,
+                hardwareDecoding: .disabled,
+                hdrPolicy: .disabled,
+                renderingQuality: .init(preset: preset),
+                sdrOutput: .compatibility8Bit
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(

@@ -238,10 +238,14 @@ struct MPVDolbyVisionRegressionTests {
             artifactDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("MPVUI-DolbyVision-\(UUID().uuidString)")
             player = MPVPlayer(configuration: .init(
-                autoPlay: false, startTime: startTime, playbackRate: playbackRate,
-                hardwareDecoding: hardwareDecoding, videoOutput: videoOutput,
-                hdrPolicy: .disabled, logLevel: logLevel,
-                additionalOptions: ["ao": "null", "sid": "no", "osd-level": "0", "screenshot-sw": "no"]
+                additionalOptions: ["ao": "null", "sid": "no", "osd-level": "0", "screenshot-sw": "no"],
+                autoPlay: false,
+                hardwareDecoding: hardwareDecoding,
+                hdrPolicy: .disabled,
+                logLevel: logLevel,
+                playbackRate: playbackRate,
+                startTime: startTime,
+                videoOutput: videoOutput
             ))
             player.logHandler = { message in
                 if [.fatal, .error].contains(message.level)

@@ -25,8 +25,8 @@ struct MPVEDRLiveUpdateTests {
         for policy in MPVPlayerConfiguration.HDRPolicy.allCases {
             let player = MPVPlayer(configuration: .init(
                 autoPlay: false,
-                videoOutput: .sampleBuffer,
-                hdrPolicy: policy
+                hdrPolicy: policy,
+                videoOutput: .sampleBuffer
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(

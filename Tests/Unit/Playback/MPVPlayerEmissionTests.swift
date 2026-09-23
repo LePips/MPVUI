@@ -82,7 +82,7 @@ struct MPVPlayerEmissionTests {
 
     @Test
     func `selected authored subtitles reevaluate feature policy when Dolby Vision metadata arrives`() {
-        let player = MPVPlayer(configuration: .init(videoOutput: .sampleBuffer, nativeVideoFeaturePolicy: .preferFeatures))
+        let player = MPVPlayer(configuration: .init(nativeVideoFeaturePolicy: .preferFeatures, videoOutput: .sampleBuffer))
         let subtitle = MPVMediaTrack(id: 1, type: .subtitle, codec: "ass", isSelected: true)
         player.apply(.init(generation: nil, update: .media(.init(tracks: [subtitle]))))
         player.updateDolbyVisionStatus(.init(sourceProfile: 5))
