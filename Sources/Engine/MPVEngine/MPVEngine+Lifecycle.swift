@@ -43,11 +43,11 @@ extension MPVEngine {
         }
     }
 
-    func createHandle() {
+    func createHandle(allowStopped: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
 
-        guard let renderTarget else { return }
-        videoToolboxSessionUsesHardware = nil
+        guard let renderTarget, allowStopped || !isStoppedForResourceRelease else { return }
+        resetMediaObservations()
         liveConfigurationFailure = nil
         fatalPlaybackError = nil
         guard let newHandle = mpv_create() else {
@@ -193,8 +193,24 @@ extension MPVEngine {
         loadPendingSourceIfPossible()
     }
 
+    /// MoltenVK retires outstanding presentations by briefly assigning 1x1 to
+    /// its layer during swapchain destruction. Authorize that native write only
+    /// on the retained Metal target while teardown joins the rendering threads.
+    @discardableResult
+    func withNativeSurfaceRetirement(_ body: () -> Void) -> Bool {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let layer = videoOutput == .metal ? renderTarget?.layerOwner as? MPVMetalLayer : nil
+        layer?.beginNativeResizeTransaction()
+        defer { layer?.endNativeResizeTransaction() }
+        body()
+        return layer?.invalidateDrawablePoolAfterNativeTeardown() ?? false
+    }
+
     func destroyHandle(preservePlayback: Bool) {
         dispatchPrecondition(condition: .onQueue(queue))
+        if !preservePlayback {
+            pendingRendererCommands.removeAll()
+        }
         cancelSubtitleQueries()
         diagnosticsTimer?.cancel()
         diagnosticsTimer = nil
@@ -225,7 +241,9 @@ extension MPVEngine {
         handle = nil
         mpv_set_wakeup_callback(oldHandle, nil, nil)
         mpv_wakeup(oldHandle)
-        mpv_terminate_destroy(oldHandle)
+        withNativeSurfaceRetirement {
+            mpv_terminate_destroy(oldHandle)
+        }
         lifecycleDiagnostics.handlesDestroyed &+= 1
         clearTextSubtitleSnapshot()
 

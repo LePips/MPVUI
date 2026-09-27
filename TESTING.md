@@ -68,3 +68,26 @@ Audio tests use the real route with playback muted. They check channel layouts, 
 Check HDR appearance, display switching, and PiP on physical devices.
 
 Use `Build/benchmark --help` for performance runs and [RenderingValidation/generate.py](Build/Tests/RenderingValidation/generate.py) for optional rendering charts.
+
+## Device testing
+
+Use [device benchmarks](Build/Benchmarks/README.md) to measure CPU and memory use, check playback, and profile on an iPhone or iPad.
+
+To run package tests on an unlocked device, generate a test host with your Apple development team:
+
+```sh
+brew install xcodegen
+python3 Build/Tests/generate_device_test_project.py --team APPLE_TEAM_ID
+xcodebuildmcp device list
+caffeinate -disu xcodebuildmcp device test \
+  --project-path .build/device-tests/MPVUIRegressionTests.xcodeproj \
+  --scheme MPVUIRegressionTests --device-id DEVICE_UDID --configuration Release \
+  --derived-data-path .build/device-tests/DerivedData \
+  --extra-args '-allowProvisioningUpdates' 'ENABLE_TESTABILITY=YES' '-parallel-testing-enabled' 'NO'
+```
+
+Release tests require `ENABLE_TESTABILITY=YES`. To run one suite, add `-only-testing:MPVUITests/SUITE_NAME` to `--extra-args`.
+
+The generated project stays in `.build/device-tests` and uses the repository's test sources. Regenerate it after adding or removing tests. For simulators, omit `--team` and use `xcodebuildmcp simulator test --simulator-id SIMULATOR_UDID`.
+
+`MPVNativePresentationTests` checks frame delivery, motion, pause, and exact seeking on physical iOS devices. Some GPU readback tests also require a device. Confirm screen output and audible synchronization manually.

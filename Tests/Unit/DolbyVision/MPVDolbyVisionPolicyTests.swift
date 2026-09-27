@@ -23,7 +23,7 @@ struct MPVDolbyVisionPolicyTests {
     func `strict is the default and compatibility is explicit and requires reload`() {
         let config = MPVPlayerConfiguration()
         #expect(config.dolbyVisionPolicy == .strict)
-        #expect(config.nativeVideoFeaturePolicy == .preserveDolbyVision)
+        #expect(config.nativeVideoFeaturePolicy == .preferFeatures)
         #expect(MPVDolbyVisionPolicy.strict.nativeMPVValue == "no")
         #expect(MPVDolbyVisionPolicy.profile7Compatibility.nativeMPVValue == "p8.1")
         #expect(MPVDolbyVisionPolicy.profile7Compatibility.changesRequireReload)

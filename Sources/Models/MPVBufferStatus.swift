@@ -15,6 +15,10 @@ public struct MPVBufferStatus: Equatable, Sendable {
     /// The number of demuxed bytes available after the current position.
     public let bytesAhead: Int64
 
+    /// Total demuxer-cache bytes, including retained data behind the current
+    /// position. Nil means the native cache did not report its allocation.
+    public let totalBytes: Int64?
+
     /// The current input rate in bytes per second.
     public let inputRate: Int64
 
@@ -29,6 +33,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
         secondsBufferedAhead: Duration = .zero,
         bufferedEnd: Duration? = nil,
         bytesAhead: Int64 = 0,
+        totalBytes: Int64? = nil,
         inputRate: Int64 = 0,
         seekableRanges: [ClosedRange<Duration>] = []
     ) {
@@ -37,6 +42,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
         self.secondsBufferedAhead = secondsBufferedAhead.clampPositiveOrZero
         self.bufferedEnd = bufferedEnd
         self.bytesAhead = max(0, bytesAhead)
+        self.totalBytes = totalBytes.map { max(0, $0) }
         self.inputRate = max(0, inputRate)
         self.seekableRanges = seekableRanges
     }

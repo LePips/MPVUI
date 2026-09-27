@@ -36,49 +36,23 @@ struct MPVNativeVideoOutputTests {
     @MainActor
     @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox])
     func `native frames and seek`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) async throws {
-        let player = MPVPlayer(configuration: .init(
+        let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null"],
             autoPlay: false,
             hardwareDecoding: hardwareDecoding,
             videoOutput: .sampleBuffer
         ))
-        let surface = MPVPlatformVideoPlayer(player: player)
-        #if os(macOS)
-        let window = NSWindow(
-            contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = surface
-        window.orderFront(nil)
-        #else
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
-        let host = UIViewController()
-        host.view.addSubview(surface)
-        surface.frame = window.bounds
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        surface.setNeedsLayout()
-        surface.layoutIfNeeded()
-        #endif
-        surface.activateRenderingSurface()
-        defer {
-            player.stop()
-            surface.detach()
-            #if os(macOS)
-            window.orderOut(nil)
-            window.contentView = nil
-            #else
-            window.isHidden = true
-            window.rootViewController = nil
-            #endif
-        }
+        let player = fixture.player
+        let surface = fixture.surface
+        defer { fixture.close() }
 
         let layer = player.sampleBufferDisplayLayer
         player.load(TestPaths.baselineMedia, autoPlay: false)
         try await waitUntil(
-            "initial paused frame; state=\(player.state), bounds=\(surface.bounds), ready=\(layer.isReadyForDisplay), status=\(layer.sampleBufferRenderer.status.rawValue), error=\(String(describing: layer.sampleBufferRenderer.error))"
+            "initial paused frame; state=\(player.state), \(fixture.presentationContext), "
+                + "rate=\(layer.controlTimebase.map(CMTimebaseGetRate) ?? -.infinity), "
+                + "ready=\(layer.isReadyForDisplay), status=\(layer.sampleBufferRenderer.status.rawValue), "
+                + "error=\(String(describing: layer.sampleBufferRenderer.error))"
         ) {
             guard player.state == .paused, layer.isReadyForDisplay,
                   let clock = layer.controlTimebase, CMTimebaseGetRate(clock) == 0

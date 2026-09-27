@@ -47,8 +47,11 @@ extension MPVEngine {
 
         for (index, property) in properties.enumerated() {
             let format: mpv_format = switch property {
-            case "time-pos":
-                // Carry frequent position values instead of rereading them.
+            case "hwdec-current":
+                MPV_FORMAT_STRING
+            case "time-pos", "duration", "estimated-vf-fps", "container-fps":
+                // Scalar observations suppress notifications for unchanged
+                // values. Position events also carry the value into Swift.
                 MPV_FORMAT_DOUBLE
             case "video-params", "video-dec-params", "video-out-params", "video-target-params":
                 // mpv invalidates these maps on every playback tick. Typed
@@ -77,12 +80,15 @@ extension MPVEngine {
 
     func scheduleEventDrain() {
         queue.async { [weak self] in
-            self?.drainEvents()
+            guard let self else { return }
+            self.lifecycleDiagnostics.engineActivity.nativeWakeups &+= 1
+            self.drainEvents()
         }
     }
 
     func drainEvents() {
         dispatchPrecondition(condition: .onQueue(queue))
+        lifecycleDiagnostics.engineActivity.eventDrainPasses &+= 1
 
         while let handle {
             guard let eventPointer = mpv_wait_event(handle, 0) else { return }
@@ -98,6 +104,9 @@ extension MPVEngine {
     // boundary separate from polling also lets tests deliver rare/stale events.
     func handleEvent(_ event: mpv_event) {
         dispatchPrecondition(condition: .onQueue(queue))
+        if event.event_id != MPV_EVENT_NONE {
+            lifecycleDiagnostics.engineActivity.nativeEvents &+= 1
+        }
         switch event.event_id {
         case MPV_EVENT_COMMAND_REPLY:
             guard let query = subtitleQueries.removeValue(forKey: event.reply_userdata) else { return }
@@ -125,6 +134,7 @@ extension MPVEngine {
                 return
             }
             cancelSubtitleQueries()
+            resetMediaObservations()
             requestedPlaylistEntryID = entryID
             activePlaylistEntryID = entryID
             isLoading = true
@@ -180,6 +190,9 @@ extension MPVEngine {
             refreshBuffer()
             refreshTextSubtitleSnapshot()
             refreshState()
+            // FILE_LOADED can publish .paused before a frame exists. A restart
+            // also occurs for paused playback after its first frame is ready.
+            performPendingRendererCommands()
 
             if let request = pendingPiPSeek, request.sawSeek,
                abs((lastPosition - request.target).seconds) < 1
@@ -197,12 +210,13 @@ extension MPVEngine {
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
             guard let name = property.name else { return }
             let propertyName = String(cString: name)
-            // Only these handlers consume event values. Video-map observations
-            // use native equality to suppress notifications, then refresh the
-            // complete current snapshot; copying their payload would discard
-            // another set of maps on every genuine (including HDR) change.
-            let copiedNode = propertyName == "time-pos" || propertyName == "sub-text-snapshot"
-                ? MPVNodeValue(copying: property) : nil
+            lifecycleDiagnostics.engineActivity.propertyChangeEvents[propertyName, default: 0] &+= 1
+            // Target parameters can contain an unknown pixel aspect ratio
+            // represented as NaN. Native node equality considers NaN unequal
+            // to itself, so compare the target signal we actually publish.
+            let needsValue = propertyName == "time-pos" || propertyName == "sub-text-snapshot"
+                || propertyName == "video-target-params" || propertyName == "hwdec-current"
+            let copiedNode = needsValue ? MPVNodeValue(copying: property) : nil
             handlePropertyChange(propertyName, copiedNode: copiedNode)
 
         case MPV_EVENT_END_FILE:
@@ -243,6 +257,12 @@ extension MPVEngine {
     var isRequestedPlaylistEntryActive: Bool {
         guard playbackRequestIsActive else { return false }
         return Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID)
+    }
+
+    func resetMediaObservations() {
+        videoToolboxSessionUsesHardware = nil
+        lastContainerFramesPerSecond = nil
+        lastVideoTargetObservation = nil
     }
 
     private func handlePropertyChange(_ name: String, copiedNode: MPVNodeValue? = nil) {
@@ -287,12 +307,38 @@ extension MPVEngine {
         case "volume", "mute", "speed":
             refreshAudioState()
 
+        case "estimated-vf-fps":
+            // The media snapshot prefers container FPS. An estimator update
+            // cannot change it while that authoritative value is available;
+            // playback diagnostics still sample the estimator independently.
+            if lastContainerFramesPerSecond == nil {
+                refreshMediaInformation()
+            }
+
+        case "video-target-params":
+            let observation = copiedNode.map {
+                VideoTargetObservation.available(MPVVideoSignalParser.parse($0))
+            } ?? .unavailable
+            guard observation != lastVideoTargetObservation else { return }
+            lastVideoTargetObservation = observation
+            refreshMediaInformation()
+
+        case "hwdec-current":
+            let selectedDecoder = copiedNode?.stringValue
+            if selectedDecoder != playbackDiagnostics.decoder.selectedDecoder {
+                // A previous decoder session cannot establish a new selection.
+                // A log delivered first already published this same selection.
+                videoToolboxSessionUsesHardware = nil
+            }
+            refreshDecoderDiagnostics(hardwareDecoder: selectedDecoder)
+            refreshMediaInformation()
+
         case "track-list", "current-tracks/audio/id", "current-tracks/video/id",
              "current-tracks/sub/id", "media-title", "metadata", "chapter-list",
-             "video-out-params", "video-params", "video-dec-params", "video-target-params",
+             "video-out-params", "video-params", "video-dec-params",
              "audio-params", "video-codec", "video-format",
-             "audio-codec-name", "hwdec-current", "file-format", "file-size",
-             "estimated-vf-fps", "container-fps":
+             "audio-codec-name", "file-format", "file-size",
+             "container-fps":
             refreshMediaInformation()
             if name == "track-list" || name == "current-tracks/sub/id" {
                 refreshTextSubtitleSnapshot()
@@ -343,6 +389,8 @@ extension MPVEngine {
             publishState(.loading)
             return
         }
+
+        pendingRendererCommands.removeAll()
 
         // Typed stop requests publish synchronously after mpv accepts the
         // command, so any STOP that reaches this active-request path belongs

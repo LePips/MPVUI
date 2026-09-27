@@ -4,14 +4,18 @@
 
 | Output | Rendering path | Use |
 | --- | --- | --- |
-| Metal (default) | mpv → libplacebo → MoltenVK → `CAMetalLayer` | Scaling, tone mapping, custom shaders, and rendering presets |
+| Metal | mpv → libplacebo → MoltenVK → `CAMetalLayer` | Scaling, tone mapping, custom shaders, and rendering presets |
 | Sample buffer | mpv → AVFoundation → `AVSampleBufferDisplayLayer` | Native presentation, supported Dolby Vision metadata, and iOS PiP |
+
+Sample buffers are the default on every platform. Custom rendering settings or additional mpv options select Metal. Set `videoOutput` to choose an output explicitly.
 
 ```swift
 let player = MPVPlayer(configuration: .init(videoOutput: .sampleBuffer))
 ```
 
 Unsupported native formats or missing metadata can trigger a switch to Metal. `player.videoOutput` reports the active output; `videoOutputFallbackReason` explains a switch. Metal shaders and presets apply only to Metal output.
+
+Automatic output selection can switch to Metal for styled subtitles, baked overlays, or zoom and pan. Raw rendering properties and commands keep Metal active across later loads. Explicit sample-buffer output prioritizes Dolby Vision; set `nativeVideoFeaturePolicy` to prefer features instead.
 
 ## HDR and PiP
 

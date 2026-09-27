@@ -116,6 +116,9 @@ extension MPVEngine {
 
     private func loadExternalTrackImmediately(_ track: ExternalTrack) {
         dispatchPrecondition(condition: .onQueue(queue))
+        // Stop releases scoped access while retaining the track descriptions.
+        // Replay must reacquire access before the native client reopens them.
+        startExternalSecurityScopedAccessIfNeeded(for: track.url)
         let path = Self.mpvPath(for: track.url)
         // mpv may already have discovered a sidecar beside the video. Reuse it
         // when loading explicitly, including after renderer recreation.

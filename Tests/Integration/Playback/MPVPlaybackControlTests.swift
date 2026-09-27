@@ -135,19 +135,82 @@ struct MPVPlaybackControlTests {
         #expect(player.lastError == nil)
     }
 
-    @Test
-    func `stopped media can be replayed from its beginning`() async throws {
-        let fixture = PlaybackFixture()
+    @Test(arguments: [MPVPlayerConfiguration.VideoOutput.sampleBuffer, .metal])
+    func `stopped media retires its renderer and can be replayed from its beginning`(
+        output: MPVPlayerConfiguration.VideoOutput
+    ) async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: output
+        ))
         defer { fixture.close() }
         try await fixture.loadPaused()
         let player = fixture.player
+        let before = await player.lifecycleDiagnostics()
         player.stop()
         try await eventually("stop acknowledged") { player.state == .stopped }
+        let stopped = await player.lifecycleDiagnostics()
+        #expect(stopped.handlesDestroyed == before.handlesDestroyed + 1)
+        #expect(stopped.handlesCreated == before.handlesCreated)
+        #expect(player.isPaused && player.position == .zero)
+        // Visible-view updates and a detached/re-attached surface must stay
+        // cheap until an explicit playback request arrives.
+        fixture.surface.activateRenderingSurface()
+        fixture.surface.detach()
+        fixture.surface.activateRenderingSurface()
+        #expect(await player.lifecycleDiagnostics().handlesCreated == stopped.handlesCreated)
         player.togglePlayback()
         try await eventually("stopped media reloaded") { player.state == .playing && player.position.seconds < 0.8 }
         #expect(player.mediaInformation.sourceURL == TestPaths.baselineMedia)
         #expect(player.lastError == nil)
         #expect(await player.lifecycleDiagnostics().loadCommands == 2)
+        #expect(await player.lifecycleDiagnostics().handlesCreated == before.handlesCreated + 1)
+    }
+
+    @Test
+    func `stop replay restores external selections and native runtime properties`() async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null"], autoPlay: false, logLevel: .info, videoOutput: .sampleBuffer
+        ))
+        defer { fixture.close() }
+        let files = try TemporaryTestDirectory()
+        defer { files.remove() }
+        let subtitle = try files.write("replay.srt", contents: "1\n00:00:00,000 --> 00:00:12,000\nReplay subtitle\n")
+        try await fixture.loadPaused(TestPaths.multitrackMedia, at: .seconds(5))
+        let player = fixture.player
+        player.loadExternalTrack(subtitle, type: .subtitle, select: true)
+        try await eventually("external subtitle selected") { player.subtitleTracks.contains { $0.isExternal && $0.isSelected } }
+        player.setVolume(37)
+        player.setMuted(true)
+        player.setPlaybackRate(1.25)
+        player.setAudioDelay(.milliseconds(250))
+        player.setSubtitleDelay(.milliseconds(125))
+        player.stop()
+        try await eventually("runtime-configured item stopped") { player.state == .stopped }
+        player.play()
+        try await eventually("external subtitle restored on replay") {
+            player.state == .playing && player.position.seconds < 2
+                && player.subtitleTracks.contains { $0.isExternal && $0.isSelected }
+        }
+        var observed: [String: String] = [:]
+        player.logHandler = { message in
+            guard let marker = message.message.range(of: "REPLAY_RUNTIME ") else { return }
+            for field in message.message[marker.upperBound...].split(whereSeparator: \.isWhitespace) {
+                let parts = field.split(separator: "=", maxSplits: 1)
+                if parts.count == 2 {
+                    observed[String(parts[0])] = String(parts[1])
+                }
+            }
+        }
+        player.command("expand-properties", arguments: [
+            "print-text", "REPLAY_RUNTIME volume=${=volume} mute=${mute} speed=${=speed} audio=${=audio-delay} sub=${=sub-delay}",
+        ])
+        try await eventually("native replay properties observed") { observed.count == 5 }
+        #expect(observed["volume"].flatMap(Double.init) == 37)
+        #expect(observed["mute"] == "yes")
+        #expect(observed["speed"].flatMap(Double.init) == 1.25)
+        #expect(observed["audio"].flatMap(Double.init) == 0.25)
+        #expect(observed["sub"].flatMap(Double.init) == 0.125)
+        #expect(player.lastError == nil)
     }
 
     @Test

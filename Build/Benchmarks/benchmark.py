@@ -342,6 +342,10 @@ def main(argv=None):
     run.add_argument("--libplacebo-include", type=Path)
     run.add_argument("--subtitle-width", type=bounded_int(128, 4096), default=1920)
     run.add_argument("--subtitle-height", type=bounded_int(72, 2160), default=1080)
+    from device_playback import add_arguments as add_device_arguments
+    add_device_arguments(commands, label=label, bounded_int=bounded_int, finite_range=finite_range)
+    from device_regression import add_arguments as add_regression_arguments
+    add_regression_arguments(commands)
     compare = commands.add_parser("compare", help="Compare medians with compatibility checks")
     compare.add_argument("baseline", type=Path)
     compare.add_argument("candidate", type=Path)
@@ -353,6 +357,12 @@ def main(argv=None):
     try:
         if args.command == "run":
             return run_benchmarks(args)
+        if args.command == "device":
+            from device_playback import run as run_device
+            return run_device(args)
+        if args.command == "device-regression":
+            from device_regression import run as run_regression
+            return run_regression(args)
         result = compare_reports(json.loads(args.baseline.read_text()), json.loads(args.candidate.read_text()),
                                  allow_mismatch=args.allow_mismatch,
                                  regression_percent=args.fail_regression_percent)

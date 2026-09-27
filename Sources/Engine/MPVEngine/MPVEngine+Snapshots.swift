@@ -39,6 +39,9 @@ extension MPVEngine {
     }
 
     func publishState(_ state: MPVPlaybackState) {
+        if state.isTerminal {
+            pendingRendererCommands.removeAll()
+        }
         publish(.paused(isPaused))
         guard state != lastState else { return }
         lastState = state
@@ -73,6 +76,7 @@ extension MPVEngine {
     }
 
     func refreshBuffer() {
+        lifecycleDiagnostics.engineActivity.bufferSnapshots &+= 1
         let cache = getNode("demuxer-cache-state")?.mapValue ?? [:]
         let ranges = Self.parseSeekableRanges(cache["seekable-ranges"])
 
@@ -89,6 +93,7 @@ extension MPVEngine {
                         Duration.init(mpvSeconds:)
                     ),
                     bytesAhead: cache["fw-bytes"]?.integerValue ?? 0,
+                    totalBytes: cache["total-bytes"]?.integerValue,
                     inputRate: cache["raw-input-rate"]?.integerValue ?? 0,
                     seekableRanges: ranges
                 )
@@ -107,6 +112,7 @@ extension MPVEngine {
     }
 
     func refreshMediaInformation() {
+        lifecycleDiagnostics.engineActivity.mediaSnapshots &+= 1
         let tracks = Self.parseTracks(getNode("track-list"))
         let chapters = Self.parseChapters(getNode("chapter-list"))
         let metadata = Self.parseMetadata(getNode("metadata"))
@@ -173,6 +179,8 @@ extension MPVEngine {
                 lastDuration > .zero ? lastDuration : nil
             }
 
+        lastContainerFramesPerSecond = getDouble("container-fps")
+        let framesPerSecond = lastContainerFramesPerSecond ?? getDouble("estimated-vf-fps")
         publish(
             .media(
                 MPVMediaInformation(
@@ -185,7 +193,7 @@ extension MPVEngine {
                     audioCodec: getString("audio-codec-name"),
                     hardwareDecoder: getString("hwdec-current"),
                     dimensions: dimensions,
-                    framesPerSecond: getDouble("container-fps") ?? getDouble("estimated-vf-fps"),
+                    framesPerSecond: framesPerSecond,
                     rotation: Int(
                         parameters?["rotate"]?.integerValue
                             ?? outputParameters?["rotate"]?.integerValue
@@ -320,6 +328,7 @@ extension MPVEngine {
     }
 
     func publish(_ update: MPVEngineUpdate) {
+        lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
         updateContinuation.yield(
             MPVEngineEmission(
                 generation: currentGeneration,
@@ -329,6 +338,7 @@ extension MPVEngine {
     }
 
     private func publishGlobally(_ update: MPVEngineUpdate) {
+        lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
         updateContinuation.yield(
             MPVEngineEmission(
                 generation: nil,
@@ -338,6 +348,7 @@ extension MPVEngine {
     }
 
     func publishFatalError(_ error: MPVPlayerError, globally: Bool = false) {
+        pendingRendererCommands.removeAll()
         completePiPSeek(false)
         fatalPlaybackError = error
         lastState = .failed(error)

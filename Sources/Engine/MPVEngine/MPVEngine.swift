@@ -40,6 +40,9 @@ final class MPVEngine: @unchecked Sendable {
     var pendingStartTime: Duration?
     var pendingSeekAfterLoad: Duration?
     var needsSourceLoad = false
+    // A stopped player keeps its source and surface for replay without keeping
+    // native decoder/renderer allocations alive. Geometry updates cannot restart it.
+    var isStoppedForResourceRelease = false
     var shouldAutoPlay: Bool
     var isDisplaySwitchInProgress = false
     var securityScopedURL: URL?
@@ -47,6 +50,17 @@ final class MPVEngine: @unchecked Sendable {
     var pendingExternalTracks: [ExternalTrack] = []
     var externalSecurityScopedURLs: Set<URL> = []
     var desiredProperties: [String: String]
+    var commandMutatedOptions: Set<String> = []
+    struct PendingRendererCommand {
+        let generation: UInt64
+        let arguments: [String]
+
+        var byteCount: Int {
+            arguments.reduce(0) { $0 + $1.utf8.count }
+        }
+    }
+
+    var pendingRendererCommands: [PendingRendererCommand] = []
     var isLoading = false
     var isFileLoaded = false
     var isPaused = false
@@ -66,6 +80,13 @@ final class MPVEngine: @unchecked Sendable {
     var lastDuration: Duration = .zero
     var lastSeekable = false
     var lastState: MPVPlaybackState = .idle
+    var lastContainerFramesPerSecond: Double?
+    enum VideoTargetObservation: Equatable {
+        case unavailable
+        case available(MPVVideoSignal)
+    }
+
+    var lastVideoTargetObservation: VideoTargetObservation?
 
     // MARK: - Text subtitles
 

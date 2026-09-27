@@ -17,6 +17,7 @@ final class PlaybackFixture {
     let window: NSWindow
     #else
     let window: UIWindow
+    private weak var previousKeyWindow: UIWindow?
     #endif
 
     init(
@@ -37,14 +38,38 @@ final class PlaybackFixture {
         window.orderFront(nil)
         surface.layoutSubtreeIfNeeded()
         #else
-        window = UIWindow(frame: frame)
+        // A scene-based test host does not composite a legacy UIWindow that
+        // has no windowScene. AVFoundation may report ready even though there
+        // is no displayed image for copyDisplayedPixelBuffer to return.
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive }
+            ?? scenes.first { $0.activationState == .foregroundInactive }
+        if let scene {
+            previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+            window = UIWindow(windowScene: scene)
+            window.frame = frame
+        } else {
+            // Unhosted simulator/package runners may not create a scene.
+            window = UIWindow(frame: frame)
+        }
         let host = UIViewController()
         host.view = surface
         window.rootViewController = host
-        window.isHidden = false
+        window.makeKeyAndVisible()
+        surface.setNeedsLayout()
         surface.layoutIfNeeded()
         #endif
         surface.activateRenderingSurface()
+    }
+
+    var presentationContext: String {
+        #if os(macOS)
+        "windowVisible=\(window.isVisible), surfaceWindow=\(surface.window != nil), bounds=\(surface.bounds)"
+        #else
+        "windowScene=\(window.windowScene != nil), activation=\(window.windowScene?.activationState.rawValue ?? -1), "
+            + "windowHidden=\(window.isHidden), key=\(window.isKeyWindow), "
+            + "surfaceWindow=\(surface.window === window), bounds=\(surface.bounds)"
+        #endif
     }
 
     func loadPaused(_ url: URL = TestPaths.baselineMedia, at position: Duration = .seconds(1)) async throws {
@@ -66,6 +91,7 @@ final class PlaybackFixture {
         #else
         window.isHidden = true
         window.rootViewController = nil
+        previousKeyWindow?.makeKey()
         #endif
     }
 }

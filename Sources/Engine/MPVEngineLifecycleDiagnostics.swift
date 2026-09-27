@@ -1,6 +1,7 @@
 /// Internal counters used by integration tests to distinguish an in-place
 /// output resize from a player teardown and media reload.
 struct MPVEngineLifecycleDiagnostics: Equatable, Sendable {
+    var engineActivity = MPVPlaybackDiagnostics.EngineActivity()
     var handlesCreated: UInt64 = 0
     var handlesDestroyed: UInt64 = 0
     var loadCommands: UInt64 = 0

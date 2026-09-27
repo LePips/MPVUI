@@ -18,6 +18,9 @@ indirect enum MPVNodeValue: Equatable, Sendable {
     init?(copying property: mpv_event_property) {
         guard let data = property.data else { return nil }
         switch property.format {
+        case MPV_FORMAT_STRING:
+            guard let value = data.assumingMemoryBound(to: UnsafePointer<CChar>?.self).pointee else { return nil }
+            self = .string(String(cString: value))
         case MPV_FORMAT_DOUBLE:
             self = .double(data.assumingMemoryBound(to: Double.self).pointee)
         case MPV_FORMAT_NODE:

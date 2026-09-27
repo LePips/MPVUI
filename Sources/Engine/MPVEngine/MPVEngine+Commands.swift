@@ -79,13 +79,99 @@ extension MPVEngine {
         return name.hasPrefix("glsl-shaders-")
     }
 
-    func performCommand(_ name: String, arguments: [String]) {
+    func performCommand(
+        _ name: String,
+        arguments: [String],
+        deferUntilPlaybackRestart: Bool = false,
+        generation: UInt64? = nil
+    ) {
         guard !name.isEmpty else { return }
         if name.caseInsensitiveCompare("stop") == .orderedSame, arguments.isEmpty {
             stop()
             return
         }
-        command([name] + arguments)
+        guard deferUntilPlaybackRestart, let generation else {
+            command([name] + arguments, allowsStoppedClient: true)
+            return
+        }
+        queue.async { [weak self] in
+            guard let self, generation == self.currentGeneration else { return }
+            let arguments = [name] + arguments
+            self.createStoppedClientForExplicitCommandIfNeeded()
+            if self.playbackRequestIsActive,
+               self.handle == nil || !self.isFileLoaded || !self.hasPlaybackStarted || self.isLoading || self.isSeeking
+            {
+                let request = PendingRendererCommand(generation: generation, arguments: arguments)
+                // Bound ownership if the replacement source never becomes ready.
+                // Existing requests retain order; overflow reports a command error.
+                let bytes = self.pendingRendererCommands.reduce(0) { $0 + $1.byteCount }
+                guard self.pendingRendererCommands.count < 64,
+                      request.byteCount <= 262_144 - bytes
+                else {
+                    self.publish(.error(.commandFailed(
+                        context: name, code: MPV_ERROR_COMMAND.rawValue,
+                        message: "Too many commands are waiting for the renderer to reload."
+                    ), fatal: false))
+                    return
+                }
+                self.pendingRendererCommands.append(request)
+            } else {
+                self.performCommandImmediately(arguments)
+            }
+        }
+    }
+
+    func performPendingRendererCommands() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        let commands = pendingRendererCommands
+        pendingRendererCommands.removeAll()
+        for command in commands where command.generation == currentGeneration {
+            performCommandImmediately(command.arguments)
+        }
+    }
+
+    private func performCommandImmediately(_ arguments: [String]) {
+        let status = runCommand(arguments)
+        if status < 0 {
+            publishCommandError(status, context: arguments.first ?? "Command")
+        }
+    }
+
+    func recordPersistentCommandMutation(_ arguments: [String]) {
+        guard let command = arguments.first?.lowercased() else { return }
+        let property: String
+        if ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(command),
+           arguments.count > 1
+        {
+            property = Self.canonicalOptionName(arguments[1])
+        } else if command == "vf" || command == "af" {
+            property = command
+        } else {
+            return
+        }
+        // File-local values, timeline actions, and renderer ownership must not
+        // become configuration for a replacement client. Only real options are
+        // read below; properties such as chapter and time-pos are not options.
+        guard !property.isEmpty, !property.contains("/"),
+              !Self.reservedProperties.contains(property),
+              ![
+                  "start",
+                  "end",
+                  "length",
+                  "playlist-start",
+                  "time-pos",
+                  "percent-pos",
+                  "chapter",
+                  "playlist-pos",
+                  "playlist-pos-1",
+                  "playlist-playing-pos"
+              ].contains(property)
+        else { return }
+        commandMutatedOptions.insert(property)
+    }
+
+    private static func canonicalOptionName(_ name: String) -> String {
+        name.hasPrefix("options/") ? String(name.dropFirst("options/".count)) : name
     }
 
     func snapshotRuntimeProperties() {
@@ -97,6 +183,13 @@ extension MPVEngine {
         ]
         for name in names {
             if let value = getString(name) {
+                desiredProperties[name] = value
+            }
+        }
+        for name in commandMutatedOptions.subtracting(names) {
+            if let value = getString("options/\(name)") {
+                // Store the resolved value of add/cycle/list operations, never
+                // replay a mutation that could compound after every stop.
                 desiredProperties[name] = value
             }
         }
@@ -119,9 +212,22 @@ extension MPVEngine {
         try check(mpv_set_option_string(handle, name, value), context: "Set option \(name)")
     }
 
-    func command(_ arguments: [String]) {
+    private func createStoppedClientForExplicitCommandIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard handle == nil, isStoppedForResourceRelease, renderTarget != nil,
+              !needsSourceLoad, !playbackRequestIsActive else { return }
+        // Explicit raw commands retain native option and command ordering even
+        // after stop retired the old session. This idle client does not reopen
+        // the source; ordinary view updates still respect the stopped latch.
+        createHandle(allowStopped: true)
+    }
+
+    func command(_ arguments: [String], allowsStoppedClient: Bool = false) {
         queue.async { [weak self] in
             guard let self else { return }
+            if allowsStoppedClient {
+                self.createStoppedClientForExplicitCommandIfNeeded()
+            }
             let status = self.runCommand(arguments)
             if status < 0 {
                 self.publishCommandError(status, context: arguments.first ?? "Command")
@@ -182,7 +288,7 @@ extension MPVEngine {
 
     func setPropertyImmediatelyOrDefer(_ name: String, to value: String) {
         dispatchPrecondition(condition: .onQueue(queue))
-        desiredProperties[name] = value
+        desiredProperties[Self.canonicalOptionName(name)] = value
         guard handle != nil else { return }
 
         let status = setPropertyImmediately(name, to: value)
@@ -207,6 +313,7 @@ extension MPVEngine {
 
     func getFlag(_ name: String) -> Bool? {
         guard let handle else { return nil }
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
         var value: Int32 = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_FLAG, &value) >= 0 else { return nil }
         return value != 0
@@ -214,6 +321,7 @@ extension MPVEngine {
 
     func getInt64(_ name: String) -> Int64? {
         guard let handle else { return nil }
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
         var value: Int64 = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_INT64, &value) >= 0 else { return nil }
         return value
@@ -221,19 +329,23 @@ extension MPVEngine {
 
     func getDouble(_ name: String) -> Double? {
         guard let handle else { return nil }
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
         var value: Double = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_DOUBLE, &value) >= 0 else { return nil }
         return value.isFinite ? value : nil
     }
 
     func getString(_ name: String) -> String? {
-        guard let handle, let value = mpv_get_property_string(handle, name) else { return nil }
+        guard let handle else { return nil }
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+        guard let value = mpv_get_property_string(handle, name) else { return nil }
         defer { mpv_free(value) }
         return String(validatingCString: value)
     }
 
     func getNode(_ name: String) -> MPVNodeValue? {
         guard let handle else { return nil }
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
         var node = mpv_node()
         guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &node) >= 0 else { return nil }
         defer { mpv_free_node_contents(&node) }

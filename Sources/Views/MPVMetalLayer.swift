@@ -155,12 +155,26 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 
     /// Limits MoltenVK's retirement sentinel exception to a host-authorized
-    /// synchronous swapchain replacement. Other background writers remain
+    /// synchronous swapchain replacement or destruction. Other background writers remain
     /// subject to the normal 1x1 rejection policy.
     func beginNativeResizeTransaction() {
         drawableStateLock.lock()
         nativeResizeTransactionCount &+= 1
         drawableStateLock.unlock()
+    }
+
+    /// Called after the renderer has joined all native presentation threads.
+    /// MoltenVK only writes its retirement sentinel for outstanding presents;
+    /// completed drawables may still belong to CAMetalLayer's reusable pool.
+    /// Invalidate that pool without exposing a permanent invalid host extent.
+    @discardableResult
+    func invalidateDrawablePoolAfterNativeTeardown() -> Bool {
+        drawableStateLock.lock()
+        defer { drawableStateLock.unlock() }
+        guard nativeResizeTransactionCount > 0, let storedLastValidDrawableSize else { return false }
+        super.drawableSize = CGSize(width: 1, height: 1)
+        super.drawableSize = storedLastValidDrawableSize
+        return true
     }
 
     func endNativeResizeTransaction() {
@@ -169,7 +183,8 @@ final class MPVMetalLayer: CAMetalLayer {
 
         // A successful replacement normally installs its final extent before
         // returning. If MoltenVK exits abnormally after writing only its 1x1
-        // retirement sentinel, never expose that transient as durable layer
+        // retirement sentinel, or teardown retires without replacing it, never
+        // expose that transient as durable layer
         // geometry once the outermost native transaction has ended.
         if nativeResizeTransactionCount == 0,
            Self.isMoltenVKRetirementSentinel(super.drawableSize),

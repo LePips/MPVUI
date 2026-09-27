@@ -77,7 +77,7 @@ struct MPVPlayerEmissionTests {
         let player = MPVPlayer()
         player.setProperty(property, to: "2")
         #expect(player.videoFeatureRequestResult?.requestedFeatures == [.zoomAndPan])
-        #expect(player.videoFeatureRequestResult?.outcome == .awaitingVideoMetadata)
+        #expect(player.videoFeatureRequestResult?.outcome == .switchedToMetal)
     }
 
     @Test

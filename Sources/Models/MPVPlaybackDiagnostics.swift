@@ -1,5 +1,35 @@
 /// Playback observations. Missing instrumentation is nil, never an inferred zero.
 public struct MPVPlaybackDiagnostics: Equatable, Sendable {
+    /// Work performed by the Swift engine bridge. Counters are cumulative for
+    /// the player's engine lifetime, including loads and renderer replacements.
+    /// Subtract two snapshots to measure activity over a playback interval.
+    public struct EngineActivity: Equatable, Sendable {
+        /// Native wakeup callbacks whose queued work has begun executing.
+        public var nativeWakeups: Int64 = 0
+        /// Event-drain blocks executed, including drains that find no events.
+        public var eventDrainPasses: Int64 = 0
+        /// Native events consumed, excluding the no-event polling sentinel.
+        public var nativeEvents: Int64 = 0
+        /// Updates enqueued for main-actor delivery, not necessarily delivered yet.
+        public var publishedUpdates: Int64 = 0
+        /// Synchronous libmpv property reads attempted, including unavailable values.
+        public var propertyReads: Int64 = 0
+        /// Complete media-information snapshots constructed.
+        public var mediaSnapshots: Int64 = 0
+        /// Buffer-status snapshots constructed.
+        public var bufferSnapshots: Int64 = 0
+        /// Playback-diagnostics snapshots constructed.
+        public var diagnosticsSnapshots: Int64 = 0
+        /// Property-change events handled for the active playback request, by name.
+        public var propertyChangeEvents: [String: Int64] = [:]
+
+        /// Creates counters with no recorded activity.
+        public init() {}
+    }
+
+    /// Sampled after diagnostics collection, before publishing this snapshot.
+    public var engineActivity = EngineActivity()
+
     /// The current audio output, channel layouts, and Spatial Audio observations.
     public var audio: MPVAudioStatus = .init()
 

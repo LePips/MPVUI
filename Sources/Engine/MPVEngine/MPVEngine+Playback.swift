@@ -11,8 +11,10 @@ extension MPVEngine {
     ) {
         queue.async { [weak self] in
             guard let self else { return }
-            let restartsRejectedNativeOutput = self.didRequestNativeOutputFallback && self.handle == nil
             self.cancelSubtitleQueries()
+            self.pendingRendererCommands.removeAll()
+            self.isStoppedForResourceRelease = false
+            self.resetMediaObservations()
             self.didRequestNativeOutputFallback = false
             self.currentGeneration = generation
             self.playbackDiagnostics = MPVPlaybackDiagnostics()
@@ -52,10 +54,9 @@ extension MPVEngine {
             self.desiredProperties.removeValue(forKey: "secondary-sub-delay")
             self.publishState(.loading)
             self.startSecurityScopedAccessIfNeeded(for: url)
-            if restartsRejectedNativeOutput {
-                // A new typed load can supersede a fallback before the UI
-                // receives it. Reuse the retained native target for that new
-                // source; its older fallback emission is generation-filtered.
+            if self.handle == nil {
+                // Explicit loads restart stopped/rejected renderers using the
+                // retained target, or wait for a later surface attachment.
                 self.createHandle()
             } else {
                 self.loadPendingSourceIfPossible()
@@ -103,6 +104,8 @@ extension MPVEngine {
             guard let self else { return }
             self.cancelSubtitleQueries()
             self.completePiPSeek(false)
+            // Snapshot before stop unloads the file and track selections.
+            self.snapshotRuntimeProperties()
             if let generation {
                 self.currentGeneration = generation
             }
@@ -127,6 +130,7 @@ extension MPVEngine {
             // user's requested state is authoritative; delayed events stay
             // ignored until a later load or play request clears this latch.
             self.playbackRequestIsActive = false
+            self.isStoppedForResourceRelease = true
             self.requestedPlaylistEntryID = nil
             self.activePlaylistEntryID = nil
             self.isLoading = false
@@ -134,8 +138,20 @@ extension MPVEngine {
             self.isSeeking = false
             self.isPausedForCache = false
             self.isIdle = true
+            self.isPaused = true
             self.didReachEnd = false
             self.hasPlaybackStarted = false
+            // Avoid destroyHandle's active-playback position snapshot: stop
+            // means replay from zero, while preserving the source and settings.
+            self.destroyHandle(preservePlayback: true)
+            self.pendingStartTime = nil
+            self.pendingSeekAfterLoad = nil
+            self.lastPosition = .zero
+            self.stopSecurityScopedAccess()
+            self.stopExternalSecurityScopedAccess()
+            self.publish(.paused(true))
+            self.publish(.buffer(.empty))
+            self.publishTiming()
             self.publishState(.stopped)
         }
     }
@@ -260,6 +276,7 @@ extension MPVEngine {
         isPaused = !playing
 
         if playing, !isFileLoaded, !isLoading, let sourceURL {
+            isStoppedForResourceRelease = false
             let restartPosition = pendingStartTime?.clampPositiveOrZero ?? .zero
             pendingStartTime = restartPosition
             pendingSeekAfterLoad = nil
@@ -272,7 +289,11 @@ extension MPVEngine {
             pendingExternalTracks = externalTracks
             startSecurityScopedAccessIfNeeded(for: sourceURL)
             publishState(.loading)
-            loadPendingSourceIfPossible()
+            if handle == nil {
+                createHandle()
+            } else {
+                loadPendingSourceIfPossible()
+            }
             return
         }
 

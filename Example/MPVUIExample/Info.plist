@@ -6,5 +6,12 @@
     <array>
         <string>audio</string>
     </array>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Connect to a local media server for playback and device benchmarks.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
 </dict>
 </plist>

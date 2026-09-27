@@ -459,7 +459,18 @@ struct MPVMobilePlaybackLifecycleTests {
 
         let lifecycleAfterTransientResize = await player.lifecycleDiagnostics()
         let renderOutputAfterTransientResize = await player.renderOutputSize()
-        #expect(lifecycleAfterTransientResize == lifecycleAfterForcedFinal)
+        // Diagnostics polling may continue while paused; a transient size
+        // must leave every renderer and playback lifecycle counter unchanged.
+        #expect(lifecycleAfterTransientResize.handlesCreated == lifecycleAfterForcedFinal.handlesCreated)
+        #expect(lifecycleAfterTransientResize.handlesDestroyed == lifecycleAfterForcedFinal.handlesDestroyed)
+        #expect(lifecycleAfterTransientResize.loadCommands == lifecycleAfterForcedFinal.loadCommands)
+        #expect(lifecycleAfterTransientResize.startFileEvents == lifecycleAfterForcedFinal.startFileEvents)
+        #expect(lifecycleAfterTransientResize.seekCommands == lifecycleAfterForcedFinal.seekCommands)
+        #expect(lifecycleAfterTransientResize.surfaceResizeCommands == lifecycleAfterForcedFinal.surfaceResizeCommands)
+        #expect(lifecycleAfterTransientResize.liveColorUpdates == lifecycleAfterForcedFinal.liveColorUpdates)
+        #expect(lifecycleAfterTransientResize.loadingStateTransitions == lifecycleAfterForcedFinal.loadingStateTransitions)
+        #expect(lifecycleAfterTransientResize.bufferingStateTransitions == lifecycleAfterForcedFinal.bufferingStateTransitions)
+        #expect(lifecycleAfterTransientResize.seekingStateTransitions == lifecycleAfterForcedFinal.seekingStateTransitions)
         #expect(renderOutputAfterTransientResize == landscapeOutputSize)
         #expect((player.state) == .paused)
         #expect(

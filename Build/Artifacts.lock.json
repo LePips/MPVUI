@@ -9,7 +9,7 @@
       "archive" : "Libmpv.xcframework.zip",
       "framework" : "Libmpv",
       "module" : "Libmpv",
-      "sha256" : "6f0d7feed77fc2cf2917d21604bff478faf1dd91a7fb86071b1d53a43785c3b1",
+      "sha256" : "260db64bdaff22265099130ef807fa00bd4051ec9fef1107168a616cdbb776a4",
       "slices" : [
         {
           "architectures" : [
@@ -106,8 +106,8 @@
         }
       ],
       "target" : "Libmpv-GPL",
-      "url" : "https://github.com/LePips/MPVUI/releases/download/0.3.0/Libmpv.xcframework.zip"
+      "url" : "https://github.com/LePips/MPVUI/releases/download/0.4.0/Libmpv.xcframework.zip"
     }
   ],
-  "releaseID" : "0.3.0"
+  "releaseID" : "0.4.0"
 }

@@ -197,6 +197,9 @@ extension MPVEngine {
         let changedColor = !previous.matchesSurfaceConfiguration(target)
         renderTarget = target
         outputHeadroom = target.outputHeadroom
+        // A stopped handle is retired. Save the new surface description for
+        // replay without sending properties to an unavailable native client.
+        guard handle != nil else { return }
         if videoOutput == .metal {
             if changedColor {
                 liveConfigurationFailure = nil

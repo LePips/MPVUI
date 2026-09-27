@@ -173,6 +173,8 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public let logLevel: LogLevel
 
     /// How native Dolby Vision conflicts with subtitles and geometry features.
+    /// Implicit native output prefers requested features, permitting a Metal
+    /// reload. An explicitly selected backend defaults to preserving Dolby Vision.
     public let nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy
 
     /// Renderer cost/quality defaults and optional explicit overrides.
@@ -181,8 +183,15 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// SDR gamut and precision, independent of the HDR policy.
     public let sdrOutput: MPVSDROutputPolicy
 
-    /// The video backend. Use `.sampleBuffer` for iOS picture in picture.
+    /// The resolved video backend. Uncustomized players use native sample buffers
+    /// on every platform; custom rendering settings use Metal.
+    /// An explicit initializer value always takes precedence.
     public let videoOutput: VideoOutput
+
+    /// Whether the caller delegated output selection. The player uses this to
+    /// preserve advanced rendering requests by switching an implicit native
+    /// selection to Metal without changing explicit native-output behavior.
+    let usesAutomaticVideoOutput: Bool
 
     // MARK: - Additional options
 
@@ -197,6 +206,11 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     // MARK: - Initialization
 
     /// Creates a configuration using the normalization rules documented on each property.
+    /// Omitting `videoOutput` selects native sample buffers on every platform
+    /// when rendering, color, deinterlacing, HDR policy, SDR precision,
+    /// and additional options are unchanged. Supplying custom rendering options selects Metal.
+    /// Omitting `nativeVideoFeaturePolicy` prefers features for that implicit
+    /// native choice and preserves Dolby Vision for explicitly selected outputs.
     public init(
         additionalOptions: [String: String] = [:],
         audio: MPVAudioConfiguration = .init(),
@@ -209,16 +223,24 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         initialBufferSeconds: Duration = .seconds(1),
         logLevel: LogLevel = .warning,
         loop: Bool = false,
-        nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy = .preserveDolbyVision,
+        nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy? = nil,
         networkCacheSeconds: Duration = .seconds(10),
         playbackRate: Double = 1,
         renderingQuality: MPVRenderingQuality = .init(),
         sdrOutput: MPVSDROutputPolicy = .automatic,
         startTime: Duration? = nil,
         subtitleLuminance: Double = 203,
-        videoOutput: VideoOutput = .metal,
+        videoOutput: VideoOutput? = nil,
         volume: Double = 100
     ) {
+        let resolvedVideoOutput = videoOutput ?? Self.automaticVideoOutput(
+            additionalOptions: additionalOptions,
+            colorManagement: colorManagement,
+            deinterlace: deinterlace,
+            hdrPolicy: hdrPolicy,
+            renderingQuality: renderingQuality,
+            sdrOutput: sdrOutput
+        )
         self.additionalOptions = additionalOptions
         self.audio = audio
         self.autoPlay = autoPlay
@@ -231,17 +253,40 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.logLevel = logLevel
         self.loop = loop
         self.nativeVideoFeaturePolicy = nativeVideoFeaturePolicy
+            ?? (videoOutput == nil && resolvedVideoOutput == .sampleBuffer
+                ? .preferFeatures : .preserveDolbyVision)
         self.networkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
         self.playbackRate = Self.normalizedPlaybackRate(playbackRate)
         self.renderingQuality = renderingQuality
         self.sdrOutput = sdrOutput
         self.startTime = startTime?.clampPositiveOrZero
         self.subtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)
-        self.videoOutput = videoOutput
+        self.videoOutput = resolvedVideoOutput
+        self.usesAutomaticVideoOutput = videoOutput == nil
         self.volume = Self.normalizedVolume(volume)
     }
 
     // MARK: - Normalization
+
+    private static func automaticVideoOutput(
+        additionalOptions: [String: String],
+        colorManagement: MPVColorManagement,
+        deinterlace: MPVDeinterlacePolicy,
+        hdrPolicy: HDRPolicy,
+        renderingQuality: MPVRenderingQuality,
+        sdrOutput: MPVSDROutputPolicy
+    ) -> VideoOutput {
+        if additionalOptions.isEmpty,
+           colorManagement == .init(),
+           deinterlace == .init(),
+           hdrPolicy == .automatic,
+           renderingQuality == .init(),
+           sdrOutput == .automatic
+        {
+            return .sampleBuffer
+        }
+        return .metal
+    }
 
     private static func normalizedPlaybackRate(_ value: Double) -> Double {
         guard value.isFinite, value > 0 else { return defaultPlaybackRate }

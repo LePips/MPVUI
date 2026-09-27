@@ -19,7 +19,8 @@ public final class MPVPlayer {
     public let configuration: MPVPlayerConfiguration
 
     /// The video output currently in use. Unsupported native formats fall back
-    /// to Metal for the current source; the next load retries the configured output.
+    /// to Metal for the current source. Advanced raw rendering settings keep an
+    /// automatically selected output on Metal across subsequent loads.
     public private(set) var videoOutput: MPVPlayerConfiguration.VideoOutput
 
     /// Why the current source switched from native sample buffers to Metal.
@@ -105,6 +106,8 @@ public final class MPVPlayer {
     private var requestedVideoFeatures: Set<MPVVideoFeature> = []
     @ObservationIgnored
     private var requestedVideoFeaturePolicy: MPVNativeVideoFeaturePolicy?
+    @ObservationIgnored
+    private var automaticVideoOutputFallbackReason: String?
 
     /// Playback volume in mpv's `0...100` range.
     public private(set) var volume: Double
@@ -190,12 +193,20 @@ public final class MPVPlayer {
         requestedVideoFeatures = []
         requestedVideoFeaturePolicy = nil
         videoFeatureRequestResult = nil
-        let restoresConfiguredOutput = videoOutput != configuration.videoOutput
-        if restoresConfiguredOutput {
-            changeVideoOutput(to: configuration.videoOutput, preservePlayback: false)
+        // Raw rendering properties survive engine recreation and later loads.
+        // Keep the renderer that can honor them; per-item feature/native-format
+        // fallbacks still retry the configured backend on the next load.
+        let preferredOutput: MPVPlayerConfiguration.VideoOutput = automaticVideoOutputFallbackReason == nil
+            ? configuration.videoOutput : .metal
+        let fallbackReason = automaticVideoOutputFallbackReason.map {
+            MPVPresentationStatus.FallbackReason.nativeOutputUnavailable($0)
         }
-        videoOutputFallbackReason = nil
-        presentationFallbackReason = nil
+        let restoresConfiguredOutput = videoOutput != preferredOutput
+        if restoresConfiguredOutput {
+            changeVideoOutput(to: preferredOutput, preservePlayback: false, fallbackReason: fallbackReason)
+        }
+        videoOutputFallbackReason = automaticVideoOutputFallbackReason
+        presentationFallbackReason = fallbackReason
         engine?.load(
             url,
             autoPlay: autoPlay,
@@ -222,7 +233,8 @@ public final class MPVPlayer {
         engine?.togglePlayback()
     }
 
-    /// Stops the current playback item.
+    /// Stops the current item and retires its native playback session.
+    /// The source and runtime settings remain available for replay with ``play()``.
     public func stop() {
         storedPictureInPicture?.stop()
         playbackGeneration &+= 1
@@ -452,7 +464,10 @@ public final class MPVPlayer {
     /// Values persist before surface attachment and across renderer recreation.
     /// Use typed methods for normalization and immediate state updates. Properties
     /// managed by MPVUI's renderer or playback state are rejected through ``lastError``.
+    /// Rendering properties switch an automatically selected native output to
+    /// Metal for this player's lifetime. Explicit backend choices are unchanged.
     public func setProperty(_ name: String, to value: String) {
+        let property = Self.normalizedRawProperty(name)
         if ["video-zoom", "video-pan-x", "video-pan-y"].contains(name),
            let amount = Double(value), amount.isFinite, amount != 0
         {
@@ -462,12 +477,34 @@ public final class MPVPlayer {
         {
             requestVideoFeatures([.zoomAndPan])
         }
+        if !property.isEmpty, engine?.isManagedOption(property) != true,
+           !Self.isRendererIndependentProperty(property),
+           !Self.isNeutralGeometryProperty(property, value: value)
+        {
+            preserveAutomaticRenderingCompatibility("The custom mpv property \(property) requires Metal rendering.")
+        }
         engine?.performPropertySet(name, value: value)
     }
 
-    /// Runs an mpv command.
+    /// Runs an mpv command. Rendering commands and unclassified commands switch
+    /// an automatically selected native output to Metal. Playback, audio, and
+    /// track commands keep the current backend. A rendering command that reloads
+    /// an active item runs once its replacement frame is ready. Otherwise commands
+    /// require an attached surface; ``setProperty(_:to:)`` supports deferred settings.
+    /// A command sent after stop creates an idle native client without reopening
+    /// the source. Another ``stop()`` releases that client.
     public func command(_ name: String, arguments: [String] = []) {
-        engine?.performCommand(name, arguments: arguments)
+        let requiresFullRenderer = Self.commandRequiresFullRenderer(name, arguments: arguments)
+        let waitsForRenderer = requiresFullRenderer
+            && configuration.usesAutomaticVideoOutput && configuration.videoOutput == .sampleBuffer
+            && state != .idle && !state.isTerminal && mediaInformation.sourceURL != nil
+        if requiresFullRenderer {
+            preserveAutomaticRenderingCompatibility("The custom mpv command \(name) requires Metal rendering.")
+        }
+        engine?.performCommand(
+            name, arguments: arguments,
+            deferUntilPlaybackRestart: waitsForRenderer, generation: playbackGeneration
+        )
     }
 
     /// Clears the last non-fatal command error.
@@ -497,6 +534,60 @@ public final class MPVPlayer {
 // MARK: - Rendering bridge
 
 extension MPVPlayer {
+    private static func normalizedRawProperty(_ name: String) -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return name.hasPrefix("options/") ? String(name.dropFirst("options/".count)) : name
+    }
+
+    private static func isNeutralGeometryProperty(_ property: String, value: String) -> Bool {
+        guard let amount = Double(value), amount.isFinite else { return false }
+        switch property {
+        case "video-zoom", "video-pan-x", "video-pan-y": return amount == 0
+        case "video-scale-x", "video-scale-y": return amount == 1
+        default: return false
+        }
+    }
+
+    private static func isRendererIndependentProperty(_ property: String) -> Bool {
+        // Unknown properties keep the original full-renderer behavior. Track
+        // selection remains native until metadata identifies a composition need.
+        let independent: Set<String> = [
+            "pause", "volume", "volume-max", "mute", "speed", "aid", "vid", "sid", "secondary-sid",
+            "audio-delay", "sub-delay", "secondary-sub-delay", "sub-visibility", "secondary-sub-visibility",
+            "chapter", "time-pos", "percent-pos", "ab-loop-a", "ab-loop-b", "loop-file", "loop-playlist",
+            "playlist-pos", "playlist-pos-1", "playlist-playing-pos", "af", "cache", "replaygain",
+        ]
+        return independent.contains(property)
+            || ["audio-", "replaygain-", "cache-", "demuxer-", "stream-"].contains { property.hasPrefix($0) }
+    }
+
+    private static func commandRequiresFullRenderer(_ rawName: String, arguments: [String]) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty else { return false }
+        if ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(name) {
+            guard let property = arguments.first else { return false }
+            return !isRendererIndependentProperty(normalizedRawProperty(property))
+        }
+        let independent: Set<String> = [
+            "seek", "revert-seek", "frame-step", "frame-back-step", "stop", "quit", "quit-watch-later",
+            "loadfile", "loadlist", "playlist-next", "playlist-prev", "playlist-play-index",
+            "playlist-remove", "playlist-move", "playlist-clear", "playlist-shuffle", "playlist-unshuffle",
+            "audio-add", "audio-remove", "audio-reload", "video-add", "video-remove", "video-reload",
+            "sub-add", "sub-remove", "sub-reload", "sub-seek", "ab-loop", "af",
+        ]
+        return !independent.contains(name)
+    }
+
+    private func preserveAutomaticRenderingCompatibility(_ reason: String) {
+        guard configuration.usesAutomaticVideoOutput, configuration.videoOutput == .sampleBuffer else { return }
+        // Also latch when a feature request or native rejection already changed
+        // this item to Metal. The raw setting outlives that per-item fallback.
+        automaticVideoOutputFallbackReason = automaticVideoOutputFallbackReason ?? reason
+        if videoOutput == .sampleBuffer {
+            handleNativeVideoOutputUnavailable(reason)
+        }
+    }
+
     private static var pictureInPictureRequiresNativeOutput: Bool {
         #if os(iOS) && !targetEnvironment(macCatalyst)
         true
@@ -538,7 +629,10 @@ extension MPVPlayer {
         let capabilities = videoFeatureCapabilities
         let unavailable = Set(requestedVideoFeatures.filter { capabilities[$0].availability == .unavailable })
         let unknown = requestedVideoFeatures.contains { capabilities[$0].availability == .unknown }
-        let needsFallback = unavailable.contains {
+        let automaticOutputNeedsFallback = configuration.usesAutomaticVideoOutput
+            && videoOutput == .sampleBuffer && requestedVideoFeaturePolicy == .preferFeatures
+            && !requestedVideoFeatures.isDisjoint(with: [.nativeSubtitles, .bakedOverlays, .zoomAndPan])
+        let needsFallback = automaticOutputNeedsFallback || unavailable.contains {
             capabilities[$0].restriction == .nativeDolbyVisionPreservesRPU
                 && ($0 != .pictureInPictureSubtitles || !Self.pictureInPictureRequiresNativeOutput)
         }
@@ -548,9 +642,15 @@ extension MPVPlayer {
         let reason: String?
         if needsFallback {
             outcome = canSwitch ? .switchedToMetal : .requiresMetalFallback
-            reason = losesPiP
-                ? "Native Dolby Vision preserves unmodified RPU frames. Metal enables compositing and geometry, but iOS picture in picture becomes unavailable."
-                : "Native Dolby Vision preserves unmodified RPU frames. Metal enables compositing and geometry."
+            if automaticOutputNeedsFallback {
+                reason = losesPiP
+                    ? "The requested subtitles, overlays, or geometry use Metal rendering; iOS picture in picture becomes unavailable."
+                    : "The requested subtitles, overlays, or geometry use Metal rendering."
+            } else {
+                reason = losesPiP
+                    ? "Native Dolby Vision preserves unmodified RPU frames. Metal enables compositing and geometry, but iOS picture in picture becomes unavailable."
+                    : "Native Dolby Vision preserves unmodified RPU frames. Metal enables compositing and geometry."
+            }
         } else if !unavailable.isEmpty {
             outcome = .unavailable
             reason = unavailable.contains { capabilities[$0].restriction == .nativeDolbyVisionPreservesRPU }
@@ -832,7 +932,7 @@ extension MPVPlayer {
         engine?.detachSynchronously(fromLayerAddress: layerAddress)
     }
 
-    /// Called only after native output has rejected a frame before display.
+    /// Switches for a rejected native frame or an explicit rendering requirement.
     func handleNativeVideoOutputUnavailable(
         _ reason: String,
         fallbackReason: MPVPresentationStatus.FallbackReason? = nil
@@ -841,7 +941,11 @@ extension MPVPlayer {
         videoOutputFallbackReason = reason
         presentationFallbackReason = fallbackReason ?? .nativeOutputUnavailable(reason)
         lastError = nil
-        state = .loading
+        if state != .idle && state != .stopped {
+            state = .loading
+        }
+        // A stopped engine retains its URL and deferred seek for a later play.
+        // Preserve that logical playback request without changing its idle state.
         changeVideoOutput(to: .metal, preservePlayback: true, fallbackReason: presentationFallbackReason)
         reattachVideoOutput()
     }

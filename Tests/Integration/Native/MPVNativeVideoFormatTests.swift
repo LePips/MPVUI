@@ -355,6 +355,15 @@ private final class NativeFormatFixture {
     }
 
     func close() {
+        if buffer == nil {
+            print("Native pixel readback unavailable: \(playback.presentationContext), "
+                + "state=\(player.state), rate=\(layer.controlTimebase.map(CMTimebaseGetRate) ?? -.infinity), "
+                + "ready=\(layer.isReadyForDisplay), status=\(layer.sampleBufferRenderer.status.rawValue), "
+                + "error=\(String(describing: layer.sampleBufferRenderer.error))")
+            for message in nativeLogs {
+                print("Native readback: \(message)")
+            }
+        }
         playback.close()
     }
 

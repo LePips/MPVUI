@@ -30,6 +30,7 @@ extension MPVEngine {
     func recordAcceptedCommand(_ arguments: [String], status: Int32) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard status >= 0, let command = arguments.first?.lowercased() else { return }
+        recordPersistentCommandMutation(arguments)
         switch command {
         case "loadfile":
             lifecycleDiagnostics.loadCommands &+= 1
@@ -52,11 +53,7 @@ extension MPVEngine {
             message: message.text.map { String(cString: $0) } ?? ""
         )
         if isRequestedPlaylistEntryActive, let hardware = MPVPlaybackDiagnosticsParser.videoToolboxSession(log) {
-            videoToolboxSessionUsesHardware = switch hardware {
-            case .hardware: true
-            case .software: false
-            case .unknown: nil
-            }
+            updateVideoToolboxSession(hardware, hardwareDecoder: getString("hwdec-current"))
         }
         if videoOutput == .sampleBuffer,
            isRequestedPlaylistEntryActive,
@@ -114,6 +111,7 @@ extension MPVEngine {
 
     func refreshPlaybackDiagnostics() {
         guard handle != nil else { return }
+        lifecycleDiagnostics.engineActivity.diagnosticsSnapshots &+= 1
         var result = playbackDiagnostics
         result.audio = MPVAudioStatusParser.parse(
             output: getString("current-ao"), codec: getString("audio-codec-name"),
@@ -138,12 +136,7 @@ extension MPVEngine {
         result.nativeOutputStatistics = videoOutput == .sampleBuffer
             ? MPVPlaybackDiagnosticsParser.nativeStatistics(getNode("avfoundation-video-statistics")) : nil
         let hardwareDecoder = getString("hwdec-current")
-        result.decoder = MPVPlaybackDiagnosticsParser.decoder(
-            codec: getString("video-format"), hardwareDecoder: hardwareDecoder,
-            interop: getString("hwdec-interop"), pixelFormat: getString("video-dec-params/pixelformat"),
-            requested: configuration.hardwareDecoding,
-            sessionUsesHardware: videoToolboxSessionUsesHardware
-        )
+        result.decoder = decoderDiagnostics(hardwareDecoder: hardwareDecoder)
         result.deinterlace = MPVRenderingOptions.deinterlaceStatus(
             policy: configuration.deinterlace,
             interlaced: getFlag("video-frame-info/interlaced"), hardwareDecoder: hardwareDecoder,
@@ -170,13 +163,55 @@ extension MPVEngine {
                 unsupportedFeatures: resolution.unsupportedFeatures
             )
         }
-        result.fallbackReasons = [result.decoder.fallbackReason, result.deinterlace.reason, liveConfigurationFailure]
-            .compactMap(\.self)
-        if case let .nativeOutputUnavailable(reason) = presentationFallbackReason {
-            result.fallbackReasons.append(reason)
-        }
+        result.fallbackReasons = diagnosticFallbackReasons(result)
+        result.engineActivity = lifecycleDiagnostics.engineActivity
         playbackDiagnostics = result
         publish(.diagnostics(result))
+    }
+
+    func decoderDiagnostics(hardwareDecoder: String?) -> MPVPlaybackDiagnostics.Decoder {
+        MPVPlaybackDiagnosticsParser.decoder(
+            codec: getString("video-format"), hardwareDecoder: hardwareDecoder,
+            interop: getString("hwdec-interop"), pixelFormat: getString("video-dec-params/pixelformat"),
+            requested: configuration.hardwareDecoding,
+            sessionUsesHardware: videoToolboxSessionUsesHardware
+        )
+    }
+
+    // Session logs and copied selected-decoder events can expose a fallback that
+    // starts and ends between periodic snapshots. Publish each delivered change.
+    func updateVideoToolboxSession(
+        _ session: MPVPlaybackDiagnosticsParser.VideoToolboxSessionResult,
+        hardwareDecoder: String?
+    ) {
+        videoToolboxSessionUsesHardware = switch session {
+        case .hardware: true
+        case .software: false
+        case .unknown: nil
+        }
+        refreshDecoderDiagnostics(hardwareDecoder: hardwareDecoder)
+    }
+
+    func refreshDecoderDiagnostics(hardwareDecoder: String?) {
+        guard handle != nil else { return }
+        var result = playbackDiagnostics
+        result.decoder = decoderDiagnostics(hardwareDecoder: hardwareDecoder)
+        result.fallbackReasons = diagnosticFallbackReasons(result)
+        guard result != playbackDiagnostics else { return }
+        // This updates decoder fields only; diagnosticsSnapshots is the
+        // revision of full timer/native snapshots used by timing collectors.
+        result.engineActivity = lifecycleDiagnostics.engineActivity
+        playbackDiagnostics = result
+        publish(.diagnostics(result))
+    }
+
+    private func diagnosticFallbackReasons(_ result: MPVPlaybackDiagnostics) -> [String] {
+        var reasons = [result.decoder.fallbackReason, result.deinterlace.reason, liveConfigurationFailure]
+            .compactMap(\.self)
+        if case let .nativeOutputUnavailable(reason) = presentationFallbackReason {
+            reasons.append(reason)
+        }
+        return reasons
     }
 
     static func nativeOutputRejectionReason(_ log: MPVLogMessage) -> String? {
