@@ -53,6 +53,19 @@ struct MPVDisplayMatchingCoordinatorTests {
         #expect(content.codec == kCMVideoCodecType_H264)
     }
 
+    @Test(arguments: ["dvhe", "dvh1"])
+    func `Dolby codec aliases retain frame rate matching without implying validation`(codec: String) throws {
+        let content = try #require(MPVDisplayMatchingContent(
+            media: .init(
+                videoCodec: codec, dimensions: .init(width: 3840, height: 2160),
+                framesPerSecond: 23.976
+            ), outputUsesHDR: true, videoOutput: .sampleBuffer
+        ))
+        #expect(content.refreshRate == Float(24000.0 / 1001))
+        #expect(content.codec == kCMVideoCodecType_HEVC)
+        #expect(content.dolbyVision == nil)
+    }
+
     @Test
     func `changing HDR scene metadata does not restart HDMI matching`() throws {
         let first = try #require(MPVDisplayMatchingContent(
@@ -123,6 +136,121 @@ struct MPVDisplayMatchingCoordinatorTests {
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] == nil)
         #expect(extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] == nil)
         #expect(extensions[kCMFormatDescriptionExtension_BitsPerComponent as String] == nil)
+    }
+
+    @Test(arguments: [(5, 0, "dvcC"), (8, 1, "dvvC"), (8, 4, "dvvC")])
+    func `validated native Dolby Vision advertises its effective configuration`(
+        profile: Int, compatibility: Int, atom: String
+    ) throws {
+        let content = try #require(MPVDisplayMatchingContent(
+            media: media(fps: 24000.0 / 1001, source: .init(
+                primaries: "bt.2020", transferFunction: compatibility == 4 ? .hlg : .pq,
+                dolbyVisionProfile: profile, dolbyVisionLevel: 6,
+                dolbyVisionBaseLayerCompatibilityID: compatibility
+            )),
+            outputUsesHDR: true, videoOutput: .sampleBuffer,
+            dolbyVisionStatus: .init(
+                effectiveProfile: profile, effectiveBaseLayerCompatibilityID: compatibility,
+                nativeValidation: .validated
+            )
+        ))
+        let format = try #require(content.makeFormatDescription())
+        #expect(content.refreshRate == Float(24000.0 / 1001))
+        #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_DolbyVisionHEVC)
+        let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
+        let atoms = try #require(extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms as String] as? [String: Data])
+        let record = try #require(atoms[atom])
+        #expect(atoms.count == 1)
+        #expect(record.count == 24)
+        #expect(Array(record.prefix(5)) == [1, 0, UInt8(profile * 2), 53, UInt8(compatibility * 16)])
+        #expect(record.dropFirst(5).allSatisfy { $0 == 0 })
+    }
+
+    @Test
+    func `Profile 7 conversion advertises validated Profile 8 point 1`() throws {
+        let content = try #require(MPVDisplayMatchingContent(
+            media: media(source: .init(
+                transferFunction: .pq, dolbyVisionProfile: 7, dolbyVisionLevel: 6,
+                dolbyVisionBaseLayerCompatibilityID: 6
+            )), outputUsesHDR: true, videoOutput: .sampleBuffer,
+            dolbyVisionStatus: .init(
+                requestedPolicy: .profile7Compatibility, sourceProfile: 7,
+                effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1,
+                nativeValidation: .validated, conversion: .converted, enhancementLayer: .discarded
+            )
+        ))
+        #expect(content.dolbyVision?.profile == 8)
+        #expect(content.dolbyVision?.compatibilityID == 1)
+        #expect(content.dolbyVision?.configurationRecord[3] == 53, "EL-present must remain clear.")
+    }
+
+    @Test
+    func `source tags and conversion intent cannot advertise native Dolby Vision`() throws {
+        let source = MPVVideoSignal(
+            transferFunction: .pq, dolbyVisionProfile: 8, dolbyVisionLevel: 6,
+            dolbyVisionBaseLayerCompatibilityID: 1
+        )
+        for status: MPVDolbyVisionStatus in [
+            .unknown,
+            .init(sourceProfile: 8),
+            .init(requestedPolicy: .profile7Compatibility, sourceProfile: 7, conversion: .pending),
+            .init(effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1, nativeValidation: .rejected),
+            .init(effectiveProfile: 7, effectiveBaseLayerCompatibilityID: 6, nativeValidation: .validated),
+            .init(effectiveProfile: 8, nativeValidation: .validated),
+        ] {
+            let content = try #require(MPVDisplayMatchingContent(
+                media: media(source: source), outputUsesHDR: true,
+                videoOutput: .sampleBuffer, dolbyVisionStatus: status
+            ))
+            #expect(content.dolbyVision == nil)
+            #expect(content.codec == kCMVideoCodecType_HEVC)
+        }
+    }
+
+    @Test(arguments: [nil, 0, -1, 16])
+    func `missing or invalid Dolby level does not invent a configuration record`(level: Int?) {
+        #expect(MPVDisplayMatchingContent.DolbyVision(status: .init(
+            effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1,
+            nativeValidation: .validated
+        ), level: level) == nil)
+    }
+
+    @Test
+    func `Dolby validation and backend fallback each update the display criteria`() throws {
+        let information = media(source: .init(
+            primaries: "bt.2020", transferFunction: .pq,
+            dolbyVisionProfile: 8, dolbyVisionLevel: 6,
+            dolbyVisionBaseLayerCompatibilityID: 1
+        ))
+        let validated = MPVDolbyVisionStatus(
+            effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1, nativeValidation: .validated
+        )
+        let pending = try #require(MPVDisplayMatchingContent(
+            media: information, outputUsesHDR: true, videoOutput: .sampleBuffer
+        ))
+        let native = try #require(MPVDisplayMatchingContent(
+            media: information, outputUsesHDR: true, videoOutput: .sampleBuffer,
+            dolbyVisionStatus: validated
+        ))
+        let metal = try #require(MPVDisplayMatchingContent(
+            media: information, outputUsesHDR: true, videoOutput: .metal,
+            dolbyVisionStatus: validated
+        ))
+        let sdr = try #require(MPVDisplayMatchingContent(
+            media: information, outputUsesHDR: false, videoOutput: .sampleBuffer,
+            dolbyVisionStatus: validated
+        ))
+        var state = MPVDisplayMatchingState()
+        #expect(update(&state, pending) == .apply(pending))
+        #expect(update(&state, native) == .apply(native))
+        #expect(update(&state, native) == .keep)
+        #expect(update(&state, metal) == .apply(metal))
+        #expect(metal.dolbyVision == nil)
+        #expect(sdr.dolbyVision == nil)
+        #expect(sdr.convertsHDRToSDR)
+        let format = try #require(sdr.makeFormatDescription())
+        let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
+        #expect(extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms as String] == nil)
     }
 
     @Test

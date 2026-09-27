@@ -70,7 +70,7 @@ public struct ContentView: View {
         // Exercise the iOS rendering path in the macOS example during validation.
         let videoOutput: MPVPlayerConfiguration.VideoOutput =
             ProcessInfo.processInfo.arguments.contains("--native-video-output") ? .sampleBuffer : .metal
-        #elseif os(iOS) && !targetEnvironment(macCatalyst)
+        #elseif (os(iOS) && !targetEnvironment(macCatalyst)) || os(tvOS)
         let videoOutput: MPVPlayerConfiguration.VideoOutput = .sampleBuffer
         #else
         let videoOutput: MPVPlayerConfiguration.VideoOutput = .metal

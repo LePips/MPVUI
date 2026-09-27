@@ -55,7 +55,11 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         policy: player.configuration.colorManagement.displayProfile
     )
     var edrHeadroomOverrideForTesting: (current: Double, potential: Double)?
-    #if os(tvOS)
+    /// Last submitted hint, not confirmation of the physical HDMI output mode.
+    var displayMatchingContent: MPVDisplayMatchingContent? {
+        displayMatchingCoordinator.content
+    }
+
     private lazy var displayMatchingCoordinator: MPVDisplayMatchingCoordinator = {
         let coordinator = MPVDisplayMatchingCoordinator()
         coordinator.displayModeSwitchDidChange = { [weak self, weak player] switching in
@@ -64,7 +68,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         }
         return coordinator
     }()
-    #endif
+
     private(set) var videoOverlay: MPVVideoOverlay?
     private(set) var videoOverlayHost: MPVVideoOverlayHostingView?
     private weak var videoOverlayContainer: PlatformView?
@@ -326,9 +330,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         handleLayerReplacementIfNeeded()
         guard player.isRenderSurfaceActive(token: surfaceToken) else {
             resizeCoordinator.surfaceWasSuperseded()
-            #if os(tvOS)
             displayMatchingCoordinator.detach()
-            #endif
             return
         }
 
@@ -429,9 +431,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         headroomObservationTimer = nil
         displayRefreshTask?.cancel()
         displayRefreshTask = nil
-        #if os(tvOS)
         displayMatchingCoordinator.detach()
-        #endif
         player.pictureInPictureSurfaceDidDetach(self)
         if player.videoOutput == .sampleBuffer,
            player.isRenderSurfaceActive(token: surfaceToken)
@@ -670,6 +670,7 @@ private extension MPVPlatformVideoPlayer {
             _ = player.mediaInformation
             _ = player.state
             _ = player.videoOutput
+            _ = player.dolbyVisionStatus
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -976,19 +977,19 @@ private extension MPVPlatformVideoPlayer {
     }
 
     func updateDisplayMatching() {
-        #if os(tvOS)
         let outputUsesHDR = player.videoOutput == .sampleBuffer
             ? player.configuration.hdrPolicy != .disabled
             : surfaceConfiguration?.usesExtendedDynamicRange == true
         displayMatchingCoordinator.update(
-            window: window,
+            target: MPVPlatformDisplayMatchingTarget.make(for: window),
             media: player.mediaInformation,
             mediaGeneration: player.mediaGeneration,
             state: player.state,
             isActive: isActiveRenderingSurface,
-            outputUsesHDR: outputUsesHDR
+            outputUsesHDR: outputUsesHDR,
+            videoOutput: player.videoOutput,
+            dolbyVisionStatus: player.dolbyVisionStatus
         )
-        #endif
     }
 
     func synchronizeRenderTargetAfterGeometryChange(
