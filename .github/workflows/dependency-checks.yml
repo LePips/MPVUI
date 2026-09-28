@@ -1,0 +1,28 @@
+name: Dependency update checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/workflows/dependency-*.yml"
+      - "Build/update_dependencies.py"
+      - "Build/Tests/test_update_dependencies.py"
+      - "Build/Inputs.lock.json"
+      - "Build/Android/Native.lock.json"
+      - "Build/Patches/**"
+      - "Build/Android/Patches/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  updater:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s Build/Tests -p test_update_dependencies.py
+      - run: python3 Build/update_dependencies.py --validate
