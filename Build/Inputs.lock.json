@@ -483,12 +483,12 @@
         {
           "framework": "Libshaderc_combined",
           "module": "Libshaderc_combined",
-          "sha256": "758047b615708575b580eb960a2d083f760a29dc462d6eaa360416c946ce433b",
+          "sha256": "77a3d355993cf53843a394bf58262dab99cdd93f9e6fe31d5ca6e55b03866ce1",
           "target": "Libshaderc_combined",
-          "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2025.5.0/Libshaderc_combined.xcframework.zip"
+          "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/Libshaderc_combined.xcframework.zip"
         }
       ],
-      "sha256": "1079da73a292e5b2cea6a02fa2208c4935ead79a98043f81708424510e0ab53f",
+      "sha256": "d213fa58de7886846fb8cb713ea5213b77654a3ad2ba3d89b1f2fe367d945ba5",
       "slices": [
         "ios",
         "isimulator",
@@ -499,8 +499,8 @@
         "xros",
         "xrsimulator"
       ],
-      "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2025.5.0/libshaderc-all.zip",
-      "version": "2025.5.0"
+      "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/libshaderc-all.zip",
+      "version": "2026.1.0"
     },
     {
       "consumers": [
@@ -513,12 +513,12 @@
         {
           "framework": "lcms2",
           "module": "lcms2",
-          "sha256": "dc0dce0606f6ab6841a8ec5a6bd4448e2f3ef00661a050460f806c9393dc6982",
+          "sha256": "945a6fa36ad8b39cfb75603a84f375249bc382adde4eb8e9cfc70b8cb942312d",
           "target": "lcms2",
-          "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.17.0/lcms2.xcframework.zip"
+          "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2.xcframework.zip"
         }
       ],
-      "sha256": "8c118b2c04e2440ecf25ffebfa7952ebb09aba83a71378e3b9ed45dae3a6115a",
+      "sha256": "a101ca23ce1686eed5e0154997994e50aefaceb5179ef2b55b4d2a798425ccac",
       "slices": [
         "ios",
         "isimulator",
@@ -529,8 +529,8 @@
         "xros",
         "xrsimulator"
       ],
-      "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.17.0/lcms2-all.zip",
-      "version": "2.17.0"
+      "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2-all.zip",
+      "version": "2.18.0"
     },
     {
       "consumers": [
@@ -844,7 +844,7 @@
       "version": "0.41.0"
     },
     {
-      "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+      "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
       "id": "ffmpeg",
       "patches": [
         {
@@ -873,9 +873,9 @@
           "sha256": "62d2e6d274347e80a9fc7c711c3ee335955229aac35d810f3a1335f13d38915a"
         }
       ],
-      "ref": "n9.0.1",
+      "ref": "n9.0.2",
       "url": "https://github.com/FFmpeg/FFmpeg",
-      "version": "9.0.1"
+      "version": "9.0.2"
     }
   ],
   "toolchain": {
