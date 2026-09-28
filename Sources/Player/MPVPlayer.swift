@@ -881,14 +881,16 @@ extension MPVPlayer {
         layerAddress: Int64,
         drawableWidth: Int,
         drawableHeight: Int,
-        force: Bool = false
+        force: Bool = false,
+        live: Bool = false
     ) async -> Bool {
         guard activeRenderSurfaceToken == token else { return false }
         return await engine?.resizeRenderTargetAndWait(
             width: drawableWidth,
             height: drawableHeight,
             forLayerAddress: layerAddress,
-            force: force
+            force: force,
+            live: live
         ) ?? false
     }
 

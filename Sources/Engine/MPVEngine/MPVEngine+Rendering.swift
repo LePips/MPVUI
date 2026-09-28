@@ -36,7 +36,8 @@ extension MPVEngine {
         width: Int,
         height: Int,
         forLayerAddress layerAddress: Int64,
-        force: Bool = false
+        force: Bool = false,
+        live: Bool = false
     ) async -> Bool {
         guard Self.isValidDrawableExtent(width: width, height: height) else { return false }
         return await withCheckedContinuation { continuation in
@@ -50,7 +51,8 @@ extension MPVEngine {
                         width: width,
                         height: height,
                         forLayerAddress: layerAddress,
-                        force: force
+                        force: force,
+                        live: live
                     )
                 )
             }
@@ -218,7 +220,7 @@ extension MPVEngine {
                 || previous.usesExtendedDynamicRange != target.usesExtendedDynamicRange
                 || previous.colorConfiguration?.pixelFormat != target.colorConfiguration?.pixelFormat
             {
-                // The embedding option has force_update=true and synchronously
+                // The embedding property synchronously
                 // reaches VOCTRL_EXTERNAL_RESIZE, including equal extents when
                 // a color-space change needs a fresh swapchain description.
                 let resized = resizeRenderTargetImmediately(
@@ -238,7 +240,8 @@ extension MPVEngine {
         width: Int,
         height: Int,
         forLayerAddress layerAddress: Int64,
-        force: Bool = false
+        force: Bool = false,
+        live: Bool = false
     ) -> Bool {
         dispatchPrecondition(condition: .onQueue(queue))
         guard Self.isValidDrawableExtent(width: width, height: height),
@@ -264,7 +267,7 @@ extension MPVEngine {
             layer?.beginNativeResizeTransaction()
             defer { layer?.endNativeResizeTransaction() }
             return setPropertyImmediately(
-                "external-surface-size",
+                live ? "external-surface-size-live" : "external-surface-size",
                 to: "\(width)x\(height)"
             )
         }()

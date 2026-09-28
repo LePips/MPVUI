@@ -203,7 +203,7 @@ struct MPVMobilePlaybackLifecycleTests {
             surface.setNeedsLayout()
             surface.layoutIfNeeded()
             try await Task.sleep(nanoseconds: 20_000_000)
-            #expect(surface.metalLayer.contentsGravity == .resizeAspectFill)
+            #expect(surface.metalLayer.contentsGravity == .resize)
             #expect(surface.metalLayer.drawableSize.width > 1)
             #expect(surface.metalLayer.drawableSize.height > 1)
         }
@@ -226,6 +226,8 @@ struct MPVMobilePlaybackLifecycleTests {
             settledRenderOutputSize == landscapeOutputSize,
             "mpv should resize its existing output at the settled landscape drawable size."
         )
+        // Logical viewport changes precede the final drawable allocation.
+        let playingResizeLatency = try await waitForResizeLatency(landscapeOutputSize, from: surface)
         try #require(
             (surface.metalLayer.drawableSize)
                 == CGSize(
@@ -261,7 +263,6 @@ struct MPVMobilePlaybackLifecycleTests {
             "The semantic subtitle stream must survive a playing resize."
         )
 
-        let playingResizeLatency = try await waitForResizeLatency(landscapeOutputSize, from: surface)
         let lifecycleAfterPlayingResize = await player.lifecycleDiagnostics()
         try #require(
             lifecycleAfterPlayingResize.handlesCreated

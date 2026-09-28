@@ -38,12 +38,11 @@ diff --git a/options/options.c b/options/options.c
 index 716c3e6f1033b086f4651aea35390a3749a86794..71a8333b27fda765e87edc004b98143c736d2c55 100644
 --- a/options/options.c
 +++ b/options/options.c
-@@ -245,6 +245,8 @@ static const m_option_t mp_vo_opt_list[] = {
+@@ -245,6 +245,7 @@ static const m_option_t mp_vo_opt_list[] = {
  #if HAVE_EGL_ANDROID
      {"android-surface-size", OPT_SIZE_BOX(android_surface_size)},
  #endif
-+    {"external-surface-size", OPT_SIZE_BOX(android_surface_size),
-+        .force_update = true},
++    {"external-surface-size", OPT_SIZE_BOX(android_surface_size)},
  #if HAVE_D3D11
      {"d3d11-composition-size", OPT_SIZE_BOX(d3d11_composition_size)},
  #endif
@@ -51,15 +50,7 @@ diff --git a/player/command.c b/player/command.c
 index 96bc06a0b06e7c4eed854d2ce44e0947fce51c99..f9e73be653be6ea84ddb988e980dddde41655f0b 100644
 --- a/player/command.c
 +++ b/player/command.c
-@@ -98,6 +98,7 @@ struct command_ctx {
-     int num_warned_deprecated;
- 
-     bool command_opts_processed;
-+    int external_surface_resize_result;
- 
-     struct overlay *overlays;
-     int num_overlays;
-@@ -443,6 +444,25 @@ static int mp_property_generic_option(void *ctx, struct m_property *prop,
+@@ -443,6 +444,31 @@ static int mp_property_generic_option(void *ctx, struct m_property *prop,
      return M_PROPERTY_NOT_IMPLEMENTED;
  }
  
@@ -70,40 +61,46 @@ index 96bc06a0b06e7c4eed854d2ce44e0947fce51c99..f9e73be653be6ea84ddb988e980dddde
 +                                             int action, void *arg)
 +{
 +    MPContext *mpctx = ctx;
++    bool live = strcmp(prop->name, "external-surface-size-live") == 0;
++    struct m_property option = *prop;
++    option.name = "external-surface-size";
 +    if (action != M_PROPERTY_SET)
-+        return mp_property_generic_option(ctx, prop, action, arg);
++        return mp_property_generic_option(ctx, &option, action, arg);
 +
-+    mpctx->command_ctx->external_surface_resize_result = VO_NOTIMPL;
-+    int result = mp_property_generic_option(ctx, prop, action, arg);
++    int result = mp_property_generic_option(ctx, &option, action, arg);
 +    if (result <= 0)
 +        return result;
 +
-+    return mpctx->command_ctx->external_surface_resize_result > 0
-+        ? M_PROPERTY_OK : M_PROPERTY_ERROR;
++    // Invoke exactly once, including equal sizes used to refresh color state.
++    // force_update on the option echoes through config caches and can rebuild
++    // the same swapchain again after this synchronous request has returned.
++    int resized = mpctx->video_out
++        ? vo_control(mpctx->video_out, VOCTRL_EXTERNAL_RESIZE, live ? &live : NULL) : VO_TRUE;
++    return resized > 0 ? M_PROPERTY_OK : M_PROPERTY_ERROR;
 +}
 +
  /// Playback speed (RW)
  static int mp_property_playback_speed(void *ctx, struct m_property *prop,
                                        int action, void *arg)
-@@ -4411,6 +4431,7 @@ static const struct m_property mp_properties_base[] = {
+@@ -4411,6 +4431,8 @@ static const struct m_property mp_properties_base[] = {
      {"idle-active", mp_property_idle},
      {"window-id", mp_property_window_id},
      {"display-swapchain", mp_property_vo_display_swapchain},
 +    {"external-surface-size", mp_property_external_surface_size},
++    {"external-surface-size-live", mp_property_external_surface_size},
  
      {"chapter-list", mp_property_list_chapters},
      {"track-list", mp_property_list_tracks},
-@@ -8017,7 +8038,12 @@ void mp_option_run_callback(struct MPContext *mpctx, struct mp_option_callback *
+@@ -8017,7 +8038,11 @@ void mp_option_run_callback(struct MPContext *mpctx, struct mp_option_callback *
              queue_seek(mpctx, MPSEEK_RELATIVE, 0.0, MPSEEK_EXACT, 0);
      }
  
 -    if (opt_ptr == &opts->vo->android_surface_size || opt_ptr == &opts->vo->d3d11_composition_size) {
-+    if (opt_ptr == &opts->vo->android_surface_size) {
-+        int result = VO_TRUE;
-+        if (mpctx->video_out)
-+            result = vo_control(mpctx->video_out, VOCTRL_EXTERNAL_RESIZE, NULL);
-+        mpctx->command_ctx->external_surface_resize_result = result;
-+    } else if (opt_ptr == &opts->vo->d3d11_composition_size) {
++    // The embedding property owns its synchronous resize. Preserve the
++    // option callback for the Android and D3D11 surfaces.
++    if ((opt_ptr == &opts->vo->android_surface_size &&
++         strcmp(co->name, "external-surface-size") != 0) ||
++        opt_ptr == &opts->vo->d3d11_composition_size) {
          if (mpctx->video_out)
              vo_control(mpctx->video_out, VOCTRL_EXTERNAL_RESIZE, NULL);
      }
@@ -133,12 +130,50 @@ diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
 index 2d95eb85b883447503eb20f7bd3073edc7730efd..1913e97e0472533b6287568cca752368cdf928d5 100644
 --- a/video/out/vo_gpu_next.c
 +++ b/video/out/vo_gpu_next.c
-@@ -1847,8 +1847,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
+@@ -1275,2 +1275,27 @@
+     apply_crop(&target, p->dst, swframe.fbo->params.w, swframe.fbo->params.h);
++    // During an embedded live resize the viewport changes at display cadence,
++    // but the drawable pool stays valid. Render in normalized viewport space;
++    // Core Animation maps that canvas to the current view without cropping it.
++    // This keeps letterboxing, zoom/pan, and OSD placement correct even when
++    // the view's aspect ratio changes, without retiring pending video frames.
++    if (strcmp(p->ra_ctx->fns->name, "moltenvk") == 0 &&
++        vo->dwidth > 1 && vo->dheight > 1)
++    {
++        float sx = (float)swframe.fbo->params.w / vo->dwidth;
++        float sy = (float)swframe.fbo->params.h / vo->dheight;
++        target.crop.x0 *= sx;
++        target.crop.x1 *= sx;
++        target.crop.y0 *= sy;
++        target.crop.y1 *= sy;
++        for (int n = 0; n < target.num_overlays; n++) {
++            struct pl_overlay *overlay = &p->osd_state.overlays[n];
++            struct pl_overlay_part *parts = (struct pl_overlay_part *)overlay->parts;
++            for (int i = 0; i < overlay->num_parts; i++) {
++                parts[i].dst.x0 *= sx;
++                parts[i].dst.x1 *= sx;
++                parts[i].dst.y0 *= sy;
++                parts[i].dst.y1 *= sy;
++            }
++        }
++    }
+     update_tm_viz(&pars->color_map_params, &target);
+@@ -1847,8 +1847,17 @@ static int control(struct vo *vo, uint32_t request, void *data)
          return true;
  
      case VOCTRL_EXTERNAL_RESIZE:
 -        reconfig(vo, NULL);
 -        return true;
++        if (data && *(bool *)data &&
++            strcmp(p->ra_ctx->fns->name, "moltenvk") == 0 &&
++            vo->opts->android_surface_size.w > 1 &&
++            vo->opts->android_surface_size.h > 1)
++        {
++            vo->dwidth = vo->opts->android_surface_size.w;
++            vo->dheight = vo->opts->android_surface_size.h;
++            resize(vo);
++            return VO_TRUE;
++        }
 +        return reconfig(vo, NULL) >= 0 ? VO_TRUE : VO_FALSE;
  
      case VOCTRL_LOAD_HWDEC_API:
@@ -181,11 +216,15 @@ index 7c196eb3fe3ed95721808a9cfff3bb26ea7d1a67..43cbe4df3109d311c325f78e03074a1a
      struct ra_swapchain *sw = ctx->swapchain = talloc_zero(NULL, struct ra_swapchain);
      sw->ctx = ctx;
      sw->fns = &vulkan_swapchain;
-@@ -420,6 +426,7 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
+@@ -420,6 +426,11 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
          .surface = vk->surface,
          .present_mode = preferred_mode,
          .swapchain_depth = ctx->vo->opts->swapchain_depth,
 +        .disable_10bit_sdr = is_moltenvk,
++        // The host owns drawable extent changes. A moving layer can have
++        // different presentation bounds without invalidating its swapchain.
++        // Recreating on SUBOPTIMAL races external-surface-size on every frame.
++        .allow_suboptimal = is_moltenvk,
      };
  
      if (p->opts->swap_mode >= 0) // user override
@@ -194,7 +233,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..ba87b4397e0281d836e856a738a6a6a9a6e16fe7
 --- /dev/null
 +++ b/video/out/vulkan/context_moltenvk.m
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,165 @@
 +/*
 + * This file is part of mpv.
 + *
@@ -214,6 +253,7 @@ index 0000000000000000000000000000000000000000..ba87b4397e0281d836e856a738a6a6a9
 +
 +#include <CoreGraphics/CoreGraphics.h>
 +#include <QuartzCore/CAMetalLayer.h>
++#include <QuartzCore/CATransaction.h>
 +#include <MoltenVK/mvk_vulkan.h>
 +#include <limits.h>
 +#include <math.h>
@@ -288,6 +328,17 @@ index 0000000000000000000000000000000000000000..ba87b4397e0281d836e856a738a6a6a9
 +    return true;
 +}
 +
++static bool resize_swapchain(struct ra_ctx *ctx, int width, int height)
++{
++    // The VO thread has no UI run loop to commit an implicit transaction.
++    // Publish the replacement drawable pool and its layer state together.
++    [CATransaction begin];
++    [CATransaction setDisableActions:YES];
++    bool resized = ra_vk_ctx_resize(ctx, width, height);
++    [CATransaction commit];
++    return resized;
++}
++
 +static bool moltenvk_reconfig(struct ra_ctx *ctx)
 +{
 +    struct priv *p = ctx->priv;
@@ -303,10 +354,10 @@ index 0000000000000000000000000000000000000000..ba87b4397e0281d836e856a738a6a6a9
 +            return false;
 +    }
 +
-+    // Hold CAMetalLayer size until old swapchain rendering finishes. MoltenVK
-+    // updates drawableSize during synchronous swapchain replacement.
-+    pl_gpu_finish(p->vk.gpu);
-+    if (ra_vk_ctx_resize(ctx, width, height) &&
++    // libplacebo retires the old swapchain with its in-flight work. Draining
++    // the entire GPU here stalls playback at every live-resize update.
++    // MoltenVK installs drawableSize with the replacement swapchain.
++    if (resize_swapchain(ctx, width, height) &&
 +        ctx->vo->dwidth == width && ctx->vo->dheight == height)
 +    {
 +        p->last_successful_width = ctx->vo->dwidth;
@@ -317,7 +368,7 @@ index 0000000000000000000000000000000000000000..ba87b4397e0281d836e856a738a6a6a9
 +    // Roll back at same native boundary; host drawableSize writes can race
 +    // active Vulkan swapchain.
 +    if (rollback_width > 1 && rollback_height > 1) {
-+        if (!ra_vk_ctx_resize(ctx, rollback_width, rollback_height)) {
++        if (!resize_swapchain(ctx, rollback_width, rollback_height)) {
 +            MP_WARN(ctx, "Failed restoring MoltenVK swapchain to %dx%d\n",
 +                    rollback_width, rollback_height);
 +            ctx->vo->dwidth = p->last_successful_width;

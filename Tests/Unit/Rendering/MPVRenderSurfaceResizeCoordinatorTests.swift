@@ -203,6 +203,24 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(!harness.coordinator.diagnosticSnapshot.isContinuousInteraction)
     }
 
+    @Test @MainActor
+    func `holding an explicit window drag does not retire its buffers`() async {
+        let harness = makeHarness(
+            timing: timing(cadence: 0, continuousFinal: 10_000_000),
+            automaticResult: true
+        )
+        let size = CGSize(width: 320, height: 180)
+        harness.coordinator.beginContinuousInteraction()
+        harness.coordinator.requestResize(to: size, contentsScale: 2, kind: .continuousInteractive)
+        #expect(await eventually { harness.driver.requests.count == 1 })
+        await sleep(nanoseconds: 50_000_000)
+        #expect(harness.driver.requests.count == 1)
+        #expect(harness.coordinator.diagnosticSnapshot.isContinuousInteraction)
+        harness.coordinator.endContinuousInteraction(finalSize: size, contentsScale: 2)
+        #expect(await eventually { harness.driver.requests.count == 2 })
+        #expect(harness.driver.requests.last?.geometryChangeKind == .final)
+    }
+
     @Test
     @MainActor
     func `unchanged continuous layout does not synthesize a trailing resize`() async {

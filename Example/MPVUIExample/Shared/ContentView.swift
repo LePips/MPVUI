@@ -66,15 +66,7 @@ public struct ContentView: View {
             additionalOptions[option] = "no"
         }
         #endif
-        #if DEBUG && os(macOS)
-        // Exercise the iOS rendering path in the macOS example during validation.
-        let videoOutput: MPVPlayerConfiguration.VideoOutput =
-            ProcessInfo.processInfo.arguments.contains("--native-video-output") ? .sampleBuffer : .metal
-        #elseif (os(iOS) && !targetEnvironment(macCatalyst)) || os(tvOS)
-        let videoOutput: MPVPlayerConfiguration.VideoOutput = .sampleBuffer
-        #else
-        let videoOutput: MPVPlayerConfiguration.VideoOutput = .metal
-        #endif
+        let useMetalVideoOutput = ProcessInfo.processInfo.arguments.contains("--metal-video-output")
         let configuration = MPVPlayerConfiguration(
             additionalOptions: additionalOptions,
             audio: .init(audioSession: .hostManaged),
@@ -82,7 +74,7 @@ public struct ContentView: View {
             hardwareDecoding: .automatic,
             hdrPolicy: .automatic,
             logLevel: .info,
-            videoOutput: videoOutput
+            videoOutput: useMetalVideoOutput ? .metal : .sampleBuffer
         )
         _player = State(initialValue: MPVPlayer(configuration: configuration))
     }

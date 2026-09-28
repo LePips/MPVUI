@@ -48,6 +48,13 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     private var surfaceConfiguration: MPVRenderSurfaceConfiguration?
     private var headroomObservationTimer: Timer?
     private var displayRefreshTask: Task<Void, Never>?
+    private var geometryDisplayLink: CADisplayLink?
+    private var geometryTrackingStartedAt: CFTimeInterval = 0
+    private var lastUncoordinatedLayoutUptimeNanoseconds: UInt64?
+    private lazy var geometryDisplayLinkTarget = MPVGeometryDisplayLinkTarget { [weak self] in
+        self?.updateAnimatedPresentationGeometry()
+    }
+
     private let notificationCenter: NotificationCenter
     /// Optional current/potential readings for deterministic display tests.
     var wideGamutOverrideForTesting: Bool?
@@ -136,7 +143,6 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     #elseif canImport(UIKit)
     private var notificationObservations: [NSObjectProtocol] = []
     private var registeredTransitionIdentifier: ObjectIdentifier?
-    private var lastUncoordinatedLayoutUptimeNanoseconds: UInt64?
     #if os(iOS)
     /// Simulated display inputs for deterministic host-contract tests.
     var displayEnvironmentOverrideForTesting: (scale: CGFloat, potentialEDRHeadroom: CGFloat)?
@@ -164,7 +170,8 @@ public final class MPVPlatformVideoPlayer: PlatformView {
                 layerAddress: request.layerAddress,
                 drawableWidth: Int(request.drawableSize.width),
                 drawableHeight: Int(request.drawableSize.height),
-                force: request.geometryChangeKind == .final
+                force: request.geometryChangeKind == .final,
+                live: request.geometryChangeKind == .continuousInteractive
             )
             guard didResize,
                   self.attachedLayerAddress == request.layerAddress,
@@ -211,6 +218,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     }
 
     isolated deinit {
+        geometryDisplayLink?.invalidate()
         headroomObservationTimer?.invalidate()
         displayRefreshTask?.cancel()
         #if os(macOS) && !targetEnvironment(macCatalyst)
@@ -260,7 +268,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
             {
                 .animatedTransition
             } else {
-                .discrete
+                uncoordinatedLayoutGeometryKind()
             }
         platformDidLayout(kind: kind)
     }
@@ -395,10 +403,10 @@ public final class MPVPlatformVideoPlayer: PlatformView {
                 configureLayer(for: newConfiguration, preserveCommittedScale: true)
                 updateAttachedRenderTarget(using: newConfiguration, synchronousColorUpdate: suspendsRenderer)
             }
-            if requiresGeometryCommit {
+            if requiresGeometryCommit, geometryDisplayLink == nil {
                 // Keep the attached layer at its committed scale until the
                 // coordinator submits the native resize.
-                synchronizeRenderTargetAfterGeometryChange(kind: .discrete)
+                synchronizeRenderTargetAfterGeometryChange(kind: resizeCoordinator.geometryKindForRefresh)
             }
         }
         updateDisplayMatching()
@@ -427,6 +435,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
     /// Disconnects mpv before this view or its Metal layer is released.
     public func detach() {
         guard !isRetainedForPictureInPicture else { return }
+        stopTrackingPresentationGeometry()
         headroomObservationTimer?.invalidate()
         headroomObservationTimer = nil
         displayRefreshTask?.cancel()
@@ -467,6 +476,7 @@ extension MPVPlatformVideoPlayer {
     /// The player has synchronously retired the previous native target.
     /// Discard cached attachment state without detaching the new backend.
     func videoOutputDidChange() {
+        stopTrackingPresentationGeometry()
         resizeCoordinator.deactivate()
         attachedLayerAddress = nil
         surfaceConfiguration = nil
@@ -504,8 +514,8 @@ extension MPVPlatformVideoPlayer {
             if displayLayer.superlayer !== metalLayer {
                 displayLayer.removeFromSuperlayer()
                 metalLayer.insertSublayer(displayLayer, at: 0)
+                (metalLayer as? MPVMetalLayer)?.videoSublayer = displayLayer
             }
-            displayLayer.frame = bounds
             displayLayer.contentsScale = platformScale
         }
         let configuration = makeSurfaceConfiguration()
@@ -647,11 +657,14 @@ private extension MPVPlatformVideoPlayer {
     }
 
     func configureMetalLayerForHosting() {
+        (metalLayer as? MPVMetalLayer)?.geometryAnimationDidStart = { [weak self] in
+            self?.startTrackingPresentationGeometry()
+        }
         metalLayer.device = MTLCreateSystemDefaultDevice()
         metalLayer.isOpaque = true
         metalLayer.framebufferOnly = true
         metalLayer.backgroundColor = PlatformColor.black.cgColor
-        metalLayer.contentsGravity = .resizeAspectFill
+        metalLayer.contentsGravity = .resize
         #if canImport(UIKit)
         // Match MoltenVK 1.4.x's default before it creates the first
         // swapchain; later renderer requests are marshalled by MPVMetalLayer.
@@ -771,10 +784,56 @@ private extension MPVPlatformVideoPlayer {
 
     func platformDidLayout(kind: MPVGeometryChangeKind) {
         if player.videoOutput == .sampleBuffer {
-            updateSampleBufferSurface()
+            // The backing layer synchronizes native geometry in the same
+            // transaction as its own bounds. Layout alone does not change the
+            // screen's color policy or require reattaching the native output.
+            if player.sampleBufferDisplayLayer.superlayer !== metalLayer {
+                updateSampleBufferSurface()
+            }
             return
         }
+        guard geometryDisplayLink == nil else { return }
         synchronizeRenderTargetAfterGeometryChange(kind: kind)
+    }
+
+    func startTrackingPresentationGeometry() {
+        guard player.videoOutput == .metal, isActiveRenderingSurface, window != nil,
+              geometryDisplayLink == nil else { return }
+        geometryTrackingStartedAt = CACurrentMediaTime()
+        synchronizeRenderTargetAfterGeometryChange(kind: .animatedTransition)
+        #if os(macOS) && !targetEnvironment(macCatalyst)
+        let link = displayLink(target: geometryDisplayLinkTarget, selector: #selector(MPVGeometryDisplayLinkTarget.tick))
+        #else
+        let link = CADisplayLink(target: geometryDisplayLinkTarget, selector: #selector(MPVGeometryDisplayLinkTarget.tick))
+        #endif
+        geometryDisplayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stopTrackingPresentationGeometry() {
+        geometryDisplayLink?.invalidate()
+        geometryDisplayLink = nil
+    }
+
+    func updateAnimatedPresentationGeometry() {
+        guard player.videoOutput == .metal, isActiveRenderingSurface, window != nil else {
+            stopTrackingPresentationGeometry()
+            return
+        }
+        let isAnimating = (metalLayer as? MPVMetalLayer)?.hasGeometryAnimation == true
+        // Allow the platform to install explicit animations after layout.
+        if !isAnimating, CACurrentMediaTime() - geometryTrackingStartedAt > 0.1 {
+            stopTrackingPresentationGeometry()
+            requestAuthoritativeFinalResize()
+            return
+        }
+        let size = metalLayer.presentation()?.bounds.size ?? bounds.size
+        let scale = platformScale
+        resizeCoordinator.requestResize(
+            to: MPVRenderSurfaceConfiguration.drawableSize(for: size, scale: scale),
+            contentsScale: scale,
+            kind: .continuousInteractive
+        )
     }
 
     func makeSurfaceConfiguration() -> MPVRenderSurfaceConfiguration {
@@ -1157,7 +1216,8 @@ private extension MPVPlatformVideoPlayer {
         appKitTransitionStateTimeoutTask = nil
         isAnimatedGeometryTransition = false
     }
-    #elseif canImport(UIKit)
+    #endif
+
     func uncoordinatedLayoutGeometryKind() -> MPVGeometryChangeKind {
         let now = DispatchTime.now().uptimeNanoseconds
         defer { lastUncoordinatedLayoutUptimeNanoseconds = now }
@@ -1170,6 +1230,7 @@ private extension MPVPlatformVideoPlayer {
         return .continuousInteractive
     }
 
+    #if canImport(UIKit)
     func activeTransitionCoordinator() -> UIViewControllerTransitionCoordinator? {
         var responder: UIResponder? = self
         while let current = responder {
@@ -1209,4 +1270,19 @@ private extension MPVPlatformVideoPlayer {
         }
     }
     #endif
+}
+
+/// The display link retains this target; its closure holds the surface weakly.
+@MainActor
+private final class MPVGeometryDisplayLinkTarget: NSObject {
+    private let update: () -> Void
+
+    init(update: @escaping () -> Void) {
+        self.update = update
+    }
+
+    @objc
+    func tick() {
+        update()
+    }
 }

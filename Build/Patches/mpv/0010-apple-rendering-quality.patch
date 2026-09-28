@@ -198,10 +198,11 @@ index cd00739..54ac221 100644
          {"metadata", SUB_PROP_KEYVALUE_LIST(tag_list),
                          .unavailable = !tags->num_keys},
          {0}
-@@ -4482,6 +4526,8 @@ static const struct m_property mp_properties_base[] = {
+@@ -4482,7 +4526,9 @@ static const struct m_property mp_properties_base[] = {
      {"window-id", mp_property_window_id},
      {"display-swapchain", mp_property_vo_display_swapchain},
      {"external-surface-size", mp_property_external_surface_size},
+     {"external-surface-size-live", mp_property_external_surface_size},
 +    {"external-surface-update", mp_property_external_surface_update},
 +    {"avfoundation-video-statistics", mp_property_native_video_statistics},
  

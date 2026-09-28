@@ -19,6 +19,108 @@ final class MPVMetalLayer: CAMetalLayer {
     private let colorStateLock = NSLock()
     private var hostColorSpace: CGColorSpace?
     private var hostPixelFormat: MTLPixelFormat?
+    #if DEBUG
+    private let presentationObserverLock = NSLock()
+    private var presentationObserver: (@Sendable (CFTimeInterval) -> Void)?
+    #endif
+
+    /// Native video is a child of the view's backing layer. Keep it in the
+    /// same geometry transaction, including explicit UIKit/SwiftUI animations.
+    weak var videoSublayer: CALayer? {
+        didSet { layoutVideoSublayer() }
+    }
+
+    var geometryAnimationDidStart: (@MainActor () -> Void)?
+
+    var hasGeometryAnimation: Bool {
+        (animationKeys() ?? []).contains { key in
+            animation(forKey: key).flatMap(Self.geometryAnimation) != nil
+        }
+    }
+
+    override var bounds: CGRect {
+        didSet { layoutVideoSublayer() }
+    }
+
+    private func layoutVideoSublayer() {
+        guard let videoSublayer, videoSublayer.superlayer === self else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        videoSublayer.anchorPoint = .zero
+        videoSublayer.position = bounds.origin
+        videoSublayer.bounds = bounds
+        CATransaction.commit()
+    }
+
+    override func add(_ animation: CAAnimation, forKey key: String?) {
+        super.add(animation, forKey: key)
+        guard let geometry = Self.geometryAnimation(animation) else { return }
+        // Copy the actual animation, preserving spring parameters, keyframes,
+        // timing, and interactive interruption. A new default-duration implicit
+        // animation would visibly lag behind the hosting view.
+        if let videoSublayer, videoSublayer.superlayer === self {
+            videoSublayer.add(geometry, forKey: key)
+        }
+        if Thread.isMainThread {
+            let didStart = geometryAnimationDidStart
+            MainActor.assumeIsolated { didStart?() }
+        }
+    }
+
+    override func removeAnimation(forKey key: String) {
+        if videoSublayer?.superlayer === self,
+           animation(forKey: key).flatMap(Self.geometryAnimation) != nil
+        {
+            videoSublayer?.removeAnimation(forKey: key)
+        }
+        super.removeAnimation(forKey: key)
+    }
+
+    override func removeAllAnimations() {
+        for key in animationKeys() ?? [] {
+            removeAnimation(forKey: key)
+        }
+        super.removeAllAnimations()
+    }
+
+    private static func geometryAnimation(_ animation: CAAnimation) -> CAAnimation? {
+        if let group = animation as? CAAnimationGroup {
+            let children = group.animations?.compactMap(geometryAnimation) ?? []
+            guard !children.isEmpty, let copy = group.copy() as? CAAnimationGroup else { return nil }
+            copy.animations = children
+            return copy
+        }
+        guard let property = animation as? CAPropertyAnimation,
+              let path = property.keyPath,
+              path == "bounds" || path.hasPrefix("bounds.")
+        else { return nil }
+        return animation
+    }
+
+    #if DEBUG
+    /// Opt-in measurement of displayed frames, rather than resize requests or
+    /// submitted command buffers. No drawable handlers are installed normally.
+    func observePresentation(_ observer: (@Sendable (CFTimeInterval) -> Void)?) {
+        presentationObserverLock.lock()
+        presentationObserver = observer
+        presentationObserverLock.unlock()
+    }
+
+    override func nextDrawable() -> (any CAMetalDrawable)? {
+        let drawable = super.nextDrawable()
+        #if !targetEnvironment(simulator)
+        presentationObserverLock.lock()
+        let observer = presentationObserver
+        presentationObserverLock.unlock()
+        if let observer {
+            drawable?.addPresentedHandler { presented in
+                observer(presented.presentedTime)
+            }
+        }
+        #endif
+        return drawable
+    }
+    #endif
 
     /// MoltenVK may set a generic swapchain colorspace while rebuilding. The
     /// host's exact profile is authoritative, particularly in calibrated ICC
@@ -72,10 +174,10 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 
     override var contentsGravity: CALayerContentsGravity {
-        get { .resizeAspectFill }
+        get { .resize }
         set {
-            guard super.contentsGravity != .resizeAspectFill else { return }
-            super.contentsGravity = .resizeAspectFill
+            guard super.contentsGravity != .resize else { return }
+            super.contentsGravity = .resize
         }
     }
 

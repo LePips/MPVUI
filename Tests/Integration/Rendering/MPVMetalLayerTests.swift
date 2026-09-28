@@ -23,7 +23,7 @@ struct MPVMetalLayerTests {
         layer.drawableSize = validSize
 
         #expect(layer.isOpaque)
-        #expect(layer.contentsGravity == .resizeAspectFill)
+        #expect(layer.contentsGravity == .resize)
         #expect(layer.pixelFormat == .bgra8Unorm)
         #expect(layer.colorspace === retainedColorSpace)
 

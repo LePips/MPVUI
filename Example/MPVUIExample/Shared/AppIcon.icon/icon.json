@@ -1,0 +1,48 @@
+{
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "name": "Purple Ribbon",
+          "fill": "automatic",
+          "image-name-specializations": [
+            {
+              "value": "Ribbon.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "Ribbon-Mono.svg"
+            }
+          ]
+        }
+      ],
+      "name": "Ribbon",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.15
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  },
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.00000,0.00000,0.00000,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.00000,0.00000,0.00000,1.00000"
+      }
+    }
+  ]
+}

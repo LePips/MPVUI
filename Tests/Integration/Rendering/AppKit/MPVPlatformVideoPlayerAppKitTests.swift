@@ -20,7 +20,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         #expect(layer.isOpaque)
         #expect(layer.delegate === surface)
         #expect(layer.framebufferOnly)
-        #expect(layer.contentsGravity == .resizeAspectFill)
+        #expect(layer.contentsGravity == .resize)
         #expect(!layer.presentsWithTransaction)
         #expect(layer.displaySyncEnabled)
     }
@@ -166,7 +166,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         #expect(replacementLayer.device != nil)
         #expect(replacementLayer.framebufferOnly)
         #expect(replacementLayer.isOpaque)
-        #expect(replacementLayer.contentsGravity == .resizeAspectFill)
+        #expect(replacementLayer.contentsGravity == .resize)
         #expect(replacementLayer.toneMapMode == .never)
         #expect(MPVMetalLayer.isValidDrawableSize(replacementLayer.drawableSize))
         #expect(surface.isActiveRenderingSurface)
@@ -516,13 +516,13 @@ struct MPVPlatformVideoPlayerAppKitTests {
         try #require(interactiveSnapshot.inFlight == nil)
         try #require(interactiveSnapshot.finalCommitRequired)
         try #require(interactiveSnapshot.isContinuousInteraction)
-        try #require(interactiveSnapshot.hasContinuousFinalFallback)
+        try #require(!interactiveSnapshot.hasContinuousFinalFallback)
         try #require(
             await waitForRenderOutputSize(intermediateOutputSize, from: player)
                 == intermediateOutputSize
         )
         try #require(
-            surface.metalLayer.drawableSize == intermediateDrawableSize
+            surface.metalLayer.drawableSize == initialDrawableSize
         )
         let lifecycleBeforeFinalGeometry = await player.lifecycleDiagnostics()
         try #require(
@@ -539,7 +539,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         )
         try #require(readyForFinalSnapshot.inFlight == nil)
         try #require(readyForFinalSnapshot.isContinuousInteraction)
-        try #require(readyForFinalSnapshot.hasContinuousFinalFallback)
+        try #require(!readyForFinalSnapshot.hasContinuousFinalFallback)
 
         let finalFrameSize = CGSize(width: 880, height: 495)
         surface.setFrameSize(finalFrameSize)
@@ -556,7 +556,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         )
         #expect(queuedContinuousSnapshot.finalCommitRequired)
         #expect(queuedContinuousSnapshot.isContinuousInteraction)
-        #expect(queuedContinuousSnapshot.hasContinuousFinalFallback)
+        #expect(!queuedContinuousSnapshot.hasContinuousFinalFallback)
 
         surface.viewDidEndLiveResize()
 

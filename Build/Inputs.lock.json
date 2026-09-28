@@ -766,7 +766,7 @@
         {
           "id": "0001-moltenvk-embedding",
           "path": "Build/Patches/mpv/0001-moltenvk-embedding.patch",
-          "sha256": "a945d07e87569a1072326ac4c293749ae1a7ab31ef66807d5065354d37b9f6d2"
+          "sha256": "fa13203f09f23028ec9ea862ed2e822b4b0b1b38bb4bba36513098706271986a"
         },
         {
           "id": "0002-apple-audio-portability",
@@ -811,7 +811,7 @@
         {
           "id": "0010-apple-rendering-quality",
           "path": "Build/Patches/mpv/0010-apple-rendering-quality.patch",
-          "sha256": "0fa137ec2b00904d5fa852dccd99df5e0150d79b81d24d590a9a28072043b34a"
+          "sha256": "45eaadb0da9e689e5bee9c84d9df35c320c02691711d018744892a6b7c0e8140"
         },
         {
           "id": "0011-native-subtitle-image-cache",

@@ -25,7 +25,7 @@ final class MPVRenderSurfaceResizeCoordinator {
         var discreteCoalescingDelayNanoseconds: UInt64
 
         init(
-            continuousCadenceNanoseconds: UInt64 = 33_333_333,
+            continuousCadenceNanoseconds: UInt64 = 8_333_333,
             continuousTrailingDelayNanoseconds: UInt64 = 120_000_000,
             animatedTransitionFallbackDelayNanoseconds: UInt64 = 600_000_000,
             discreteCoalescingDelayNanoseconds: UInt64 = 16_000_000
@@ -147,6 +147,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     private var commitIdentifier: UInt64 = 0
     private var finalCommitRequired = false
     private var isContinuousInteraction = false
+    private var hasExplicitContinuousInteraction = false
     private var lastContinuousSubmissionUptimeNanoseconds: UInt64?
     private var lastResizeLatencyNanoseconds: UInt64?
 
@@ -175,6 +176,17 @@ final class MPVRenderSurfaceResizeCoordinator {
     /// The current state, intended for logging and integration-test probes.
     var diagnosticSnapshot: DiagnosticSnapshot {
         makeDiagnosticSnapshot(event: .snapshot)
+    }
+
+    /// Display and SwiftUI updates must preserve an ongoing geometry lifecycle.
+    var geometryKindForRefresh: MPVGeometryChangeKind {
+        if isContinuousInteraction {
+            return .continuousInteractive
+        }
+        if animatedFallbackTask != nil {
+            return .animatedTransition
+        }
+        return .discrete
     }
 
     /// Converts a layer identity to the address format consumed by MPVPlayer.
@@ -232,6 +244,9 @@ final class MPVRenderSurfaceResizeCoordinator {
     /// receiving a `.continuousInteractive` request starts the burst as well.
     func beginContinuousInteraction() {
         guard activeLayer != nil, activeLayerAddress != nil else { return }
+        hasExplicitContinuousInteraction = true
+        continuousFinalTask?.cancel()
+        continuousFinalTask = nil
         beginContinuousInteractionIfNeeded()
     }
 
@@ -239,6 +254,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     /// committed geometry, or any resize operation already in flight.
     func abortContinuousInteraction() {
         isContinuousInteraction = false
+        hasExplicitContinuousInteraction = false
         activeContentsScale = activeLayer?.contentsScale
         cancelPendingResize(emitEvent: true)
     }
@@ -261,6 +277,7 @@ final class MPVRenderSurfaceResizeCoordinator {
             contentsScale: contentsScale
         )
         isContinuousInteraction = false
+        hasExplicitContinuousInteraction = false
         lastContinuousSubmissionUptimeNanoseconds = nil
         continuousFinalTask?.cancel()
         continuousFinalTask = nil
@@ -421,6 +438,7 @@ final class MPVRenderSurfaceResizeCoordinator {
             armContinuousFinalFallback(for: request)
         case .animatedTransition:
             isContinuousInteraction = false
+            hasExplicitContinuousInteraction = false
             lastContinuousSubmissionUptimeNanoseconds = nil
             continuousFinalTask?.cancel()
             continuousFinalTask = nil
@@ -429,6 +447,7 @@ final class MPVRenderSurfaceResizeCoordinator {
             armAnimatedFallback(for: request)
         case .discrete:
             isContinuousInteraction = false
+            hasExplicitContinuousInteraction = false
             lastContinuousSubmissionUptimeNanoseconds = nil
             continuousFinalTask?.cancel()
             continuousFinalTask = nil
@@ -437,6 +456,7 @@ final class MPVRenderSurfaceResizeCoordinator {
             finalCommitRequired = false
         case .final:
             isContinuousInteraction = false
+            hasExplicitContinuousInteraction = false
             lastContinuousSubmissionUptimeNanoseconds = nil
             continuousFinalTask?.cancel()
             continuousFinalTask = nil
@@ -499,6 +519,7 @@ private extension MPVRenderSurfaceResizeCoordinator {
         lastAuthoritativeFinalGeometry = nil
         finalCommitRequired = false
         isContinuousInteraction = false
+        hasExplicitContinuousInteraction = false
         lastContinuousSubmissionUptimeNanoseconds = nil
         lastResizeLatencyNanoseconds = nil
 
@@ -637,6 +658,9 @@ private extension MPVRenderSurfaceResizeCoordinator {
         continuousFinalTask?.cancel()
         continuousFinalTask = nil
 
+        // A held window drag may pause at a pixel boundary or size limit.
+        // Its explicit end callback, not a quiet interval, owns the final.
+        guard !hasExplicitContinuousInteraction else { return }
         let delay = timing.continuousTrailingDelayNanoseconds
         let generation = surfaceGeneration
         continuousFinalTask = Task { @MainActor [weak self] in
@@ -655,6 +679,7 @@ private extension MPVRenderSurfaceResizeCoordinator {
 
             self.continuousFinalTask = nil
             self.isContinuousInteraction = false
+            self.hasExplicitContinuousInteraction = false
             self.emit(.continuousFinalScheduled)
             self.enqueueResize(
                 to: latest.geometry.drawableSize,
@@ -853,6 +878,7 @@ private extension MPVRenderSurfaceResizeCoordinator {
 
         finalCommitRequired = false
         isContinuousInteraction = false
+        hasExplicitContinuousInteraction = false
         continuousFinalTask?.cancel()
         continuousFinalTask = nil
         animatedFallbackTask?.cancel()
