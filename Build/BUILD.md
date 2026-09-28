@@ -35,23 +35,6 @@ Build/mpvbuild generate --check
 
 The generation check requires a remote artifact selection.
 
-## Dependency updates
-
-GitHub Actions opens draft PRs for stable FFmpeg, mpv, and SDK releases every Monday. Run **Native dependency updates** in Actions to check manually. Dependabot updates GitHub Actions weekly.
-
-Updates verify patches and archive checksums. Apple and Android source pins update together when the Android lock is present. Build and test before merging, then publish new binaries.
-
-Enable **Allow GitHub Actions to create and approve pull requests** under repository **Settings → Actions → General**.
-
-Preview an update with Python 3.10+ and Git:
-
-```sh
-python3 Build/update_dependencies.py --list
-python3 Build/update_dependencies.py --component ffmpeg --dry-run
-```
-
-Omit `--dry-run` to write the lockfiles. Recipes, toolchains, and Android-only native dependencies require manual updates.
-
 ## Cleanup
 
 Build outputs live in `.build/mpvbuild`.
