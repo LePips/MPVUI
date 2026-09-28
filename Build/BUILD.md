@@ -35,54 +35,22 @@ Build/mpvbuild generate --check
 
 The generation check requires a remote artifact selection.
 
-## Dependency update PRs
+## Dependency updates
 
-GitHub Actions checks for stable native releases every Monday at 08:17 UTC. Run
-**Native dependency updates** from the Actions tab to check immediately. Each
-component has one reusable draft PR branch; nothing merges or publishes automatically.
+GitHub Actions opens draft PRs for stable FFmpeg, mpv, and SDK releases every Monday. Run **Native dependency updates** in Actions to check manually. Dependabot updates GitHub Actions weekly.
 
-- FFmpeg and mpv follow stable release tags. The updater resolves the tag to an
-  immutable commit and applies the ordered Apple patches. When
-  `Build/Android/Native.lock.json` exists, the updater also checks its patches
-  independently and changes both platform locks together. A patch conflict fails that component's
-  job without changing its lockfiles; other components continue.
-- Every prebuilt SDK in `Inputs.lock.json` follows its mpvkit release repository.
-  Libraries shipped together (such as libass and its font libraries) update in one
-  PR. All SDK and runtime archives must exist; the updater downloads and hashes each
-  archive and compares GitHub's asset digest when available. Drafts, prereleases,
-  and development tags are excluded. Numeric release tags and the existing `-fix`
-  and numeric packaging suffixes are supported.
-- Dependabot checks GitHub Actions weekly, grouped in one PR. Add a Gradle entry
-  for `/Android` in `.github/dependabot.yml` when the Android project lands on `main`.
+Updates verify patches and archive checksums. Apple and Android source pins update together when the Android lock is present. Build and test before merging, then publish new binaries.
 
-The native workflow uses `GITHUB_TOKEN`, with write access limited to its update
-jobs. Repository **Settings → Actions → General → Workflow permissions → Allow
-GitHub Actions to create and approve pull requests** must be enabled. No personal
-token or external service is required. GitHub may require **Approve workflows to
-run** on bot-created PRs; the updater also verifies each candidate before opening
-its PR. See [GitHub's token behavior](https://docs.github.com/en/actions/concepts/security/github_token).
+Enable **Allow GitHub Actions to create and approve pull requests** under repository **Settings → Actions → General**.
 
-Preview or validate locally with Python 3.10+ and Git (no Xcode needed):
+Preview an update with Python 3.10+ and Git:
 
 ```sh
 python3 Build/update_dependencies.py --list
 python3 Build/update_dependencies.py --component ffmpeg --dry-run
-python3 Build/update_dependencies.py --component sdk-mpvkit-libass-build --dry-run
-python3 Build/update_dependencies.py --validate
-python3 -m unittest discover -s Build/Tests -p 'test_update_dependencies.py'
 ```
 
-Without `--dry-run`, a component update writes the affected lockfiles. Set
-`GH_TOKEN` for authenticated GitHub API requests when checking SDK releases locally.
-
-Patch application and checksum checks do not prove build or playback compatibility.
-Before merging a native update, build a complete Apple release candidate and the
-affected Android native libraries when present, then run their consumer/playback tests. Updating
-source locks does not replace published binaries: release and adoption remain
-separate steps. The updater leaves `Artifacts.lock.json` and `Package.swift` alone.
-
-Recipe revisions, Xcode/SDK/NDK and build-tool pins, and Android-only native
-dependencies remain manual because their versions are coupled to the build recipes.
+Omit `--dry-run` to write the lockfiles. Recipes, toolchains, and Android-only native dependencies require manual updates.
 
 ## Cleanup
 

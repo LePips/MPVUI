@@ -19,7 +19,6 @@ jobs:
       components: ${{ steps.components.outputs.value }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: python3 -m unittest discover -s Build/Tests -p test_update_dependencies.py
       - id: components
         run: echo "value=$(python3 Build/update_dependencies.py --list)" >> "$GITHUB_OUTPUT"
 

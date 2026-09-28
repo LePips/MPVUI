@@ -156,8 +156,8 @@ def update_source(root, source, android, upstream):
     if other is not None:
         other["commit"] = commit
     return [f"- {source['id']}: `{previous}` → `{tag}` ([upstream diff]({source['url']}/compare/{old_commit}...{commit})).",
-            ("- Apple and Android commits updated together; both ordered patch sets applied successfully."
-             if other is not None else "- The ordered Apple patch set applied successfully.")]
+            ("- Verified Apple and Android patches."
+             if other is not None else "- Verified Apple patches.")]
 
 
 def update_sdk(dependencies, upstream):
@@ -196,7 +196,7 @@ def update_sdk(dependencies, upstream):
         dependency["version"] = tag
     names = ", ".join(dependency["id"] for dependency in dependencies)
     return [f"- {names}: `{previous}` → `{tag}` ([release notes](https://github.com/{repository}/releases/tag/{quote(tag, safe='')})).",
-            f"- Downloaded and SHA-256 hashed all {len(hashes)} SDK/runtime assets; checked upstream digests when available."]
+            f"- Verified checksums for {len(hashes)} SDK and runtime archives."]
 
 
 def prepare_update(root, component, upstream):
@@ -216,14 +216,8 @@ def prepare_update(root, component, upstream):
 
 def report(changes):
     if not changes:
-        return "No newer stable release found.\n"
-    return ("Updates pinned native build inputs.\n\n" + "\n".join(changes) +
-            "\n\nThese checks do not compile the native libraries or test playback. "
-            "Before merging, build a complete Apple release candidate (and Android native libraries when present), "
-            "then run their consumer/playback tests. See "
-            "[Build/BUILD.md](https://github.com/LePips/MPVUI/blob/main/Build/BUILD.md).\n\n"
-            "Published binaries and `Build/Artifacts.lock.json` are unchanged. "
-            "Publish and adopt a new native artifact separately to deliver the update to consumers.\n")
+        return "No updates.\n"
+    return "\n".join(changes) + "\n- Build and test before merging; publish updated binaries separately.\n"
 
 
 def main():
