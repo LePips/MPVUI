@@ -844,7 +844,7 @@
       "version": "0.41.0"
     },
     {
-      "commit": "bf1b838f2ab88b4f8fd83443325c782ea0e0f7fa",
+      "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8",
       "id": "ffmpeg",
       "patches": [
         {
@@ -873,9 +873,9 @@
           "sha256": "62d2e6d274347e80a9fc7c711c3ee335955229aac35d810f3a1335f13d38915a"
         }
       ],
-      "ref": "n9.0.1",
+      "ref": "n9.0.2",
       "url": "https://github.com/FFmpeg/FFmpeg",
-      "version": "9.0.1"
+      "version": "9.0.2"
     }
   ],
   "toolchain": {
