@@ -3,6 +3,7 @@
 
 import argparse
 import copy
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -17,6 +18,14 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 APPLE_LOCK = Path("Build/Inputs.lock.json")
 ANDROID_LOCK = Path("Build/Android/Native.lock.json")
+
+
+@dataclass(frozen=True)
+class Update:
+    dependency: str
+    previous: str
+    version: str
+    link: str
 
 
 def run(*args, cwd=None):
@@ -149,15 +158,13 @@ def update_source(root, source, android, upstream):
         if tag == source["ref"] and commit != source["commit"]:
             raise ValueError(f"Upstream tag moved: {tag}; inspect the change manually")
         return []
-    previous = source["ref"]
+    previous = source["version"]
     old_commit = source["commit"]
     source.update(ref=tag, commit=commit, version=tag[1:])
     verify_patches(root, source, patch_sets(source, android))
     if other is not None:
         other["commit"] = commit
-    return [f"- {source['id']}: `{previous}` → `{tag}` ([upstream diff]({source['url']}/compare/{old_commit}...{commit})).",
-            ("- Verified Apple and Android patches."
-             if other is not None else "- Verified Apple patches.")]
+    return [Update(source["id"], previous, source["version"], f"{source['url']}/compare/{old_commit}...{commit}")]
 
 
 def update_sdk(dependencies, upstream):
@@ -194,9 +201,8 @@ def update_sdk(dependencies, upstream):
         item.update(url=asset["browser_download_url"], sha256=checksum)
     for dependency in dependencies:
         dependency["version"] = tag
-    names = ", ".join(dependency["id"] for dependency in dependencies)
-    return [f"- {names}: `{previous}` → `{tag}` ([release notes](https://github.com/{repository}/releases/tag/{quote(tag, safe='')})).",
-            f"- Verified checksums for {len(hashes)} SDK and runtime archives."]
+    link = f"https://github.com/{repository}/releases/tag/{quote(tag, safe='')}"
+    return [Update(dependency["id"], previous, tag, link) for dependency in dependencies]
 
 
 def prepare_update(root, component, upstream):
@@ -205,25 +211,32 @@ def prepare_update(root, component, upstream):
         original[ANDROID_LOCK] = json.loads((root / ANDROID_LOCK).read_text())
     updated = copy.deepcopy(original)
     apple, android = updated[APPLE_LOCK], updated.get(ANDROID_LOCK)
-    if component in sdk_groups(apple):
-        changes = update_sdk(sdk_groups(apple)[component], upstream)
-    else:
-        source = next(source for source in apple["sources"] if source["id"] == component)
-        changes = update_source(root, source, android, upstream)
+    groups = sdk_groups(apple)
+    changes = []
+    for selected in components(apple) if component == "all" else [component]:
+        if selected in groups:
+            changes.extend(update_sdk(groups[selected], upstream))
+        else:
+            source = next(source for source in apple["sources"] if source["id"] == selected)
+            changes.extend(update_source(root, source, android, upstream))
     outputs = {path: json.dumps(value, indent=2) + "\n" for path, value in updated.items() if value != original[path]}
     return outputs, changes
 
 
 def report(changes):
-    if not changes:
-        return "No updates.\n"
-    return "\n".join(changes) + "\n- Build and test before merging; publish updated binaries separately.\n"
+    return "".join(f"- {change.dependency}: {change.previous} -> {change.version} ([changes]({change.link}))\n"
+                   for change in changes)
+
+
+def title(changes):
+    return "Update " + ", ".join(f"{change.dependency} {change.version}" for change in changes) if changes else "Update dependencies"
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--list", action="store_true", help="Print the workflow component matrix")
+    mode.add_argument("--list", action="store_true", help="List native dependency components")
+    mode.add_argument("--all", action="store_true", help="Update all native dependencies together")
     mode.add_argument("--component", help="Update one source or SDK release bundle")
     mode.add_argument("--validate", action="store_true", help="Check committed source pins and both platforms' patches")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and verify an update without writing locks")
@@ -240,17 +253,21 @@ def main():
             verify_patches(ROOT, source, patch_sets(source, android))
         print("Source pins and ordered patches verified for all available platforms.")
         return
-    if args.component not in components(apple):
+    if not args.all and args.component not in components(apple):
         parser.error("Unknown component; use --list to see supported components")
-    outputs, changes = prepare_update(ROOT, args.component, Upstream())
+    outputs, changes = prepare_update(ROOT, "all" if args.all else args.component, Upstream())
     if not args.dry_run:
         for path, content in outputs.items():
             (ROOT / path).write_text(content)
     body = report(changes)
+    print(title(changes))
     print(body)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(body)
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with open(output, "a") as file:
+            file.write(f"title={title(changes)}\n")
 
 
 if __name__ == "__main__":
