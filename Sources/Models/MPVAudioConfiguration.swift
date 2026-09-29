@@ -30,7 +30,7 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
     /// Content eligible for Apple's spatializer. System settings still control
     /// Off, Fixed, Head Tracked, and Personalized Spatial Audio.
     public enum Spatialization: String, CaseIterable, Sendable {
-        /// Allow mono, stereo, and surround content.
+        /// Allow mono, stereo, and surround content, including audio-only media.
         case automatic
         /// Allow surround content only.
         case multichannel

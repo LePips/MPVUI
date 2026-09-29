@@ -503,7 +503,7 @@ struct MPVNativeSynchronizationProbeTests {
                         hardware: engine.videoToolboxSessionUsesHardware, hardwareDecoder: hwdec, audioOutput: ao,
                         decoderDrops: decoderDrops, outputDrops: outputDrops,
                         failed: engine.fatalPlaybackError != nil,
-                        fallback: engine.didRequestNativeOutputFallback || engine.videoOutput != .sampleBuffer
+                        fallback: engine.didRejectNativeOutput || engine.videoOutput != .sampleBuffer
                     ))
                 }
             }

@@ -30,7 +30,7 @@ struct MPVDisplayMatchingPlaybackTests {
         ))
         defer { fixture.close() }
         try await fixture.loadPaused(url)
-        try await eventually("native Dolby Vision validation; fallback=\(fixture.player.videoOutputFallbackReason ?? "none")") {
+        try await eventually("native Dolby Vision validation; fallback=\(fixture.player.lastError?.localizedDescription ?? "none")") {
             fixture.player.dolbyVisionStatus.nativeValidation == .validated
         }
         let player = fixture.player

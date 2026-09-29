@@ -120,45 +120,57 @@ public struct MPVRenderingQuality: Equatable, Sendable {
     // MARK: - Boolean options
 
     /// Whether to reduce color banding; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let debanding: Bool?
 
     // MARK: - Numeric options
 
     /// Clamped to 0...1 by the resolver; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let antiringing: Double?
 
     /// Chroma antiringing strength, clamped to 0...1; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let chromaAntiringing: Double?
 
     // MARK: - Policies
 
     /// The chroma scaling filter; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let chromaScaling: Scaling?
 
     /// Output dithering; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let dithering: Dithering?
 
     /// The gamut-mapping method; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let gamutMapping: GamutMapping?
 
     /// Peak brightness detection; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let peakDetection: PeakDetection?
 
     /// The base preset used before applying overrides.
+    /// - Note: Has no effect with sample-buffer output.
     public let preset: Preset
 
     /// The video scaling filter; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let scaling: Scaling?
 
     /// The tone-mapping curve; nil uses the preset.
+    /// - Note: Has no effect with sample-buffer output.
     public let toneMapping: ToneMapping?
 
     // MARK: - Resources
 
     /// An optional creative input LUT.
+    /// - Note: Has no effect with sample-buffer output.
     public let lut: LUT?
 
     /// Local mpv shader files, applied in order.
+    /// - Note: Has no effect with sample-buffer output.
     public let shaders: [URL]
 
     /// Creates rendering settings with optional preset overrides.

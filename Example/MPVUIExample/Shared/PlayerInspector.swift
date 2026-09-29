@@ -131,9 +131,7 @@ struct PlayerInspector: View {
                 "Video Output",
                 value: player.videoOutput == .sampleBuffer ? "AVFoundation" : "Metal (gpu-next)"
             )
-            if let reason = player.videoOutputFallbackReason {
-                InspectorRow("Output Fallback", value: reason)
-            }
+
             InspectorRow("Dimensions", value: decodedDimensions)
             InspectorRow(
                 "Frame Rate",
@@ -226,8 +224,6 @@ struct PlayerInspector: View {
                 }
                 if let request = player.videoFeatureRequestResult {
                     InspectorRow("Feature Request", value: readable(request.outcome.rawValue))
-                    InspectorRow("Reload Required", value: yesNo(request.requiresReload))
-                    InspectorRow("PiP Lost with Fallback", value: yesNo(request.losesPictureInPicture))
                     if let reason = request.reason {
                         InspectorRow("Details", value: reason)
                     }
@@ -476,7 +472,7 @@ struct PlayerInspector: View {
         case .unsupportedSubtitleLuminance: "The native build cannot apply subtitle luminance."
         case .displayDoesNotSupportHDR: "The display route does not support HDR."
         case .insufficientCurrentHeadroom: "Current display headroom is insufficient."
-        case let .nativeOutputUnavailable(reason), let .liveConfigurationFailed(reason): reason
+        case let .liveConfigurationFailed(reason): reason
         }
     }
 

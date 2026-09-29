@@ -6,6 +6,7 @@ struct MPVPlayerErrorTests {
     @Test(arguments: [
         (MPVPlayerError.clientCreationFailed, "Unable to create the mpv client."),
         (.clientUnavailable, "mpv is not available."),
+        (.nativeVideoOutputUnavailable("Unsupported format"), "Native video output is unavailable: Unsupported format"),
         (.initializationFailed(context: "Configure output", code: -4, message: "Invalid option"), "Configure output: Invalid option"),
         (.commandFailed(context: "Seek", code: -12, message: "Command failed"), "Seek: Command failed"),
         (.loadFailed(code: -13, message: "File not found"), "Load media: File not found"),

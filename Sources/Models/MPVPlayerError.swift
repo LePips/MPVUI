@@ -1,4 +1,4 @@
-/// Playback and picture-in-picture failures. mpv errors retain their native code and message.
+/// Playback and picture-in-picture failures. mpv API errors retain their native code and message.
 public enum MPVPlayerError: Error, Equatable, Sendable {
     /// The mpv client could not be created.
     case clientCreationFailed
@@ -10,6 +10,9 @@ public enum MPVPlayerError: Error, Equatable, Sendable {
     case loadFailed(code: Int32, message: String)
     /// Playback failed with the supplied native error.
     case playbackFailed(code: Int32, message: String)
+
+    /// The configured native renderer cannot present the source.
+    case nativeVideoOutputUnavailable(String)
 
     /// A command, property update, or observation failed without ending playback.
     case commandFailed(context: String, code: Int32, message: String)
@@ -45,6 +48,8 @@ public enum MPVPlayerError: Error, Equatable, Sendable {
         switch self {
         case .clientCreationFailed:
             "Unable to create the mpv client."
+        case let .nativeVideoOutputUnavailable(reason):
+            "Native video output is unavailable: \(reason)"
         case .clientUnavailable:
             "mpv is not available."
         case let .initializationFailed(context, _, message),

@@ -154,6 +154,11 @@ enum FFmpegRecipe {
         // FFmpeg expands flag variables without reparsing shell quotes. Clang response files preserve path arguments.
         try put(c.flags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-cflags.rsp"))
         try put(c.linkFlags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-ldflags.rsp"))
+        // Build-time utilities run on macOS even when the output targets another Apple platform.
+        // Pin their SDK too: an unqualified host compiler can otherwise select newer CLT headers
+        // and libraries that the locked Xcode linker cannot read.
+        let hostFlags = try ["-isysroot", c.runner.sdk("macosx").path]
+        try put(hostFlags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-hostflags.rsp"))
         // pkg-config preserves relative search paths in its output. FFmpeg expands that output as
         // shell words, so relative paths avoid backslash-escaped spaces being split a second time.
         let pkgPaths = c.dependencies.keys.sorted().map { relativePath(
@@ -172,6 +177,7 @@ enum FFmpegRecipe {
         var args = try FFmpegFlags.configureFlags + [
             "--prefix=/usr/local", "--arch=\(c.arch == "x86_64" ? "x86_64" : "aarch64")", "--target-os=darwin",
             "--cc=/usr/bin/clang", "--cxx=/usr/bin/clang++", "--disable-debug", "--enable-stripping", "--enable-gpl",
+            "--host-cc=/usr/bin/clang", "--host-cflags=@mpvbuild-hostflags.rsp", "--host-ldflags=@mpvbuild-hostflags.rsp",
             "--disable-programs", "--disable-autodetect", "--disable-sdl2", "--disable-large-tests", "--ignore-tests=TESTS",
             "--enable-audiotoolbox", "--enable-videotoolbox",
             "--disable-securetransport",

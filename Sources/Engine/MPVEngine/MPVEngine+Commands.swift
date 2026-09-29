@@ -8,49 +8,6 @@ import Darwin
 
 // Bridges commands and properties to libmpv and preserves desired runtime settings.
 extension MPVEngine {
-    /// Properties already managed
-    private static let reservedProperties: Set<String> = [
-        "external-surface-size",
-        "avfoundation-presentation",
-        "avfoundation-pip-composite-osd",
-        "avfoundation-subtitle-luminance",
-        "gpu-api",
-        "gpu-context",
-        "mute",
-        "pause",
-        "speed",
-        "sub-text-intercept",
-        "sub-text-snapshot",
-        "target-colorspace-hint",
-        "target-peak",
-        "target-prim",
-        "target-trc",
-        "vo",
-        "volume",
-        "wid",
-    ]
-
-    private static let managedOptions = reservedProperties.union(MPVRenderingOptions.reserved).union(
-        [
-            "avfoundation-native-dovi-profile7",
-            "external-surface-update",
-            "icc-profile",
-            "icc-profile-auto",
-            "target-lut",
-            "target-lut-type",
-            "dither-depth",
-            "sdr-adjust-gamma",
-            "sdr-reference-luminance",
-            "gamma-factor",
-            "gamma-auto",
-            "target-contrast",
-            "target-gamut",
-            "treat-srgb-as-power22",
-            "hdr-reference-white",
-            "icc-intent",
-        ]
-    )
-
     func performPropertySet(_ name: String, value: String) {
         let propertyName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !propertyName.isEmpty else { return }
@@ -69,72 +26,22 @@ extension MPVEngine {
     }
 
     func isManagedOption(_ rawName: String) -> Bool {
-        let name = rawName.lowercased().replacingOccurrences(of: "options/", with: "")
-        if Self.managedOptions.contains(name) {
-            return true
-        }
-        if name == "vf" || name.hasPrefix("vf-") {
-            return configuration.deinterlace.mode != .disabled
-        }
-        return name.hasPrefix("glsl-shaders-")
+        MPVOptionOwnership.isManaged(rawName, deinterlace: configuration.deinterlace)
     }
 
-    func performCommand(
-        _ name: String,
-        arguments: [String],
-        deferUntilPlaybackRestart: Bool = false,
-        generation: UInt64? = nil
-    ) {
+    func performCommand(_ name: String, arguments: [String]) {
         guard !name.isEmpty else { return }
+        if let property = MPVOptionOwnership.rendererPropertyModified(by: name, arguments: arguments) {
+            queue.async { [weak self] in
+                self?.publish(.error(.reservedProperty(name: property), fatal: false))
+            }
+            return
+        }
         if name.caseInsensitiveCompare("stop") == .orderedSame, arguments.isEmpty {
             stop()
             return
         }
-        guard deferUntilPlaybackRestart, let generation else {
-            command([name] + arguments, allowsStoppedClient: true)
-            return
-        }
-        queue.async { [weak self] in
-            guard let self, generation == self.currentGeneration else { return }
-            let arguments = [name] + arguments
-            self.createStoppedClientForExplicitCommandIfNeeded()
-            if self.playbackRequestIsActive,
-               self.handle == nil || !self.isFileLoaded || !self.hasPlaybackStarted || self.isLoading || self.isSeeking
-            {
-                let request = PendingRendererCommand(generation: generation, arguments: arguments)
-                // Bound ownership if the replacement source never becomes ready.
-                // Existing requests retain order; overflow reports a command error.
-                let bytes = self.pendingRendererCommands.reduce(0) { $0 + $1.byteCount }
-                guard self.pendingRendererCommands.count < 64,
-                      request.byteCount <= 262_144 - bytes
-                else {
-                    self.publish(.error(.commandFailed(
-                        context: name, code: MPV_ERROR_COMMAND.rawValue,
-                        message: "Too many commands are waiting for the renderer to reload."
-                    ), fatal: false))
-                    return
-                }
-                self.pendingRendererCommands.append(request)
-            } else {
-                self.performCommandImmediately(arguments)
-            }
-        }
-    }
-
-    func performPendingRendererCommands() {
-        dispatchPrecondition(condition: .onQueue(queue))
-        let commands = pendingRendererCommands
-        pendingRendererCommands.removeAll()
-        for command in commands where command.generation == currentGeneration {
-            performCommandImmediately(command.arguments)
-        }
-    }
-
-    private func performCommandImmediately(_ arguments: [String]) {
-        let status = runCommand(arguments)
-        if status < 0 {
-            publishCommandError(status, context: arguments.first ?? "Command")
-        }
+        command([name] + arguments, allowsStoppedClient: true)
     }
 
     func recordPersistentCommandMutation(_ arguments: [String]) {
@@ -153,7 +60,7 @@ extension MPVEngine {
         // become configuration for a replacement client. Only real options are
         // read below; properties such as chapter and time-pos are not options.
         guard !property.isEmpty, !property.contains("/"),
-              !Self.reservedProperties.contains(property),
+              !MPVOptionOwnership.reservedProperties.contains(property),
               ![
                   "start",
                   "end",

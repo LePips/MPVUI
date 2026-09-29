@@ -12,18 +12,13 @@ struct MPVHDRSignalParsingTests {
             liveFailure: nil
         ) == .unsupportedPolicy)
         #expect(MPVEngine.resolvedPresentationFallback(
-            backend: .nativeOutputUnavailable("unsupported matrix"),
-            policy: .displayDoesNotSupportHDR,
-            liveFailure: nil
-        ) == .nativeOutputUnavailable("unsupported matrix"))
-        #expect(MPVEngine.resolvedPresentationFallback(
             backend: nil, policy: .insufficientCurrentHeadroom,
             liveFailure: "target-trc"
         ) == .liveConfigurationFailed("target-trc"))
     }
 
     @Test
-    func `native color and Dolby rejections use the renderer fallback contract`() {
+    func `native color and Dolby rejections use the native error contract`() {
         for prefix in ["MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED:", "MPVUI_NATIVE_VIDEO_UNSUPPORTED:"] {
             #expect(MPVEngine.nativeOutputRejectionReason(MPVLogMessage(
                 prefix: "vo/avfoundation", level: .error,

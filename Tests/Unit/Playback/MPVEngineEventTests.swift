@@ -37,10 +37,10 @@ struct MPVEngineEventTests {
     }
 
     @Test @MainActor
-    func `late native output rejection preserves paused position for a replacement renderer`() async throws {
+    func `native output rejection reports one fatal error without requesting a replacement`() async throws {
         var rejected: [String] = []
         let engine = MPVEngine(configuration: .init(videoOutput: .sampleBuffer)) { emission in
-            if case let .nativeVideoOutputUnavailable(reason) = emission.update {
+            if case let .error(.nativeVideoOutputUnavailable(reason), fatal: true) = emission.update {
                 rejected.append(reason)
             }
         }
@@ -67,13 +67,22 @@ struct MPVEngineEventTests {
                     }
                 }
             }
-            #expect(engine.didRequestNativeOutputFallback && engine.needsSourceLoad)
-            #expect(engine.playbackRequestIsActive && !engine.shouldAutoPlay)
-            #expect(engine.pendingStartTime == .seconds(3))
+            #expect(engine.didRejectNativeOutput && !engine.needsSourceLoad)
+            #expect(!engine.playbackRequestIsActive)
+            #expect(engine.videoOutput == .sampleBuffer)
+            #expect(engine.fatalPlaybackError == .nativeVideoOutputUnavailable("Rejected pixel format"))
             #expect(engine.desiredProperties["vid"] == "1")
         }
         try await eventually("native rejection is published exactly once") { !rejected.isEmpty }
         #expect(rejected == ["Rejected pixel format"])
+        engine.load(TestPaths.baselineMedia, autoPlay: false, startTime: nil, generation: 1)
+        _ = await engine.lifecycleSnapshot()
+        engine.queue.sync {
+            #expect(!engine.didRejectNativeOutput)
+            #expect(engine.fatalPlaybackError == nil)
+            #expect(engine.videoOutput == .sampleBuffer)
+            #expect(engine.needsSourceLoad)
+        }
     }
 
     @Test @MainActor

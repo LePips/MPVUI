@@ -2,24 +2,24 @@
 
 `MPVVideoPlayer` hosts the video layer; `MPVPlayer` controls playback through the [patched native library](PATCHES.md).
 
-| Output | Rendering path | Use |
-| --- | --- | --- |
-| Metal | mpv → libplacebo → MoltenVK → `CAMetalLayer` | Scaling, tone mapping, custom shaders, and rendering presets |
+| Output        | Rendering path                                    | Use                                                               |
+| ------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
+| Metal         | mpv → libplacebo → MoltenVK → `CAMetalLayer`      | Scaling, tone mapping, custom shaders, and rendering presets      |
 | Sample buffer | mpv → AVFoundation → `AVSampleBufferDisplayLayer` | Native presentation, supported Dolby Vision metadata, and iOS PiP |
 
-Sample buffers are the default on every platform. Custom rendering settings or additional mpv options select Metal. Set `videoOutput` to choose an output explicitly.
+Sample buffers are the default on every platform. Only `videoOutput` selects the renderer, and it remains fixed for the player’s lifetime. Unsupported renderer settings have no effect. See [renderer option support](VIDEO_RENDERERS.md) for the support matrix and source evidence.
 
 ```swift
 let player = MPVPlayer(configuration: .init(videoOutput: .sampleBuffer))
 ```
 
-Unsupported native formats or missing metadata can trigger a switch to Metal. `player.videoOutput` reports the active output; `videoOutputFallbackReason` explains a switch. Metal shaders and presets apply only to Metal output.
-
-Automatic output selection can switch to Metal for styled subtitles, baked overlays, or zoom and pan. Raw rendering properties and commands keep Metal active across later loads. Explicit sample-buffer output prioritizes Dolby Vision; set `nativeVideoFeaturePolicy` to prefer features instead.
+Unsupported native formats or missing required metadata report a playback error. Native sample buffers support subtitles, overlays, and geometry for ordinary video; native Dolby Vision preserves unmodified RPU frames and cannot bake these features into them. Metal shaders and presets apply only to Metal output.
 
 ## HDR and PiP
 
-`hdrPolicy` controls dynamic range; `sdrOutput` controls Metal SDR precision. Native dynamic-range overrides, constrained HDR, and Metal HDR on tvOS depend on OS 26 APIs. Native SDR requests on older systems fall back to Metal. `player.mediaInformation.hdr` and `player.playbackDiagnostics` expose metadata and playback observations.
+`hdrPolicy` controls dynamic range; `sdrOutput` controls Metal SDR precision. Native HDR overrides require OS 26; earlier systems keep automatic native HDR behavior. Constrained HDR and Metal HDR on tvOS require OS 26. `player.mediaInformation.hdr` and `player.playbackDiagnostics` expose metadata and playback observations.
+
+Metal EDR uses linear float output with an effectively zero black level. SDR uses automatic contrast.
 
 iOS PiP requires sample-buffer output. macOS supports both outputs through its private `PIP.framework` presenter. Use `videoOverlay` for content that should travel with the video into PiP.
 

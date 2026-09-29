@@ -7,8 +7,11 @@ import Testing
 @Suite(.tags(.system), .serialized)
 @MainActor
 struct MPVInterlacedPlaybackTests {
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_INTERLACE_VALIDATION"] == "1"))
-    func `automatic deinterlacing retains field cadence`() async throws {
+    @Test(
+        .enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_INTERLACE_VALIDATION"] == "1"),
+        arguments: MPVPlayerConfiguration.VideoOutput.allCases
+    )
+    func `deinterlacing retains field cadence on either renderer`(output: MPVPlayerConfiguration.VideoOutput) async throws {
         let cases: [(String, Double, MPVDeinterlacePolicy)] = [
             ("480i-bottom-59.94", 60000.0 / 1001, .init(mode: .automatic)),
             ("576i-top-50", 50, .init(mode: .automatic)),
@@ -18,9 +21,11 @@ struct MPVInterlacedPlaybackTests {
         for (name, expectedCadence, policy) in cases {
             let source = try TestPaths.testMedia(name + ".mkv")
             let player = MPVPlayer(configuration: .init(
+                additionalOptions: ["ao": "null"],
                 deinterlace: policy,
                 hardwareDecoding: .disabled,
-                hdrPolicy: .disabled
+                hdrPolicy: .disabled,
+                videoOutput: output
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(
@@ -42,6 +47,7 @@ struct MPVInterlacedPlaybackTests {
                 }
                 try await Task.sleep(for: .milliseconds(50))
             }
+            #expect(player.videoOutput == output)
             let status = player.playbackDiagnostics
             #expect(player.lastError == nil)
             #expect(abs((status.estimatedFilterFramesPerSecond ?? 0) - expectedCadence) < 0.4)

@@ -116,7 +116,7 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `dismantling superseding surface reattaches previous live surface`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
@@ -210,7 +210,7 @@ struct MPVPlayerSurfaceTests {
         async
     {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
@@ -286,7 +286,7 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `zero-sized superseder retires old target before restoring resized surface`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
@@ -378,7 +378,7 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `window removal and readdition reactivate the same surface and layer once`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let representable = MPVPlayerSurface(player: player)
         let surface = representable.makePlatformView()
@@ -439,7 +439,7 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `dismantling inactive surface does not disturb current owner`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)

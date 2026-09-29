@@ -12,10 +12,9 @@ extension MPVEngine {
         queue.async { [weak self] in
             guard let self else { return }
             self.cancelSubtitleQueries()
-            self.pendingRendererCommands.removeAll()
             self.isStoppedForResourceRelease = false
             self.resetMediaObservations()
-            self.didRequestNativeOutputFallback = false
+            self.didRejectNativeOutput = false
             self.currentGeneration = generation
             self.playbackDiagnostics = MPVPlaybackDiagnostics()
             self.requestedLoadUptime = DispatchTime.now().uptimeNanoseconds
@@ -49,9 +48,17 @@ extension MPVEngine {
             self.desiredProperties.removeValue(forKey: "aid")
             self.desiredProperties.removeValue(forKey: "sid")
             self.desiredProperties.removeValue(forKey: "secondary-sid")
-            self.desiredProperties.removeValue(forKey: "audio-delay")
-            self.desiredProperties.removeValue(forKey: "sub-delay")
-            self.desiredProperties.removeValue(forKey: "secondary-sub-delay")
+            // Clear per-item timing on the retained client as well as in its
+            // recreation state. The configured VO stays attached across loads.
+            for property in ["audio-delay", "sub-delay", "secondary-sub-delay"] {
+                if self.desiredProperties.removeValue(forKey: property) != nil, self.handle != nil {
+                    let value = self.configuration.additionalOptions[property] ?? "0"
+                    let status = self.setPropertyImmediately(property, to: value)
+                    if status < 0 {
+                        self.publishCommandError(status, context: "Reset \(property)")
+                    }
+                }
+            }
             self.publishState(.loading)
             self.startSecurityScopedAccessIfNeeded(for: url)
             if self.handle == nil {

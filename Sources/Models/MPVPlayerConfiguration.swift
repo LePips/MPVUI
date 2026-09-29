@@ -46,7 +46,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         /// Request HDR when the display and platform support it.
         public static let hdrWhenAvailable = Self.always
 
-        /// Request SDR conversion, using a backend capable of enforcing it.
+        /// Request SDR conversion when supported by the selected backend.
         public static let sdr = Self.disabled
     }
 
@@ -80,15 +80,14 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         case trace
     }
 
-    /// The preferred video presentation backend.
+    /// The video presentation backend used for the player’s lifetime.
     public enum VideoOutput: String, CaseIterable, Equatable, Sendable {
         /// Full gpu-next rendering through Metal/MoltenVK.
         case metal
 
         /// Native AVFoundation output with iOS PiP; requires the native-output Libmpv build.
         /// AVFoundation handles color conversion, bypassing gpu-next shaders and tone mapping.
-        /// Unsupported native Dolby Vision falls back to Metal for that file;
-        /// ``MPVPlayer/videoOutput`` reports the active backend.
+        /// Unsupported native formats report a playback error.
         case sampleBuffer
     }
 
@@ -154,6 +153,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public let audio: MPVAudioConfiguration
 
     /// Ownership of display conversion and SDR reference viewing behavior.
+    /// - Note: Overrides have no effect with sample-buffer output; AVFoundation owns conversion.
     public let colorManagement: MPVColorManagement
 
     /// Interlace detection, processing and field-order policy.
@@ -165,37 +165,30 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// The requested hardware-decoding strategy.
     public let hardwareDecoding: HardwareDecoding
 
-    /// Desired HDR behavior for either backend. Presentation status reports
-    /// unsupported policies and any backend fallback required to enforce SDR.
+    /// Desired HDR behavior for the selected backend.
+    /// - Note: Sample-buffer overrides require OS 26; earlier systems use automatic HDR.
     public let hdrPolicy: HDRPolicy
 
     /// The minimum severity of forwarded mpv log messages.
     public let logLevel: LogLevel
 
-    /// How native Dolby Vision conflicts with subtitles and geometry features.
-    /// Implicit native output prefers requested features, permitting a Metal
-    /// reload. An explicitly selected backend defaults to preserving Dolby Vision.
-    public let nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy
-
     /// Renderer cost/quality defaults and optional explicit overrides.
+    /// - Note: Has no effect with sample-buffer output.
     public let renderingQuality: MPVRenderingQuality
 
     /// SDR gamut and precision, independent of the HDR policy.
+    /// - Note: Has no effect with sample-buffer output; AVFoundation manages precision.
     public let sdrOutput: MPVSDROutputPolicy
 
-    /// The resolved video backend. Uncustomized players use native sample buffers
-    /// on every platform; custom rendering settings use Metal.
-    /// An explicit initializer value always takes precedence.
+    /// The video backend used for the player's lifetime. Defaults to sample buffers.
+    /// Other options never change the selected backend.
     public let videoOutput: VideoOutput
-
-    /// Whether the caller delegated output selection. The player uses this to
-    /// preserve advanced rendering requests by switching an implicit native
-    /// selection to Metal without changing explicit native-output behavior.
-    let usesAutomaticVideoOutput: Bool
 
     // MARK: - Additional options
 
     /// Extra mpv options applied last. MPVUI's reserved options cannot be overridden.
+    /// - Note: gpu-next picture controls (`brightness`, `contrast`, `gamma`, `hue`,
+    ///   `saturation`) have no effect with sample-buffer output.
     ///
     /// For app-owned subtitle fonts, set `sub-fonts-dir` to a local directory path
     /// and `sub-font` to the font's internal family name. MPVUI ships no fonts.
@@ -206,11 +199,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     // MARK: - Initialization
 
     /// Creates a configuration using the normalization rules documented on each property.
-    /// Omitting `videoOutput` selects native sample buffers on every platform
-    /// when rendering, color, deinterlacing, HDR policy, SDR precision,
-    /// and additional options are unchanged. Supplying custom rendering options selects Metal.
-    /// Omitting `nativeVideoFeaturePolicy` prefers features for that implicit
-    /// native choice and preserves Dolby Vision for explicitly selected outputs.
+    /// `videoOutput` defaults to sample buffers. Unsupported renderer settings have no effect.
     public init(
         additionalOptions: [String: String] = [:],
         audio: MPVAudioConfiguration = .init(),
@@ -223,24 +212,15 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         initialBufferSeconds: Duration = .seconds(1),
         logLevel: LogLevel = .warning,
         loop: Bool = false,
-        nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy? = nil,
         networkCacheSeconds: Duration = .seconds(10),
         playbackRate: Double = 1,
         renderingQuality: MPVRenderingQuality = .init(),
         sdrOutput: MPVSDROutputPolicy = .automatic,
         startTime: Duration? = nil,
         subtitleLuminance: Double = 203,
-        videoOutput: VideoOutput? = nil,
+        videoOutput: VideoOutput = .sampleBuffer,
         volume: Double = 100
     ) {
-        let resolvedVideoOutput = videoOutput ?? Self.automaticVideoOutput(
-            additionalOptions: additionalOptions,
-            colorManagement: colorManagement,
-            deinterlace: deinterlace,
-            hdrPolicy: hdrPolicy,
-            renderingQuality: renderingQuality,
-            sdrOutput: sdrOutput
-        )
         self.additionalOptions = additionalOptions
         self.audio = audio
         self.autoPlay = autoPlay
@@ -252,41 +232,17 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.initialBufferSeconds = initialBufferSeconds.clampPositiveOrZero
         self.logLevel = logLevel
         self.loop = loop
-        self.nativeVideoFeaturePolicy = nativeVideoFeaturePolicy
-            ?? (videoOutput == nil && resolvedVideoOutput == .sampleBuffer
-                ? .preferFeatures : .preserveDolbyVision)
         self.networkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
         self.playbackRate = Self.normalizedPlaybackRate(playbackRate)
         self.renderingQuality = renderingQuality
         self.sdrOutput = sdrOutput
         self.startTime = startTime?.clampPositiveOrZero
         self.subtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)
-        self.videoOutput = resolvedVideoOutput
-        self.usesAutomaticVideoOutput = videoOutput == nil
+        self.videoOutput = videoOutput
         self.volume = Self.normalizedVolume(volume)
     }
 
     // MARK: - Normalization
-
-    private static func automaticVideoOutput(
-        additionalOptions: [String: String],
-        colorManagement: MPVColorManagement,
-        deinterlace: MPVDeinterlacePolicy,
-        hdrPolicy: HDRPolicy,
-        renderingQuality: MPVRenderingQuality,
-        sdrOutput: MPVSDROutputPolicy
-    ) -> VideoOutput {
-        if additionalOptions.isEmpty,
-           colorManagement == .init(),
-           deinterlace == .init(),
-           hdrPolicy == .automatic,
-           renderingQuality == .init(),
-           sdrOutput == .automatic
-        {
-            return .sampleBuffer
-        }
-        return .metal
-    }
 
     private static func normalizedPlaybackRate(_ value: Double) -> Double {
         guard value.isFinite, value > 0 else { return defaultPlaybackRate }

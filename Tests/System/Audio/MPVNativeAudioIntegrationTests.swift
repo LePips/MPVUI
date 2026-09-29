@@ -11,6 +11,84 @@ import Testing
 ))
 @MainActor
 struct MPVNativeAudioIntegrationTests {
+    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
+    func `public audio configuration reaches Apple and rate changes preserve video eligibility`(
+        decoding: MPVAudioConfiguration.DolbyDecoding,
+        spatialization: MPVAudioConfiguration.Spatialization
+    ) async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            audio: .init(dolbyDecoding: decoding, spatialization: spatialization),
+            autoPlay: false, logLevel: .verbose, volume: 0
+        ))
+        defer { fixture.close() }
+        let player = fixture.player
+        var sinkMuted = false
+        var logs: [String] = []
+        var completed = false
+        player.logHandler = { message in
+            logs.append("[\(message.prefix)] \(message.message)")
+            if message.message.contains("AUDIO_AUDIT_MUTED=yes") {
+                sinkMuted = true
+            }
+        }
+        defer {
+            if !completed {
+                print(
+                    "Public audio audit: state=\(player.state) position=\(player.position) error=\(String(describing: player.lastError)) audio=\(player.playbackDiagnostics.audio)"
+                )
+                print(logs.suffix(100).joined(separator: "\n"))
+            }
+        }
+        player.setMuted(true)
+        try player.load(TestPaths.testMedia("eac3-surround51.mka"))
+        try await eventually("public player native audio initialized") {
+            player.playbackDiagnostics.audio.output == "avfoundation"
+                && player.playbackDiagnostics.audio.nativePath != nil
+        }
+        // Mute the actual sink before starting compressed audio, then verify
+        // the public command reached it without changing video backends.
+        player.setProperty("ao-mute", to: "yes")
+        player.command("expand-properties", arguments: ["print-text", "AUDIO_AUDIT_MUTED=${ao-mute}"])
+        try await eventually("native sink muted") { sinkMuted }
+        player.play()
+        try await eventually("public audio playback and spatialization observations") {
+            player.position.seconds > 0.2
+                && player.playbackDiagnostics.audio.allowsStereoSpatialization != nil
+                && player.playbackDiagnostics.audio.allowsMultichannelSpatialization != nil
+        }
+        let audio = player.playbackDiagnostics.audio
+        #expect(audio.nativePath == (decoding == .automatic ? "avplayer" : "sample-buffer"))
+        #expect(audio.outputFormat?.contains("spdif") == (decoding == .automatic))
+        #expect(audio.sourceChannels?.contains("5.1") == true)
+        #expect(audio.allowsStereoSpatialization == (spatialization == .automatic))
+        #expect(audio.allowsMultichannelSpatialization == (spatialization != .disabled))
+
+        let firstPosition = player.position
+        try await eventually("public audio clock continues after input drains") {
+            player.position > firstPosition + .milliseconds(400)
+        }
+        player.pause()
+        try await eventually("public audio paused") { player.state == .paused && player.isPaused }
+        let seekPosition = player.position + .seconds(1)
+        player.seek(by: .seconds(1))
+        try await eventually("relative audio seek uses the current native clock") {
+            player.state == .paused && abs(player.position.seconds - seekPosition.seconds) < 0.2
+        }
+
+        player.setPlaybackRate(1.25)
+        player.play()
+        try await eventually("public rate request uses PCM") {
+            player.playbackDiagnostics.audio.nativePath == "sample-buffer"
+                && player.playbackDiagnostics.audio.outputFormat?.contains("spdif") == false
+        }
+        #expect(player.videoOutput == .sampleBuffer)
+        #expect(player.lastError == nil)
+        #expect(player.playbackDiagnostics.audio.allowsStereoSpatialization == (spatialization == .automatic))
+        #expect(player.playbackDiagnostics.audio.allowsMultichannelSpatialization == (spatialization != .disabled))
+        #expect(player.lastError == nil)
+        completed = true
+    }
+
     @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, ["ac3", "eac3"])
     func `configured Dolby policy preserves surround source layout`(
         policy: MPVAudioConfiguration.DolbyDecoding,

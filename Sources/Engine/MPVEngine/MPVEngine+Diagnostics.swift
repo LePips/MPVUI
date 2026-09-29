@@ -61,33 +61,20 @@ extension MPVEngine {
         {
             refreshMediaInformation()
         }
-        if videoOutput == .sampleBuffer, !didRequestNativeOutputFallback,
+        if videoOutput == .sampleBuffer, !didRejectNativeOutput,
            let reason = Self.nativeOutputRejectionReason(log),
            Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID),
            sourceURL != nil
         {
-            // A replacement load can overtake a queued rejection log. Apply
-            // fallback only to the matching entry, including after its
-            // END_FILE has cleared both IDs, never to a newer pending load.
-            didRequestNativeOutputFallback = true
-            // Reconfiguration can fail before FILE_LOADED. Preserve the
-            // requested position/intention even if END_FILE already arrived.
-            if !isFileLoaded, !isLoading {
-                pendingStartTime = lastPosition
-                shouldAutoPlay = !isPaused
-                pendingExternalTracks = externalTracks
-            }
-            let requestedVideoTrack = desiredProperties["vid"]
-            destroyHandle(preservePlayback: true)
-            // A failed VO reconfiguration can make mpv disable its video
-            // track. That is an output failure, not the user's track choice;
-            // do not carry an automatic vid=no into the replacement renderer.
-            desiredProperties["vid"] = requestedVideoTrack
-            needsSourceLoad = true
-            playbackRequestIsActive = true
-            didReachEnd = false
-            fatalPlaybackError = nil
-            publish(.nativeVideoOutputUnavailable(reason))
+            // Retire the rejected client without changing the configured renderer.
+            // A later explicit load may retry using the same native surface.
+            didRejectNativeOutput = true
+            destroyHandle(preservePlayback: false)
+            needsSourceLoad = false
+            playbackRequestIsActive = false
+            isLoading = false
+            isFileLoaded = false
+            publishFatalError(.nativeVideoOutputUnavailable(reason))
         }
         let orderedLevels: [MPVPlayerConfiguration.LogLevel] = [.none, .fatal, .error, .warning, .info, .status, .verbose, .debug, .trace]
         let threshold = orderedLevels.firstIndex(of: configuration.logLevel) ?? 0
@@ -206,12 +193,8 @@ extension MPVEngine {
     }
 
     private func diagnosticFallbackReasons(_ result: MPVPlaybackDiagnostics) -> [String] {
-        var reasons = [result.decoder.fallbackReason, result.deinterlace.reason, liveConfigurationFailure]
+        [result.decoder.fallbackReason, result.deinterlace.reason, liveConfigurationFailure]
             .compactMap(\.self)
-        if case let .nativeOutputUnavailable(reason) = presentationFallbackReason {
-            reasons.append(reason)
-        }
-        return reasons
     }
 
     static func nativeOutputRejectionReason(_ log: MPVLogMessage) -> String? {

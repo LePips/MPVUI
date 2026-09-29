@@ -39,9 +39,6 @@ extension MPVEngine {
     }
 
     func publishState(_ state: MPVPlaybackState) {
-        if state.isTerminal {
-            pendingRendererCommands.removeAll()
-        }
         publish(.paused(isPaused))
         guard state != lastState else { return }
         lastState = state
@@ -348,7 +345,6 @@ extension MPVEngine {
     }
 
     func publishFatalError(_ error: MPVPlayerError, globally: Bool = false) {
-        pendingRendererCommands.removeAll()
         completePiPSeek(false)
         fatalPlaybackError = error
         lastState = .failed(error)

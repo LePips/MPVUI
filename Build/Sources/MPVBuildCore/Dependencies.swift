@@ -105,6 +105,15 @@ struct DependencyBuilder: Sendable {
             }
             for file in try files(output.appendingPathComponent("lib/pkgconfig")) where file.pathExtension == "pc" {
                 var text = try String(contentsOf: file, encoding: .utf8)
+                if dependency.id == "libshaderc", file.lastPathComponent == "shaderc.pc" {
+                    // The public artifact ships only the combined static archive.
+                    // Upstream's default alias names an absent shared library;
+                    // libplacebo's transitive dependency uses this alias.
+                    text = try String(
+                        contentsOf: file.deletingLastPathComponent().appendingPathComponent("shaderc_combined.pc"),
+                        encoding: .utf8
+                    )
+                }
                 text = text.replacingOccurrences(
                     of: "/path/to/workdir/\(dependency.id)/\(slice.id)/thin/\(arch)",
                     with: "${pcfiledir}/../.."

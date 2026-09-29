@@ -25,7 +25,7 @@ struct MPVWideGamutLiveTests {
             let player = MPVPlayer(configuration: .init(
                 autoPlay: false,
                 colorManagement: .init(displayProfile: mode),
-                hdrPolicy: .disabled
+                hdrPolicy: .disabled, videoOutput: .metal
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = makeWindow(surface)
@@ -76,7 +76,7 @@ struct MPVWideGamutLiveTests {
 
     @Test
     func `SDR gamut transition preserves paused decoder and position`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled))
+        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.wideGamutOverrideForTesting = true
         surface.edrHeadroomOverrideForTesting = (current: 1, potential: 1)

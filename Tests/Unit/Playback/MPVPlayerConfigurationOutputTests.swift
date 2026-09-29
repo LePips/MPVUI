@@ -5,35 +5,17 @@ import Testing
 @Suite(.tags(.unit))
 struct MPVPlayerConfigurationOutputTests {
     @Test
-    func `default output uses sample buffers on every platform`() {
-        let configuration = MPVPlayerConfiguration()
-        #expect(configuration.usesAutomaticVideoOutput)
-        #expect(configuration.videoOutput == .sampleBuffer)
-        #expect(configuration.nativeVideoFeaturePolicy == .preferFeatures)
-        #expect(MPVPlayerConfiguration.default == configuration)
-        #expect(MPVPlayerConfiguration(videoOutput: nil) == configuration)
-    }
-
-    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
-    func `explicit backend remains authoritative`(output: MPVPlayerConfiguration.VideoOutput) {
-        let configuration = MPVPlayerConfiguration(videoOutput: output)
-        #expect(!configuration.usesAutomaticVideoOutput)
-        #expect(configuration.videoOutput == output)
-        #expect(configuration.nativeVideoFeaturePolicy == .preserveDolbyVision)
-        let customized = MPVPlayerConfiguration(
-            additionalOptions: ["scale": "lanczos"],
-            renderingQuality: .init(preset: .highQuality),
-            sdrOutput: .highPrecision,
-            videoOutput: output
-        )
-        #expect(customized.videoOutput == output)
+    func `default output is sample buffers without implicit selection state`() {
+        #expect(MPVPlayerConfiguration().videoOutput == .sampleBuffer)
+        #expect(MPVPlayerConfiguration() == MPVPlayerConfiguration(videoOutput: .sampleBuffer))
     }
 
     @Test
-    func `rendering customizations retain Metal`() {
+    func `rendering options never choose the default renderer`() {
         let shader = URL(fileURLWithPath: "/tmp/benchmark-shader.glsl")
         let configurations = [
-            MPVPlayerConfiguration(additionalOptions: ["sub-font": "Example Font"]),
+            MPVPlayerConfiguration(additionalOptions: ["vf": "hflip"]),
+            MPVPlayerConfiguration(additionalOptions: ["unknown-rendering-option": "yes"]),
             MPVPlayerConfiguration(colorManagement: .init(referenceWhite: 250)),
             MPVPlayerConfiguration(colorManagement: .init(sdrViewing: .legacyDisplay)),
             MPVPlayerConfiguration(renderingQuality: .init(preset: .battery)),
@@ -43,50 +25,26 @@ struct MPVPlayerConfigurationOutputTests {
             MPVPlayerConfiguration(renderingQuality: .init(shaders: [shader])),
             MPVPlayerConfiguration(deinterlace: .init(mode: .automatic)),
             MPVPlayerConfiguration(deinterlace: .init(algorithm: .bwdif, mode: .forced)),
-            MPVPlayerConfiguration(hdrPolicy: .always),
-            MPVPlayerConfiguration(hdrPolicy: .disabled),
-            MPVPlayerConfiguration(hdrPolicy: .constrained),
             MPVPlayerConfiguration(sdrOutput: .compatibility8Bit),
             MPVPlayerConfiguration(sdrOutput: .highPrecision),
         ]
         for configuration in configurations {
-            #expect(configuration.usesAutomaticVideoOutput)
-            #expect(configuration.videoOutput == .metal)
-            #expect(configuration.nativeVideoFeaturePolicy == .preserveDolbyVision)
+            #expect(configuration.videoOutput == .sampleBuffer)
         }
     }
 
-    @Test
-    func `unrelated playback options preserve automatic output selection`() {
+    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases, MPVPlayerConfiguration.HDRPolicy.allCases)
+    func `only the output option chooses the renderer`(
+        output: MPVPlayerConfiguration.VideoOutput, hdrPolicy: MPVPlayerConfiguration.HDRPolicy
+    ) {
         let configuration = MPVPlayerConfiguration(
-            autoPlay: false,
-            initialBufferSeconds: .seconds(2),
-            networkCacheSeconds: .seconds(20),
-            playbackRate: 1.5,
-            volume: 75
+            additionalOptions: ["vf": "hflip", "vo": "invalid", "unknown-rendering-option": "yes"],
+            colorManagement: .init(referenceWhite: 250),
+            deinterlace: .init(mode: .forced), hdrPolicy: hdrPolicy,
+            renderingQuality: .init(preset: .highQuality), sdrOutput: .highPrecision,
+            videoOutput: output
         )
-        #expect(configuration.videoOutput == MPVPlayerConfiguration.default.videoOutput)
-        #expect(configuration.nativeVideoFeaturePolicy == MPVPlayerConfiguration.default.nativeVideoFeaturePolicy)
-    }
-
-    @Test(arguments: [MPVNativeVideoFeaturePolicy.preserveDolbyVision, .preferFeatures])
-    func `explicit feature policy is retained`(policy: MPVNativeVideoFeaturePolicy) {
-        #expect(MPVPlayerConfiguration(nativeVideoFeaturePolicy: policy).nativeVideoFeaturePolicy == policy)
-        for output in MPVPlayerConfiguration.VideoOutput.allCases {
-            let configuration = MPVPlayerConfiguration(nativeVideoFeaturePolicy: policy, videoOutput: output)
-            #expect(configuration.nativeVideoFeaturePolicy == policy)
-        }
-    }
-
-    @MainActor
-    @Test
-    func `implicit native output preserves selected authored subtitles when DV arrives`() {
-        let player = MPVPlayer(configuration: .init(autoPlay: false))
-        let subtitle = MPVMediaTrack(id: 1, type: .subtitle, codec: "ass", isSelected: true)
-        player.apply(.init(generation: nil, update: .media(.init(tracks: [subtitle]))))
-        player.updateDolbyVisionStatus(.init(sourceProfile: 8))
-        #expect(player.videoOutput == .metal)
-        #expect(player.videoFeatureRequestResult?.outcome == .switchedToMetal)
-        #expect(player.videoFeatureRequestResult?.requestedFeatures == [.nativeSubtitles])
+        #expect(configuration.videoOutput == output)
+        #expect(MPVPlayerConfiguration(hdrPolicy: hdrPolicy).videoOutput == .sampleBuffer)
     }
 }

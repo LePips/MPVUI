@@ -1,6 +1,7 @@
 import Foundation
 
 /// SDR precision and gamut are independent of extended dynamic range.
+/// - Note: Has no effect with sample-buffer output; AVFoundation manages precision.
 public enum MPVSDROutputPolicy: String, CaseIterable, Equatable, Sendable {
     /// Linear float Display P3 on wide-gamut screens; 8-bit sRGB elsewhere.
     case automatic
@@ -20,7 +21,7 @@ public struct MPVColorManagement: Equatable, Sendable {
         /// ColorSync converts the accurately tagged layer to the current display.
         /// mpv's automatic ICC selection is disabled to avoid a second transform.
         case automatic
-        /// macOS SDR only. libplacebo converts to this calibrated RGB display
+        /// macOS SDR Metal only. libplacebo converts to this calibrated RGB display
         /// profile. The layer is tagged with the current system display profile
         /// so ColorSync performs an identity display conversion. Use a profile
         /// calibrated for the connected screen; this does not install it globally.
@@ -68,14 +69,17 @@ public struct MPVColorManagement: Equatable, Sendable {
     /// SDR reference white used in HDR mapping, in cd/m². This describes the
     /// rendering model; it does not set or measure physical screen luminance.
     /// Clamped to `10...1000` and rounded; non-finite values use 203.
+    /// - Note: Overrides have no effect with sample-buffer output.
     public let referenceWhite: Double
 
     // MARK: - Policies
 
     /// The requested display conversion profile.
+    /// - Note: Overrides have no effect with sample-buffer output.
     public let displayProfile: DisplayProfile
 
     /// The requested SDR viewing behavior.
+    /// - Note: Overrides have no effect with sample-buffer output.
     public let sdrViewing: SDRViewing
 
     /// Creates color settings with reference white clamped to 10...1000 cd/m².

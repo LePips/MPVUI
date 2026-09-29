@@ -112,32 +112,6 @@ public final class MPVPictureInPictureController {
         isVideoOverlayActive = false
     }
 
-    /// Preserve this public facade and its callbacks across a per-file fallback.
-    /// macOS hosts the entire view and can keep presenting after a backend change.
-    func videoOutputWillChange() {
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        sampleBufferController?.invalidate()
-        setNativeRendering(false)
-        sampleBufferController = nil
-        isSupported = false
-        isPossible = false
-        isActive = false
-        isTransitioning = false
-        isSuspended = false
-        renderSize = .zero
-        lastError = nil
-        #endif
-    }
-
-    func videoOutputDidChange() {
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        if let player {
-            configureSampleBufferController(for: player)
-        }
-        #endif
-        refreshPlaybackState()
-    }
-
     /// Request PiP after `isPossible` becomes true. Errors are observable.
     public func start() {
         guard isSupported else {

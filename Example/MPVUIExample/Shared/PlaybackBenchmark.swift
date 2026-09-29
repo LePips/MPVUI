@@ -183,7 +183,7 @@ private struct PlaybackBenchmarkSettings {
         .init(
             additionalOptions: options, audio: .init(audioSession: .hostManaged),
             autoPlay: true, hardwareDecoding: softwareDecoding ? .disabled : .automatic,
-            logLevel: .none, sdrOutput: sdrOutput, videoOutput: backend, volume: 100
+            logLevel: .none, sdrOutput: sdrOutput, videoOutput: backend ?? .sampleBuffer, volume: 100
         )
     }
 
@@ -594,8 +594,7 @@ private final class PlaybackBenchmark {
         if let player = mpv {
             phase.recordDiagnostics(
                 player.playbackDiagnostics,
-                backend: player.videoOutput.rawValue,
-                outputFallback: player.videoOutputFallbackReason
+                backend: player.videoOutput.rawValue
             )
         }
         let uptime = ProcessInfo.processInfo.systemUptime
@@ -625,7 +624,6 @@ private final class PlaybackBenchmark {
             }
             return [
                 "effectiveBackend": player.videoOutput.rawValue,
-                "videoOutputFallbackReason": nullable(player.videoOutputFallbackReason),
                 "fallbackReasons": d.fallbackReasons, "decoderSession": session,
                 "selectedDecoder": nullable(d.decoder.selectedDecoder),
                 "videoToolboxSessionUsesHardware": nullable(d.decoder.videoToolboxSessionUsesHardware),
@@ -759,7 +757,7 @@ private struct BenchmarkPhase {
         lastDiagnosticsRevision = revision
     }
 
-    mutating func recordDiagnostics(_ value: MPVPlaybackDiagnostics, backend: String, outputFallback: String?) {
+    mutating func recordDiagnostics(_ value: MPVPlaybackDiagnostics, backend: String) {
         let revision = value.engineActivity.diagnosticsSnapshots
         guard revision != lastDiagnosticsRevision else { return }
         lastDiagnosticsRevision = revision
@@ -774,7 +772,7 @@ private struct BenchmarkPhase {
         diagnosticSamples.append([
             "observedElapsedSeconds": elapsed, "diagnosticsRevision": revision,
             "audioVideoDriftSeconds": finite(value.audioVideoDriftSeconds),
-            "effectiveBackend": backend, "videoOutputFallbackReason": nullable(outputFallback),
+            "effectiveBackend": backend,
             "decoderSession": session, "selectedDecoder": nullable(value.decoder.selectedDecoder),
             "decodedPixelFormat": nullable(value.decoder.decodedPixelFormat),
             "videoToolboxSessionUsesHardware": nullable(value.decoder.videoToolboxSessionUsesHardware),

@@ -26,8 +26,8 @@ final class MPVEngine: @unchecked Sendable {
     // MARK: - Handle and rendering state
 
     var handle: OpaquePointer?
-    var videoOutput: MPVPlayerConfiguration.VideoOutput
-    var didRequestNativeOutputFallback = false
+    let videoOutput: MPVPlayerConfiguration.VideoOutput
+    var didRejectNativeOutput = false
     var currentGeneration: UInt64 = 0
     var renderTarget: MPVRenderTarget?
     var outputHeadroom: Double = 1
@@ -51,16 +51,6 @@ final class MPVEngine: @unchecked Sendable {
     var externalSecurityScopedURLs: Set<URL> = []
     var desiredProperties: [String: String]
     var commandMutatedOptions: Set<String> = []
-    struct PendingRendererCommand {
-        let generation: UInt64
-        let arguments: [String]
-
-        var byteCount: Int {
-            arguments.reduce(0) { $0 + $1.utf8.count }
-        }
-    }
-
-    var pendingRendererCommands: [PendingRendererCommand] = []
     var isLoading = false
     var isFileLoaded = false
     var isPaused = false

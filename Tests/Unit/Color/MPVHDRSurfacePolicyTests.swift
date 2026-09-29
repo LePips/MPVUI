@@ -1,8 +1,19 @@
+import Foundation
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .hdr))
 struct MPVHDRSurfacePolicyTests {
+    @Test(arguments: [false, true])
+    func `legacy render targets carry an explicit contrast contract`(hdr: Bool) {
+        let target = MPVRenderTarget(
+            layerAddress: 0, layerOwner: NSObject(), drawableWidth: 640, drawableHeight: 360,
+            usesExtendedDynamicRange: hdr, displaySupportsExtendedDynamicRange: true, outputHeadroom: 4
+        )
+        let options = Dictionary(uniqueKeysWithValues: MPVEngine.colorTargetOptions(for: target))
+        #expect(options["target-contrast"] == (hdr ? "inf" : "auto"))
+    }
+
     @Test(arguments: [(Double(2), "406"), (0, "203"), (.nan, "203"), (.infinity, "203"), (.greatestFiniteMagnitude, "203"), (100, "10000")])
     func `legacy color targets bound peak luminance and retain explicit SDR defaults`(headroom: Double, peak: String) {
         let hdr = Dictionary(uniqueKeysWithValues: MPVEngine.colorTargetOptions(usesExtendedDynamicRange: true, outputHeadroom: headroom))

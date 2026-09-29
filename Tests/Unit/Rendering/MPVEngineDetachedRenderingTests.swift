@@ -40,24 +40,6 @@ struct MPVEngineDetachedRenderingTests {
     }
 
     @Test
-    func `switching a retired backend on the engine queue clears obsolete load intent`() {
-        let engine = MPVEngine(configuration: .init(videoOutput: .sampleBuffer)) { _ in }
-        engine.queue.sync {
-            engine.renderTarget = target()
-            engine.sourceURL = TestPaths.baselineMedia
-            engine.needsSourceLoad = true
-            engine.playbackRequestIsActive = true
-            engine.pendingStartTime = .seconds(12)
-            engine.switchVideoOutputSynchronously(to: .metal, preservePlayback: false)
-            #expect(engine.videoOutput == .metal)
-            #expect(engine.renderTarget == nil && engine.sourceURL == nil)
-            #expect(!engine.needsSourceLoad && !engine.playbackRequestIsActive)
-            #expect(engine.pendingStartTime == nil)
-            engine.shutdownSynchronously()
-        }
-    }
-
-    @Test
     func `queued detach retires only its own target and remains safe on repeated shutdown`() async {
         let engine = MPVEngine(configuration: .init()) { _ in }
         engine.queue.sync { engine.renderTarget = target() }

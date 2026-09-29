@@ -9,7 +9,7 @@ struct MPVEDRLiveUpdateTests {
     @Test
     func `constrained Metal HDR permits the requested compositor adaptation`() {
         guard #available(macOS 26.0, *) else { return }
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .constrained))
+        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .constrained, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.configureMetalLayer(usesExtendedDynamicRange: true, scale: 1, outputHeadroom: 2)
         #expect(surface.metalLayer.preferredDynamicRange == .constrainedHigh)
@@ -54,7 +54,7 @@ struct MPVEDRLiveUpdateTests {
 
     @Test
     func `brightness changes use current headroom without reloading playback`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .always))
+        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .always, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.edrHeadroomOverrideForTesting = (current: 2, potential: 8)
         let window = NSWindow(

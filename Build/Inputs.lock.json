@@ -837,6 +837,11 @@
           "id": "0015-apple-spatial-audio",
           "path": "Build/Patches/mpv/0015-apple-spatial-audio.patch",
           "sha256": "2a19ffc239b4a9e72fc7e8c637a813e91b5cfbd7455663b6264792fdca59b2e2"
+        },
+        {
+          "id": "0016-native-audio-clock-wakeup",
+          "path": "Build/Patches/mpv/0016-native-audio-clock-wakeup.patch",
+          "sha256": "563615ef6c5ce8b81d065a9baeea89624e6371467c463029991096103d764fd2"
         }
       ],
       "ref": "v0.41.0",

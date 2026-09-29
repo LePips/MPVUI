@@ -55,7 +55,7 @@ struct MPVNativePresentationTests {
             }
             previous = current
             try #require(player.state == .playing && !player.isPaused)
-            try #require(player.videoOutput == .sampleBuffer && player.videoOutputFallbackReason == nil)
+            try #require(player.videoOutput == .sampleBuffer && player.lastError == nil)
         }
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         let progress = player.position.seconds - startPosition

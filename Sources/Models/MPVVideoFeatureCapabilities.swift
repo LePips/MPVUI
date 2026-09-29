@@ -1,10 +1,13 @@
 /// Features whose implementation depends on the current item and renderer.
 public enum MPVVideoFeature: String, CaseIterable, Hashable, Sendable {
     /// ASS/SSA and bitmap subtitles composed by mpv into the video frame.
+    /// - Note: Unavailable for native Dolby Vision sample buffers.
     case nativeSubtitles
     /// Graphics rasterized into the video sample, including iOS PiP overlays.
+    /// - Note: Unavailable for native Dolby Vision sample buffers.
     case bakedOverlays
     /// Scaling and repositioning video content within the output frame.
+    /// - Note: Unavailable for native Dolby Vision sample buffers.
     case zoomAndPan
     /// App UI placed above the inline video. It does not modify decoder pixels.
     case inlineSwiftUIOverlays
@@ -115,11 +118,7 @@ public struct MPVVideoFeatureRequestResult: Equatable, Sendable {
         case available
         /// The request is waiting for video metadata.
         case awaitingVideoMetadata
-        /// The requested features require a switch to Metal.
-        case requiresMetalFallback
-        /// The request switched playback to Metal.
-        case switchedToMetal
-        /// The requested features cannot be provided under the current policy.
+        /// The requested features cannot be provided by the selected renderer.
         case unavailable
     }
 
@@ -129,10 +128,6 @@ public struct MPVVideoFeatureRequestResult: Equatable, Sendable {
     public let requestedFeatures: Set<MPVVideoFeature>
     /// Requested features unavailable on the evaluated renderer.
     public let unavailableFeatures: Set<MPVVideoFeature>
-    /// A renderer switch reloads the item while preserving position and intent.
-    public let requiresReload: Bool
-    /// Whether switching renderers removes picture-in-picture support.
-    public let losesPictureInPicture: Bool
     /// An explanation of the request outcome, if available.
     public let reason: String?
 }

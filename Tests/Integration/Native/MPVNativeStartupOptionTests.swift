@@ -45,6 +45,8 @@ struct MPVNativeStartupOptionTests {
         ("target-prim", "display-p3"),
         ("target-trc", "linear"),
         ("target-peak", "812"),
+        ("target-contrast", "inf"),
+        ("target-contrast", "auto"),
         ("target-peak", "203"),
         ("target-trc", "srgb"),
         ("target-peak", "auto"),

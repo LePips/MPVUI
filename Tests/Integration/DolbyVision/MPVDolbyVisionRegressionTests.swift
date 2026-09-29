@@ -19,7 +19,7 @@ private let dolbyVisionFixture = TestPaths.dolbyVisionMedia
 struct MPVDolbyVisionRegressionTests {
     @MainActor
     @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
-    func `software profile 5 falls back without public logging and restores native for SDR`() async throws {
+    func `software profile 5 fails without switching and a later SDR load recovers`() async throws {
         let host = Host(hardwareDecoding: .disabled, startTime: .seconds(1), playbackRate: 1.5)
         defer { host.close() }
         let player = host.player
@@ -33,34 +33,26 @@ struct MPVDolbyVisionRegressionTests {
         var exposedUnvalidatedFrame = false
         try await eventually("software Profile 5 fallback") {
             exposedUnvalidatedFrame = exposedUnvalidatedFrame || rejectedLayer.isReadyForDisplay
-            return player.videoOutput == .metal && player.state == .paused
-                && abs(player.position.seconds - 1) < 0.15
+            if case .failed(.nativeVideoOutputUnavailable) = player.state {
+                return true
+            }
+            return false
         }
         #expect(!exposedUnvalidatedFrame)
         #expect(rejectedLayer.sampleBufferRenderer.displayedPixelBuffer() == nil)
-        #expect(player.videoOutputFallbackReason?.contains("Dolby Vision") == true)
+        #expect(player.videoOutput == .sampleBuffer)
         #expect(player.configuration.videoOutput == .sampleBuffer)
         #expect(player.isPaused)
         #expect(player.playbackRate == 1.5)
         #expect(player.mediaInformation.sourceURL == dolbyVisionFixture)
-        #expect(player.lastError == nil)
+        #expect(player.lastError != nil)
         #expect(player.pictureInPicture === pictureInPicture)
         #expect(pictureInPicture.allowsAutomaticStartFromInline)
         #expect(await pictureInPicture.restoreUserInterface?() == true)
         #expect(logs.isEmpty, "Internal native capability errors must not enable public log forwarding.")
         let fallback = await player.lifecycleDiagnostics()
-        // Check the replacement engine really resumes the same timeline.
-        player.play()
-        try await eventually("fallback playback advancing") {
-            player.state == .playing && player.position.seconds > 1.2
-        }
-        #expect(player.playbackRate == 1.5)
-        player.pause()
-        try await eventually("fallback pause") { player.state == .paused }
-
         player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(0.4))
         #expect(player.videoOutput == .sampleBuffer)
-        #expect(player.videoOutputFallbackReason == nil)
         #expect(player.pictureInPicture === pictureInPicture)
         try await eventually("SDR native restoration") {
             player.state == .paused && player.sampleBufferDisplayLayer.isReadyForDisplay
@@ -80,20 +72,22 @@ struct MPVDolbyVisionRegressionTests {
 
     @MainActor
     @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
-    func `hardware profile 5 requires real dolby vision session and RPU or falls back`() async throws {
+    func `hardware profile 5 requires a validated session or reports native failure`() async throws {
         let host = Host(hardwareDecoding: .videoToolbox, startTime: .seconds(25), logLevel: .debug)
         defer { host.close() }
         let player = host.player
         let layer = player.sampleBufferDisplayLayer
         player.load(dolbyVisionFixture)
         try await eventually("hardware Profile 5 output decision") {
-            player.state == .paused && (player.videoOutput == .metal
-                || layer.sampleBufferRenderer.displayedPixelBuffer() != nil)
+            if case .failed(.nativeVideoOutputUnavailable) = player.state {
+                return true
+            }
+            return player.state == .paused && layer.sampleBufferRenderer.displayedPixelBuffer() != nil
         }
         #expect(player.isPaused)
         #expect(abs(player.position.seconds - 25) < 0.15)
-        #expect(player.lastError == nil)
-        if player.videoOutput == .sampleBuffer {
+        #expect(player.videoOutput == .sampleBuffer)
+        if player.lastError == nil {
             let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
             let attachments = CVBufferCopyAttachments(buffer, .shouldPropagate) as? [String: Any] ?? [:]
             let internalAttachments = CVBufferCopyAttachments(buffer, .shouldNotPropagate) as? [String: Any] ?? [:]
@@ -106,7 +100,6 @@ struct MPVDolbyVisionRegressionTests {
             let rpu = try #require(attachments["DolbyVisionRPUData"] as? Data)
             try #require(!rpu.isEmpty)
             #expect(player.mediaInformation.hardwareDecoder == "videotoolbox")
-            #expect(player.videoOutputFallbackReason == nil)
             #expect(layer.sampleBufferRenderer.status == .rendering)
             let overlay = ImageRenderer(content: Color.white.frame(width: 32, height: 32))
             let bitmap = try #require(overlay.cgImage.flatMap(MPVVideoOverlayBitmap.init))
@@ -119,43 +112,27 @@ struct MPVDolbyVisionRegressionTests {
             )
             try await host.holdNativeWindowForVisualValidationIfRequested()
         } else {
-            #expect(player.videoOutputFallbackReason?.contains("Dolby Vision") == true)
+            guard case .nativeVideoOutputUnavailable = player.lastError else {
+                Issue.record("Expected a native output error: \(String(describing: player.lastError))")
+                return
+            }
             #expect(!layer.isReadyForDisplay)
             #expect(layer.sampleBufferRenderer.displayedPixelBuffer() == nil)
-            print("DOLBY_VISION hardware: safe Metal fallback, reason=\(player.videoOutputFallbackReason ?? "missing")")
-            let image = try await host.screenshot(named: "hardware-fallback")
-            let actual = try pixels(image)
-            #expect(actual.meanBrightness > 0.02)
-            expectChartColors(actual)
         }
     }
 
     @MainActor
     @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
-    func `software fallback colors match GPU and known chart patches`() async throws {
-        let fallback = Host(hardwareDecoding: .disabled, startTime: .seconds(25))
-        defer { fallback.close() }
-        fallback.player.load(dolbyVisionFixture)
-        try await eventually("software fallback color frame") {
-            fallback.player.videoOutput == .metal && fallback.player.state == .paused
-        }
-        let fallbackImage = try await fallback.screenshot(named: "software-fallback")
-        let reference = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .seconds(25))
-        defer { reference.close() }
-        reference.player.load(dolbyVisionFixture)
-        try await eventually("direct gpu-next color frame") { reference.player.state == .paused }
-        let gpuImage = try await reference.screenshot(named: "direct-gpu-next")
-        let actual = try pixels(fallbackImage)
-        let gpu = try pixels(gpuImage)
-        let gpuDifference = actual.meanAbsoluteDifference(from: gpu)
-        print(
-            "DOLBY_VISION color: fallback-vs-gpu RGB mean error=\(gpuDifference), brightness=\(actual.meanBrightness), images=\(fallback.artifactDirectory.path), gpu=\(reference.artifactDirectory.path)"
-        )
+    func `explicit Metal software colors match known chart patches`() async throws {
+        let host = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .seconds(25))
+        defer { host.close() }
+        host.player.load(dolbyVisionFixture)
+        try await eventually("explicit Metal color frame") { host.player.state == .paused }
+        let image = try await host.screenshot(named: "explicit-metal")
+        let actual = try pixels(image)
         #expect(actual.meanBrightness > 0.02, "A black screenshot cannot validate color.")
-        #expect(gpuDifference < 0.02, "Fallback must render the same colors as direct gpu-next.")
         expectChartColors(actual)
-        #expect(fallback.player.lastError == nil)
-        #expect(reference.player.lastError == nil)
+        #expect(host.player.lastError == nil)
     }
 
     private func expectChartColors(_ actual: Pixels) {

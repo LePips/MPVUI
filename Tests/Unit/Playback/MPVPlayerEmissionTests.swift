@@ -77,19 +77,18 @@ struct MPVPlayerEmissionTests {
         let player = MPVPlayer()
         player.setProperty(property, to: "2")
         #expect(player.videoFeatureRequestResult?.requestedFeatures == [.zoomAndPan])
-        #expect(player.videoFeatureRequestResult?.outcome == .switchedToMetal)
+        #expect(player.videoFeatureRequestResult?.outcome == .awaitingVideoMetadata)
     }
 
     @Test
     func `selected authored subtitles reevaluate feature policy when Dolby Vision metadata arrives`() {
-        let player = MPVPlayer(configuration: .init(nativeVideoFeaturePolicy: .preferFeatures, videoOutput: .sampleBuffer))
+        let player = MPVPlayer(configuration: .init(videoOutput: .sampleBuffer))
         let subtitle = MPVMediaTrack(id: 1, type: .subtitle, codec: "ass", isSelected: true)
         player.apply(.init(generation: nil, update: .media(.init(tracks: [subtitle]))))
         player.updateDolbyVisionStatus(.init(sourceProfile: 5))
-        #expect(player.videoOutput == .metal)
-        #expect(player.videoFeatureRequestResult?.outcome == .switchedToMetal)
+        #expect(player.videoOutput == .sampleBuffer)
+        #expect(player.videoFeatureRequestResult?.outcome == .unavailable)
         #expect(player.videoFeatureRequestResult?.requestedFeatures == [.nativeSubtitles])
-        #expect(player.videoFeatureRequestResult?.requiresReload == true)
         #expect(player.lastError == nil)
     }
 }

@@ -25,8 +25,6 @@ public struct MPVPresentationStatus: Equatable, Sendable {
         case displayDoesNotSupportHDR
         /// The display currently lacks the required EDR headroom.
         case insufficientCurrentHeadroom
-        /// Native video output is unavailable for the supplied reason.
-        case nativeOutputUnavailable(String)
         /// A live output configuration update failed with the supplied reason.
         case liveConfigurationFailed(String)
     }

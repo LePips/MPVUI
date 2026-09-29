@@ -540,7 +540,7 @@ struct MPVPerformanceBenchmarkTests {
         try #require(player.lastError == nil, "Playback error: \(String(describing: player.lastError))")
         // A loop emits seeking/restart events while remaining in active playback.
         try #require(player.state == .playing || player.state == .seeking, "Playback stopped during benchmark: \(player.state)")
-        try #require(player.videoOutput == backend && player.videoOutputFallbackReason == nil, "Benchmark output fell back.")
+        try #require(player.videoOutput == backend && player.lastError == nil, "Benchmark output fell back.")
         try #require(player.playbackDiagnostics.decoder.session == .software)
         try #require(player.playbackDiagnostics.fallbackReasons.isEmpty)
         if backend == .metal {

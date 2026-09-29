@@ -1,0 +1,27 @@
+diff --git a/audio/out/buffer.c b/audio/out/buffer.c
+--- a/audio/out/buffer.c
++++ b/audio/out/buffer.c
+@@ -66,6 +66,7 @@
+     int64_t device_delay_ns;
+     int64_t device_clock_time_ns;
+     double device_clock_rate;
++    int64_t device_clock_wakeup_ns;
+ 
+     int64_t end_time_ns;        // absolute output time of last played sample
+     int64_t queued_time_ns;     // duration of samples that have been queued to
+@@ -206,6 +207,15 @@
+         p->device_delay_ns = MPMAX(delay_ns, 0);
+         p->device_clock_time_ns = mp_time_ns();
+         p->device_clock_rate = isfinite(clock_rate) ? MPCLAMP(clock_rate, 0, 4) : 0;
++        // After compressed input drains, only the device clock advances.
++        // Wake the core to refresh playback PTS and observers, at most 20 Hz.
++        // Loader requests can publish more often than the driver's timer.
++        if (!p->paused && p->device_clock_rate > 0 &&
++            p->device_clock_time_ns - p->device_clock_wakeup_ns >= MP_TIME_MS_TO_NS(50))
++        {
++            p->device_clock_wakeup_ns = p->device_clock_time_ns;
++            wakeup = true;
++        }
+         if (!playing) {
+             p->playing = false;
+             p->streaming = false;

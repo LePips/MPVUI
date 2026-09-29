@@ -1,12 +1,12 @@
 import Dispatch
 import Foundation
 
-// Attaches render surfaces and applies live size, color, and backend changes.
+// Attaches render surfaces and applies live size and color changes.
 extension MPVEngine {
     func attach(to target: MPVRenderTarget) {
         queue.async { [weak self] in
             guard let self else { return }
-            guard !self.didRequestNativeOutputFallback else { return }
+            guard !self.didRejectNativeOutput else { return }
 
             if let currentTarget = self.renderTarget, currentTarget.layerAddress == target.layerAddress {
                 if self.handle != nil {
@@ -162,38 +162,6 @@ extension MPVEngine {
         }
     }
 
-    /// Switch only after the old VO has retired; each backend requires a
-    /// different layer type. The current view supplies the new target next.
-    func switchVideoOutputSynchronously(
-        to videoOutput: MPVPlayerConfiguration.VideoOutput,
-        preservePlayback: Bool,
-        fallbackReason: MPVPresentationStatus.FallbackReason? = nil
-    ) {
-        let change = {
-            self.destroyHandle(preservePlayback: preservePlayback)
-            self.renderTarget = nil
-            self.videoOutput = videoOutput
-            self.presentationFallbackReason = fallbackReason
-            self.liveConfigurationFailure = nil
-            self.didRequestNativeOutputFallback = false
-            self.fatalPlaybackError = nil
-            if !preservePlayback {
-                // destroyHandle may have no handle left after a rejected VO.
-                // Never reload the previous URL while attaching the new layer.
-                self.sourceURL = nil
-                self.pendingStartTime = nil
-                self.pendingSeekAfterLoad = nil
-                self.needsSourceLoad = false
-                self.playbackRequestIsActive = false
-            }
-        }
-        if DispatchQueue.getSpecific(key: queueKey) == queueValue {
-            change()
-        } else {
-            queue.sync(execute: change)
-        }
-    }
-
     private func updateRenderTargetImmediately(_ target: MPVRenderTarget, previous: MPVRenderTarget) {
         guard !previous.matches(target) else { return }
         let changedColor = !previous.matchesSurfaceConfiguration(target)
@@ -309,10 +277,14 @@ extension MPVEngine {
     }
 
     static func colorTargetOptions(for target: MPVRenderTarget) -> [(String, String)] {
-        target.colorConfiguration?.options ?? colorTargetOptions(
+        let options = target.colorConfiguration?.options ?? colorTargetOptions(
             usesExtendedDynamicRange: target.usesExtendedDynamicRange,
             outputHeadroom: target.outputHeadroom
         )
+        // Linear EDR is an intermediate signal for Apple's compositor, not a
+        // display with an assumed SDR contrast. mpv uses 1e-7 nits for `inf`.
+        // Apply to explicit color configurations too, and clear it on SDR return.
+        return options + [("target-contrast", target.usesExtendedDynamicRange ? "inf" : "auto")]
     }
 
     static func colorTargetOptions(

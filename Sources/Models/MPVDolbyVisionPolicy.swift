@@ -1,7 +1,7 @@
 /// Dolby Vision behavior requested when creating a native decoder.
 public enum MPVDolbyVisionPolicy: String, CaseIterable, Equatable, Sendable {
     /// Do not opt into native Profile 7 conversion. Unsupported native streams
-    /// use Metal; this does not establish enhancement-layer reproduction.
+    /// fail native playback; this does not establish enhancement-layer reproduction.
     case strict
 
     /// Explicitly permit lossy Profile 7 to Profile 8.1 compatibility conversion.
@@ -17,14 +17,4 @@ public enum MPVDolbyVisionPolicy: String, CaseIterable, Equatable, Sendable {
     var nativeMPVValue: String {
         self == .strict ? "no" : "p8.1"
     }
-}
-
-/// Selects the tradeoff when requested video features would modify a native
-/// Dolby Vision frame and invalidate its RPU metadata.
-public enum MPVNativeVideoFeaturePolicy: String, CaseIterable, Equatable, Sendable {
-    /// Keep native Dolby Vision and report unavailable features.
-    case preserveDolbyVision
-    /// Reload with Metal when a requested feature requires compositing or geometry.
-    /// On iOS this also removes native picture-in-picture support.
-    case preferFeatures
 }

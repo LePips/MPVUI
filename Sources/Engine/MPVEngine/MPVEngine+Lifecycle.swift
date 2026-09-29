@@ -46,7 +46,7 @@ extension MPVEngine {
     func createHandle(allowStopped: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
 
-        guard let renderTarget, allowStopped || !isStoppedForResourceRelease else { return }
+        guard let renderTarget, !didRejectNativeOutput, allowStopped || !isStoppedForResourceRelease else { return }
         resetMediaObservations()
         liveConfigurationFailure = nil
         fatalPlaybackError = nil
@@ -208,9 +208,6 @@ extension MPVEngine {
 
     func destroyHandle(preservePlayback: Bool) {
         dispatchPrecondition(condition: .onQueue(queue))
-        if !preservePlayback {
-            pendingRendererCommands.removeAll()
-        }
         cancelSubtitleQueries()
         diagnosticsTimer?.cancel()
         diagnosticsTimer = nil

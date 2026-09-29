@@ -8,7 +8,7 @@ import Testing
 struct MPVIdleColorUpdateTests {
     @Test
     func `idle color changes configure the first frame without recreating the handle`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled))
+        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.wideGamutOverrideForTesting = false
         surface.edrHeadroomOverrideForTesting = (current: 1, potential: 1)

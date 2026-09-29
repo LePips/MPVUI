@@ -1,7 +1,6 @@
 enum MPVEngineUpdate: Sendable {
     case state(MPVPlaybackState)
     case paused(Bool)
-    case nativeVideoOutputUnavailable(String)
     case timing(position: Duration, duration: Duration, isSeekable: Bool)
     case buffer(MPVBufferStatus)
     case media(MPVMediaInformation)

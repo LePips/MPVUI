@@ -473,23 +473,6 @@ public final class MPVPlatformVideoPlayer: PlatformView {
 }
 
 extension MPVPlatformVideoPlayer {
-    /// The player has synchronously retired the previous native target.
-    /// Discard cached attachment state without detaching the new backend.
-    func videoOutputDidChange() {
-        stopTrackingPresentationGeometry()
-        resizeCoordinator.deactivate()
-        attachedLayerAddress = nil
-        surfaceConfiguration = nil
-        #if os(macOS) && !targetEnvironment(macCatalyst)
-        endAppKitAnimatedGeometryTransition()
-        isAppKitContinuousGeometryChange = false
-        #elseif canImport(UIKit)
-        registeredTransitionIdentifier = nil
-        lastUncoordinatedLayoutUptimeNanoseconds = nil
-        #endif
-        activateRenderingSurface()
-    }
-
     func retainRenderingForPictureInPicture() {
         guard isActiveRenderingSurface else { return }
         isRetainedForPictureInPicture = true
@@ -527,8 +510,6 @@ extension MPVPlatformVideoPlayer {
             policyFallbackReason: configuration.policyFallbackReason,
             colorConfiguration: configuration.colorConfiguration
         )
-        // A policy may select a backend fallback synchronously.
-        guard player.videoOutput == .sampleBuffer else { return }
         player.attachSampleBufferOutput()
         updateDisplayMatching()
     }

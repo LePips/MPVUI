@@ -231,13 +231,18 @@ struct MPVSemanticSubtitleIntegrationTests {
         player.selectSubtitle(secondary.id)
         try #require(try await waitForPlayer(player) { $0.selectedSubtitle()?.id == secondary.id })
 
-        // Capture non-default timing and hidden state during a real renderer replacement.
+        // Capture non-default timing and hidden state during native client recreation.
         player.setSubtitleDelay(.seconds(-5))
         player.setSubtitlesVisible(false, for: .secondary)
         before = recorder.values.count
-        player.handleNativeVideoOutputUnavailable("Subtitle role restoration test")
+        player.stop()
+        try #require(try await waitForPlayer(player) { $0.state == .stopped })
+        player.play()
+        player.pause()
+        player.seek(to: .seconds(2))
         try #require(try await waitForPlayer(player) {
-            $0.videoOutput == .metal && $0.state == .paused
+            $0.videoOutput == .sampleBuffer && $0.state == .paused
+                && abs($0.position.seconds - 2) < 0.2
                 && $0.selectedSubtitle()?.id == secondary.id
                 && $0.selectedSubtitle(for: .secondary)?.id == primary.id
         })

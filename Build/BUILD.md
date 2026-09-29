@@ -3,7 +3,7 @@
 - `Build/mpvbuild` applies [patches](PATCHES.md) and packages mpv, FFmpeg, and their dependencies as `Libmpv.xcframework.zip`.
 - SwiftPM imports the framework as `Libmpv-GPL`.
 - [Inputs.lock.json](Inputs.lock.json) pins sources, patches, dependencies, and toolchain versions
--  [PLATFORMS.md](PLATFORMS.md) lists native build targets
+- [PLATFORMS.md](PLATFORMS.md) lists native build targets
 - `Package.swift` defines the Swift wrapper's supported platforms
 
 ## Local build

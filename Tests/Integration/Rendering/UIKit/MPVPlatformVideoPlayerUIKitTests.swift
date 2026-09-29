@@ -14,7 +14,8 @@ struct MPVPlatformVideoPlayerUIKitTests {
             configuration: .init(
                 autoPlay: false,
                 hardwareDecoding: .disabled,
-                hdrPolicy: .disabled
+                hdrPolicy: .disabled,
+                videoOutput: .metal
             )
         )
         let surface = MPVPlatformVideoPlayer(player: player)
@@ -198,7 +199,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
     @Test
     func `failed transition registration falls back to one latest final`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         let viewController = TransitionHostingViewController()
@@ -286,7 +287,8 @@ struct MPVPlatformVideoPlayerUIKitTests {
             configuration: .init(
                 autoPlay: true,
                 hardwareDecoding: .disabled,
-                hdrPolicy: .always
+                hdrPolicy: .always,
+                videoOutput: .metal
             )
         )
         let surface = MPVPlatformVideoPlayer(player: player)

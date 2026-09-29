@@ -192,7 +192,6 @@ extension MPVEngine {
             refreshState()
             // FILE_LOADED can publish .paused before a frame exists. A restart
             // also occurs for paused playback after its first frame is ready.
-            performPendingRendererCommands()
 
             if let request = pendingPiPSeek, request.sawSeek,
                abs((lastPosition - request.target).seconds) < 1
@@ -389,8 +388,6 @@ extension MPVEngine {
             publishState(.loading)
             return
         }
-
-        pendingRendererCommands.removeAll()
 
         // Typed stop requests publish synchronously after mpv accepts the
         // command, so any STOP that reaches this active-request path belongs

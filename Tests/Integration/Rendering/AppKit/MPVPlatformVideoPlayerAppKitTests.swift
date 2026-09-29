@@ -62,7 +62,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
     @Test
     @MainActor
     func `patched external surface size resizes in place`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled))
+        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         let layer = surface.metalLayer
         let token = UUID()
@@ -127,7 +127,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
     @MainActor
     func `backing layer replacement detaches stale target and reattaches once`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
@@ -187,7 +187,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
     @MainActor
     func `fullscreen final boundary submits once and cancels fallback`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
@@ -285,7 +285,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         async throws
     {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
@@ -421,7 +421,8 @@ struct MPVPlatformVideoPlayerAppKitTests {
             configuration: .init(
                 autoPlay: true,
                 hardwareDecoding: .disabled,
-                hdrPolicy: .disabled
+                hdrPolicy: .disabled,
+                videoOutput: .metal
             )
         )
         let surface = MPVPlatformVideoPlayer(player: player)
@@ -637,7 +638,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         invalidFrameSize: CGSize
     ) async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled)
+            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.displayScaleOverrideForTesting = 1
@@ -704,7 +705,8 @@ struct MPVPlatformVideoPlayerAppKitTests {
             configuration: .init(
                 autoPlay: true,
                 hardwareDecoding: .disabled,
-                hdrPolicy: .disabled
+                hdrPolicy: .disabled,
+                videoOutput: .metal
             )
         )
         let surface = MPVPlatformVideoPlayer(player: player)
@@ -1042,7 +1044,8 @@ struct MPVPlatformVideoPlayerAppKitTests {
             configuration: .init(
                 autoPlay: true,
                 hdrPolicy: .always,
-                logLevel: .debug
+                logLevel: .debug,
+                videoOutput: .metal
             )
         )
         let nativeSurfaceConfigurations = NativeSurfaceConfigurationLogRecorder()

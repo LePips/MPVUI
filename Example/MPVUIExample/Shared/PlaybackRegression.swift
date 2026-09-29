@@ -104,7 +104,7 @@ private struct RegressionSettings {
             autoPlay: true,
             hardwareDecoding: softwareDecoding ? .disabled : .automatic,
             logLevel: .none,
-            videoOutput: backend
+            videoOutput: backend ?? .sampleBuffer
         )
     }
 
@@ -408,7 +408,7 @@ private final class PlaybackRegression {
         }
         if let player, let expectedBackend {
             try require(player.videoOutput == expectedBackend, "Playback changed the expected video backend")
-            try require(player.videoOutputFallbackReason == nil, "Unexpected video output fallback")
+            try require(player.lastError == nil, "Unexpected playback error")
         }
     }
 
