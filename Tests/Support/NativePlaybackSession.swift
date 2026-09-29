@@ -31,6 +31,14 @@ final class NativePlaybackSession {
         mpv_terminate_destroy(handle)
     }
 
+    func registerStream(
+        protocol name: String,
+        userData: UnsafeMutableRawPointer,
+        open: mpv_stream_cb_open_ro_fn
+    ) throws {
+        try #require(mpv_stream_cb_add_ro(handle, name, userData, open) >= 0)
+    }
+
     func property(_ name: String) -> MPVNodeValue? {
         var node = mpv_node()
         guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &node) >= 0 else { return nil }

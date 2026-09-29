@@ -842,6 +842,11 @@
           "id": "0016-native-audio-clock-wakeup",
           "path": "Build/Patches/mpv/0016-native-audio-clock-wakeup.patch",
           "sha256": "563615ef6c5ce8b81d065a9baeea89624e6371467c463029991096103d764fd2"
+        },
+        {
+          "id": "0017-track-switch-buffering",
+          "path": "Build/Patches/mpv/0017-track-switch-buffering.patch",
+          "sha256": "f3952cc333df592c417f223872b74cffbb9ddca48126d41fc8828ad988db44c0"
         }
       ],
       "ref": "v0.41.0",
