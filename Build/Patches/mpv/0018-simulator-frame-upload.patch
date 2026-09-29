@@ -1,0 +1,39 @@
+Subject: [PATCH] Copy software frame uploads on Apple simulators
+
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -19,6 +19,10 @@
+ 
+ #include <sys/stat.h>
+ #include <time.h>
++
++#ifdef __APPLE__
++#include <TargetConditionals.h>
++#endif
+ 
+ #include <libplacebo/colorspace.h>
+ #include <libplacebo/options.h>
+@@ -712,6 +716,13 @@
+ 
+         struct pl_plane_data data[4] = {0};
+         bool use_uint = false;
++        bool async_upload = gpu->limits.callbacks;
++#if defined(__APPLE__) && TARGET_OS_SIMULATOR
++        // Metal Simulator cannot share arbitrary CPU frame allocations through
++        // XPC. Synchronous uploads copy them into a Metal-owned staging buffer.
++        // Direct-rendered frames already backed by a GPU buffer stay zero-copy.
++        async_upload = false;
++#endif
+ 
+         // At this point, we know that the format is supported, query_format()
+         // makes sure of that. Just check if we should use UINT as a fallback.
+@@ -737,7 +748,7 @@
+                 data[n].buf = buf;
+                 data[n].buf_offset = (uint8_t *) data[n].pixels - buf->data;
+                 data[n].pixels = NULL;
+-            } else if (gpu->limits.callbacks) {
++            } else if (async_upload) {
+                 data[n].callback = talloc_free;
+                 data[n].priv = mp_image_new_ref(mpi);
+             }

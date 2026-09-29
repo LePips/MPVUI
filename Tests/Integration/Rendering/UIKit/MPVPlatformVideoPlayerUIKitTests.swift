@@ -468,7 +468,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
     @Test
     func `display HDR loss invalidates stale transition work before reconfiguration`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .always, sdrOutput: .compatibility8Bit)
+            configuration: .init(autoPlay: false, hdrPolicy: .always, sdrOutput: .compatibility8Bit, videoOutput: .metal)
         )
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.displayEnvironmentOverrideForTesting = (

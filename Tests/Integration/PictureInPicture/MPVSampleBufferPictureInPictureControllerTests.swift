@@ -75,9 +75,14 @@ struct MPVSampleBufferPictureInPictureControllerTests {
             measurements.values.removeAll()
             pip.updateRenderSize(size)
             surface.setVideoOverlay(overlay(revision: revision + 1))
-            try await waitForOverlayCondition("resized PiP caption") { !measurements.values.isEmpty }
+            // The detached inline host also reports its collapsed layout.
+            // Wait for and compare the nonempty layouts used by the PiP renderer.
+            try await waitForOverlayCondition("resized PiP caption") {
+                measurements.values.contains { $0.canvas.width > 0 && $0.canvas.height > 0 }
+            }
+            let rendered = measurements.values.filter { $0.canvas.width > 0 && $0.canvas.height > 0 }
             #expect(
-                measurements.values.allSatisfy { $0.canvas.width == inline.canvas.width && $0.text == inline.text },
+                rendered.allSatisfy { $0.canvas.width == inline.canvas.width && $0.text == inline.text },
                 "PiP at \(size): \(measurements.values); inline: \(inline)"
             )
         }

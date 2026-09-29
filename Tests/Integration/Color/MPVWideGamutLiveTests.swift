@@ -48,7 +48,7 @@ struct MPVWideGamutLiveTests {
     @Test
     func `initial SDR swapchain matches precision and gamut`() async throws {
         for policy in [MPVSDROutputPolicy.automatic, .compatibility8Bit] {
-            let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled, sdrOutput: policy))
+            let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled, sdrOutput: policy, videoOutput: .metal))
             let surface = MPVPlatformVideoPlayer(player: player)
             surface.wideGamutOverrideForTesting = true
             surface.edrHeadroomOverrideForTesting = (current: 1, potential: 1)

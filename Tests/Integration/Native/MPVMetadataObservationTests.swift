@@ -121,7 +121,8 @@ struct MPVMetadataObservationTests {
             hardwareDecoding: .disabled,
             hdrPolicy: .disabled,
             logLevel: .none,
-            sdrOutput: .compatibility8Bit
+            sdrOutput: .compatibility8Bit,
+            videoOutput: .metal
         ))
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(

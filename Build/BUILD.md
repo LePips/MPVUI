@@ -8,7 +8,7 @@
 
 ## Local build
 
-Run from the repository root. Requires Python 3.10+, the pinned Xcode, shaderc (`glslc`), and NASM. The doctor checks their versions and bootstraps build tools.
+Run from the repository root. Requires Python 3.10+, the pinned Xcode, shaderc (`glslc`), and NASM. Release validation also requires XcodeGen for the iOS test host. The doctor checks pinned tool versions and bootstraps build tools.
 
 ```sh
 Build/mpvbuild doctor --bootstrap

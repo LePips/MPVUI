@@ -24,6 +24,8 @@ See [credits and licenses](Patches/AVFOUNDATION_CREDITS.md), [rendering](RENDERI
 | [0014-webp-animation-duration](Patches/mpv/0014-webp-animation-duration.patch)                     | Include the final animated WebP frame in duration estimates.                                                                       |
 | [0015-apple-spatial-audio](Patches/mpv/0015-apple-spatial-audio.patch)                             | Add Spatial Audio settings and diagnostics, preserve session ownership and pause state, and fall back to PCM for audio processing. |
 | [0016-native-audio-clock-wakeup](Patches/mpv/0016-native-audio-clock-wakeup.patch)                 | Keep playback position and relative seeks accurate during native compressed audio playback.                                        |
+| [0017-track-switch-buffering](Patches/mpv/0017-track-switch-buffering.patch)                     | Preserve buffered audio and video during track refresh seeks.                                                                      |
+| [0018-simulator-frame-upload](Patches/mpv/0018-simulator-frame-upload.patch)                     | Copy CPU frame uploads into Metal-owned buffers on Apple simulators.                                                               |
 
 ## FFmpeg
 

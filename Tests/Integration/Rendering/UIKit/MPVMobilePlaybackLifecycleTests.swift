@@ -27,7 +27,8 @@ struct MPVMobilePlaybackLifecycleTests {
                 playbackRate: 0.1,
                 // This scenario verifies 8-bit SDR resize behavior. Automatic
                 // SDR legitimately selects float16 on a wide-gamut display.
-                sdrOutput: .compatibility8Bit
+                sdrOutput: .compatibility8Bit,
+                videoOutput: .metal
             )
         )
         let subtitleSnapshots = MobileSubtitleSnapshotRecorder()

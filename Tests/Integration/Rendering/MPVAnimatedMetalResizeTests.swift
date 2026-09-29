@@ -41,6 +41,13 @@ struct MPVAnimatedMetalResizeTests {
         surface.activateRenderingSurface()
         try await fixture.loadPaused()
         let layer = surface.metalLayer
+        try await eventually("SwiftUI player reaches its initial drawable size") {
+            let expected = MPVRenderSurfaceConfiguration.drawableSize(for: surface.bounds.size, scale: layer.contentsScale)
+            let snapshot = surface.resizeDiagnosticSnapshot
+            return layer.drawableSize == expected && snapshot.committedDrawableSize == expected
+                && snapshot.pendingDrawableSize == nil && snapshot.inFlight == nil
+                && !snapshot.finalCommitRequired
+        }
         for fraction in [0.45, 0.0] {
             let initialDrawable = layer.drawableSize
             withAnimation(.easeInOut(duration: 0.8)) { model.fraction = fraction }

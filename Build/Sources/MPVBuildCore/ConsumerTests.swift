@@ -165,11 +165,27 @@ struct ConsumerTests {
         for (platform, prefix) in [("iOS Simulator", "iOS"), ("tvOS Simulator", "tvOS")] {
             guard let device = devices.first(where: { $0.runtime.contains("." + prefix + "-") })
             else { throw BuildError("Missing required \(prefix) simulator runtime") }
+            var testTarget = ["-scheme", "MPVUI"]
+            if prefix == "iOS" {
+                // Rotation and presentation tests require an app-owned window scene.
+                let host = stage.appendingPathComponent(".build/ios-test-host")
+                try graph.runner.run(
+                    "python3",
+                    [
+                        stage.appendingPathComponent("Build/Tests/generate_device_test_project.py").path,
+                        "--repository", stage.path,
+                        "--output", host.path,
+                    ],
+                    env: ["USER": NSUserName()]
+                )
+                testTarget = [
+                    "-project", host.appendingPathComponent("MPVUIRegressionTests.xcodeproj").path,
+                    "-scheme", "MPVUIRegressionTests",
+                ]
+            }
             try graph.runner.run(
                 "/usr/bin/xcodebuild",
-                [
-                    "-scheme",
-                    "MPVUI",
+                testTarget + [
                     "-parallel-testing-enabled",
                     "NO",
                     "-destination",

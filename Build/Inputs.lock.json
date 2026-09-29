@@ -847,6 +847,11 @@
           "id": "0017-track-switch-buffering",
           "path": "Build/Patches/mpv/0017-track-switch-buffering.patch",
           "sha256": "f3952cc333df592c417f223872b74cffbb9ddca48126d41fc8828ad988db44c0"
+        },
+        {
+          "id": "0018-simulator-frame-upload",
+          "path": "Build/Patches/mpv/0018-simulator-frame-upload.patch",
+          "sha256": "565a6df4532e53177f35ca9d1e42bed94962fca35887e7de76257966c8c6bf69"
         }
       ],
       "ref": "v0.41.0",

@@ -9,23 +9,23 @@ import UIKit
 struct MPVMobileVideoPlayerCompositionTests {
     @Test
     func `SwiftUI updates overlays then transfers ownership when its player changes`() async throws {
-        let first = MPVPlayer(configuration: .init(additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: .sampleBuffer))
+        let fixture = PlaybackFixture()
+        let first = fixture.player
+        fixture.surface.detach()
         let second = MPVPlayer(configuration: .init(additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: .sampleBuffer))
         var appeared: [String] = []
         let video = MPVVideoPlayer(player: first)
             .videoOverlay { Text("Discarded").onAppear { appeared.append("discarded") } }
             .videoOverlay(alignment: .bottom) { Text("Current").onAppear { appeared.append("current") } }
         let host = UIHostingController(rootView: AnyView(video))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let window = fixture.window
         window.rootViewController = host
         window.makeKeyAndVisible()
         host.view.layoutIfNeeded()
         defer {
             findSurface(in: host.view)?.detach()
-            first.stop()
+            fixture.close()
             second.stop()
-            window.isHidden = true
-            window.rootViewController = nil
         }
         try await eventually("SwiftUI mounts the latest overlay") { appeared.contains("current") && first.hasActiveRenderSurface }
         #expect(!appeared.contains("discarded"))
