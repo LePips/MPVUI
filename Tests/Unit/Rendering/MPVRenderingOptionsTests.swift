@@ -5,6 +5,30 @@ import Testing
 
 @Suite(.tags(.unit))
 struct MPVRenderingOptionsTests {
+    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
+    func `automatic decoder prefers Apple interop only for Metal`(output: MPVPlayerConfiguration.VideoOutput) {
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.automatic, backend: output)["hwdec"]
+            == (output == .metal ? "videotoolbox,auto-safe" : "auto-safe"))
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.videoToolbox, backend: output)["hwdec"] == "videotoolbox")
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.disabled, backend: output) == ["hwdec": "no"])
+    }
+
+    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
+    func `Metal bounds hardware decoder threads without changing software or native output`(output: MPVPlayerConfiguration.VideoOutput) {
+        for decoding in [MPVPlayerConfiguration.HardwareDecoding.automatic, .videoToolbox] {
+            #expect(MPVRenderingOptions.hardwareDecodingOptions(decoding, backend: output)["hwdec-threads"]
+                == (output == .metal ? "2" : nil))
+        }
+        #expect(!MPVOptionOwnership.isManaged("hwdec-threads", deinterlace: .init()))
+    }
+
+    @Test(arguments: MPVRenderingQuality.Preset.allCases)
+    func `Metal presets retain presentation pipelining`(preset: MPVRenderingQuality.Preset) {
+        let result = MPVRenderingOptions.resolve(.init(preset: preset), backend: .metal, lowPowerMode: false)
+        #expect(result.options["swapchain-depth"] == "2")
+        #expect(!MPVOptionOwnership.isManaged("swapchain-depth", deinterlace: .init()))
+    }
+
     @Test
     func `automatic uses power state and explicit overrides`() {
         let requested = MPVRenderingQuality(antiringing: 9, preset: .automatic, scaling: .lanczos)

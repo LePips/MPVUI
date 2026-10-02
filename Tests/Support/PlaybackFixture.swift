@@ -8,7 +8,7 @@ import UIKit
 #endif
 
 /// Owns a real player and attached rendering surface for one test only.
-/// Call close() from defer; each case starts with an independent native session.
+/// Call `close()` from `defer`. Each case starts with an independent native session.
 @MainActor
 final class PlaybackFixture {
     let player: MPVPlayer
@@ -26,10 +26,11 @@ final class PlaybackFixture {
             autoPlay: false,
             videoOutput: .sampleBuffer
         ),
+        player: MPVPlayer? = nil,
         notificationCenter: NotificationCenter = .default
     ) {
-        player = MPVPlayer(configuration: configuration)
-        surface = MPVPlatformVideoPlayer(player: player, notificationCenter: notificationCenter)
+        self.player = player ?? MPVPlayer(configuration: configuration)
+        surface = MPVPlatformVideoPlayer(player: self.player, notificationCenter: notificationCenter)
         let frame = CGRect(x: 0, y: 0, width: 320, height: 180)
         #if os(macOS)
         _ = NSApplication.shared

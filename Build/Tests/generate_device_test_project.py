@@ -73,6 +73,7 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
                 "info": {
                     "path": str(output / "TestHost-Info.plist"),
                     "properties": {
+                        "CADisableMinimumFrameDurationOnPhone": True,
                         "NSLocalNetworkUsageDescription": "Connect to a local media server for playback regression tests.",
                         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
                     },

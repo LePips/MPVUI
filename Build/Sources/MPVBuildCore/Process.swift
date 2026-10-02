@@ -93,7 +93,9 @@ struct Runner: Sendable {
         if process.terminationStatus != 0 {
             let diagnostic = ((try? String(contentsOf: out, encoding: .utf8)) ?? "") +
                 ((try? String(contentsOf: log, encoding: .utf8)) ?? "")
-            throw BuildError("\(name) failed (\(process.terminationStatus)); log: \(log.path)\n\(diagnostic.suffix(9000))")
+            throw BuildError(
+                "\(name) failed (\(process.terminationStatus)); log: \(log.path); stdout: \(out.path)\n\(ProcessDiagnostics.excerpt(diagnostic))"
+            )
         }
         return try output == nil ? String(decoding: Data(contentsOf: out), as: UTF8.self).trimmingCharacters(in: .newlines) : ""
     }

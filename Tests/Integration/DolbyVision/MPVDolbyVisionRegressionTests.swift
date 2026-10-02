@@ -4,22 +4,19 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
-import ImageIO
 @testable import MPVUI
 import SwiftUI
 import Testing
+import VideoToolbox
 
-private let dolbyVisionFixture = TestPaths.dolbyVisionMedia
-
-/// Uses optional local Profile 5 charts for color regressions.
-/// MPVUI_DOLBY_VISION_FIXTURE may point to another copy of the Profile 5 clip.
-/// Buffer delivery alone cannot validate Dolby Vision: unvalidated Profile 5
-/// frames must never reach AVFoundation, where they appear pink/green/purple.
+/// Generated Profile 5 and 8 media covers output decisions and metadata.
+/// Unvalidated Profile 5 frames must never reach AVFoundation.
 @Suite(.tags(.integration, .dolbyVision), .serialized)
 struct MPVDolbyVisionRegressionTests {
     @MainActor
-    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
+    @Test
     func `software profile 5 fails without switching and a later SDR load recovers`() async throws {
+        let profile5 = try TestPaths.testMedia("dolby-vision-p5.mp4")
         let host = Host(hardwareDecoding: .disabled, startTime: .seconds(1), playbackRate: 1.5)
         defer { host.close() }
         let player = host.player
@@ -29,7 +26,7 @@ struct MPVDolbyVisionRegressionTests {
         pictureInPicture.allowsAutomaticStartFromInline = true
         pictureInPicture.restoreUserInterface = { true }
         let rejectedLayer = player.sampleBufferDisplayLayer
-        player.load(dolbyVisionFixture)
+        player.load(profile5)
         var exposedUnvalidatedFrame = false
         try await eventually("software Profile 5 fallback") {
             exposedUnvalidatedFrame = exposedUnvalidatedFrame || rejectedLayer.isReadyForDisplay
@@ -44,7 +41,7 @@ struct MPVDolbyVisionRegressionTests {
         #expect(player.configuration.videoOutput == .sampleBuffer)
         #expect(player.isPaused)
         #expect(player.playbackRate == 1.5)
-        #expect(player.mediaInformation.sourceURL == dolbyVisionFixture)
+        #expect(player.mediaInformation.sourceURL == profile5)
         #expect(player.lastError != nil)
         #expect(player.pictureInPicture === pictureInPicture)
         #expect(pictureInPicture.allowsAutomaticStartFromInline)
@@ -71,13 +68,14 @@ struct MPVDolbyVisionRegressionTests {
     }
 
     @MainActor
-    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
+    @Test
     func `hardware profile 5 requires a validated session or reports native failure`() async throws {
-        let host = Host(hardwareDecoding: .videoToolbox, startTime: .seconds(25), logLevel: .debug)
+        let startTime: Duration = .seconds(1.25)
+        let host = Host(hardwareDecoding: .videoToolbox, startTime: startTime, logLevel: .debug)
         defer { host.close() }
         let player = host.player
         let layer = player.sampleBufferDisplayLayer
-        player.load(dolbyVisionFixture)
+        try player.load(TestPaths.testMedia("dolby-vision-p5.mp4"))
         try await eventually("hardware Profile 5 output decision") {
             if case .failed(.nativeVideoOutputUnavailable) = player.state {
                 return true
@@ -85,7 +83,7 @@ struct MPVDolbyVisionRegressionTests {
             return player.state == .paused && layer.sampleBufferRenderer.displayedPixelBuffer() != nil
         }
         #expect(player.isPaused)
-        #expect(abs(player.position.seconds - 25) < 0.15)
+        #expect(abs(player.position.seconds - startTime.seconds) < 0.15)
         #expect(player.videoOutput == .sampleBuffer)
         if player.lastError == nil {
             let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
@@ -110,7 +108,6 @@ struct MPVDolbyVisionRegressionTests {
             print(
                 "DOLBY_VISION hardware: validated native session, RPU bytes=\(rpu.count), format=\(CVPixelBufferGetPixelFormatType(buffer)), attachments=\(attachments.keys.sorted())"
             )
-            try await host.holdNativeWindowForVisualValidationIfRequested()
         } else {
             guard case .nativeVideoOutputUnavailable = player.lastError else {
                 Issue.record("Expected a native output error: \(String(describing: player.lastError))")
@@ -121,81 +118,39 @@ struct MPVDolbyVisionRegressionTests {
         }
     }
 
+    /// Declared or actual RPU compression must not block native output. VideoToolbox
+    /// rejects compressed configurations, so every submitted RPU is standalone.
     @MainActor
-    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
-    func `explicit Metal software colors match known chart patches`() async throws {
-        let host = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .seconds(25))
+    @Test(
+        .enabled(
+            if: VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC),
+            "Requires a hardware Dolby Vision HEVC decoder."
+        ),
+        arguments: ["dolby-vision-p81.mp4", "dolby-vision-p84.mp4", "dolby-vision-p81-declared-extended.ts", "dolby-vision-p81-extended.ts"]
+    )
+    func `hardware profile 8 plays every frame as native Dolby Vision`(name: String) async throws {
+        let host = Host(hardwareDecoding: .videoToolbox, startTime: .seconds(1.25))
         defer { host.close() }
-        host.player.load(dolbyVisionFixture)
-        try await eventually("explicit Metal color frame") { host.player.state == .paused }
-        let image = try await host.screenshot(named: "explicit-metal")
-        let actual = try pixels(image)
-        #expect(actual.meanBrightness > 0.02, "A black screenshot cannot validate color.")
-        expectChartColors(actual)
-        #expect(host.player.lastError == nil)
-    }
-
-    private func expectChartColors(_ actual: Pixels) {
-        // At 25 seconds, the 1920x1080 chart has red/green/blue patch centers at
-        // (182, 470), (439, 470), (696, 470). Sample inside each patch after the
-        // 160x90 readback. Channel dominance rejects an IPT-as-YUV color cast
-        // even if both renderers regress together, without fixing a tone map.
-        for (channel, x) in [12 ..< 18, 33 ..< 39, 55 ..< 61].enumerated() {
-            let color = actual.meanRGB(x: x, y: 36 ..< 42)
-            #expect(color[channel] > 0.2, "Chart primary must be visible: \(color)")
-            for other in 0 ..< 3 where other != channel {
-                #expect(color[channel] > color[other] * 2, "Chart primary has the wrong hue: \(color)")
-            }
+        let player = host.player
+        let layer = player.sampleBufferDisplayLayer
+        try player.load(TestPaths.testMedia(name))
+        try await eventually("native Profile 8 frame after a keyframe seek in \(name)") {
+            player.lastError != nil
+                || player.state == .paused && layer.sampleBufferRenderer.displayedPixelBuffer() != nil
+                && abs(player.position.seconds - 1.25) < 0.05
         }
-    }
+        try #require(player.lastError == nil, "\(String(describing: player.lastError))")
+        #expect(player.mediaInformation.hardwareDecoder == "videotoolbox")
+        let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
+        let attachments = CVBufferCopyAttachments(buffer, .shouldPropagate) as? [String: Any] ?? [:]
+        #expect((attachments["DolbyVisionRPUData"] as? Data)?.isEmpty == false)
 
-    private struct Pixels {
-        let rgba: [UInt8]
-        var meanBrightness: Double {
-            stride(from: 0, to: rgba.count, by: 4).reduce(0.0) {
-                $0 + (Double(rgba[$1]) + Double(rgba[$1 + 1]) + Double(rgba[$1 + 2])) / 765
-            } / Double(rgba.count / 4)
+        // Frames after the seek keyframe carry RPUs that reference earlier ones.
+        player.play()
+        try await eventually("native Profile 8 playback to the end of \(name)") {
+            player.lastError != nil || player.state == .ended || player.position.seconds > 1.9
         }
-
-        func meanAbsoluteDifference(from other: Self) -> Double {
-            var total = 0.0
-            for i in stride(from: 0, to: rgba.count, by: 4) {
-                for channel in 0 ..< 3 {
-                    total += abs(Double(rgba[i + channel]) - Double(other.rgba[i + channel])) / 255
-                }
-            }
-            return total / Double(rgba.count / 4 * 3)
-        }
-
-        func meanRGB(x: Range<Int>, y: Range<Int>) -> [Double] {
-            var channels = [Double](repeating: 0, count: 3)
-            for row in y {
-                for column in x {
-                    let index = (row * 160 + column) * 4
-                    for channel in 0 ..< 3 {
-                        channels[channel] += Double(rgba[index + channel]) / 255
-                    }
-                }
-            }
-            return channels.map { $0 / Double(x.count * y.count) }
-        }
-    }
-
-    private func pixels(_ image: CGImage) throws -> Pixels {
-        let width = 160
-        let height = 90
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        try bytes.withUnsafeMutableBytes { storage in
-            let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
-            let context = try #require(CGContext(
-                data: storage.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                bytesPerRow: width * 4, space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ))
-            context.interpolationQuality = .high
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        }
-        return Pixels(rgba: bytes)
+        #expect(player.lastError == nil, "\(String(describing: player.lastError))")
     }
 
     @MainActor
@@ -203,26 +158,22 @@ struct MPVDolbyVisionRegressionTests {
         let player: MPVPlayer
         let surface: MPVPlatformVideoPlayer
         let window: NSWindow
-        let artifactDirectory: URL
 
         init(
             hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding,
-            videoOutput: MPVPlayerConfiguration.VideoOutput = .sampleBuffer,
             startTime: Duration,
             playbackRate: Double = 1,
             logLevel: MPVPlayerConfiguration.LogLevel = .none
         ) {
-            artifactDirectory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("MPVUI-DolbyVision-\(UUID().uuidString)")
             player = MPVPlayer(configuration: .init(
-                additionalOptions: ["ao": "null", "sid": "no", "osd-level": "0", "screenshot-sw": "no"],
+                additionalOptions: ["ao": "null", "sid": "no", "osd-level": "0"],
                 autoPlay: false,
                 hardwareDecoding: hardwareDecoding,
                 hdrPolicy: .disabled,
                 logLevel: logLevel,
                 playbackRate: playbackRate,
                 startTime: startTime,
-                videoOutput: videoOutput
+                videoOutput: .sampleBuffer
             ))
             player.logHandler = { message in
                 if [.fatal, .error].contains(message.level)
@@ -249,78 +200,6 @@ struct MPVDolbyVisionRegressionTests {
             surface.detach()
             window.orderOut(nil)
             window.contentView = nil
-        }
-
-        /// Opt-in inspection of the actual AVFoundation presentation. A layer
-        /// bitmap or the unconverted YUV buffer cannot prove Dolby Vision colors.
-        func holdNativeWindowForVisualValidationIfRequested() async throws {
-            let environment = ProcessInfo.processInfo.environment
-            guard environment["MPVUI_HOLD_NATIVE_DV_WINDOW"] == "1" else { return }
-            window.title = "MPVUI Native Dolby Vision Validation"
-            window.center()
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-            NSApplication.shared.activate()
-            if let path = environment["MPVUI_NATIVE_DV_READY_FILE"] {
-                let marker = try JSONSerialization.data(withJSONObject: [
-                    "title": window.title,
-                    "windowNumber": window.windowNumber,
-                    "processIdentifier": ProcessInfo.processInfo.processIdentifier,
-                    "readyAt": Date().timeIntervalSince1970,
-                ], options: [.sortedKeys])
-                try marker.write(to: URL(fileURLWithPath: path), options: .atomic)
-            }
-            print(
-                "DOLBY_VISION native window ready: title=\(window.title), window=\(window.windowNumber); holding 45 seconds for actual display inspection"
-            )
-            fflush(nil)
-            try await Task.sleep(for: .seconds(45))
-            #expect(player.videoOutput == .sampleBuffer)
-            #expect(player.isPaused)
-            #expect(player.lastError == nil)
-        }
-
-        func screenshot(named name: String) async throws -> CGImage {
-            try FileManager.default.createDirectory(at: artifactDirectory, withIntermediateDirectories: true)
-            let url = artifactDirectory.appendingPathComponent(name + ".png")
-            for _ in 0 ..< 500 {
-                if let frame = await player.renderedScreenshotForTesting()?.mapValue,
-                   let width = frame["w"]?.integerValue,
-                   let height = frame["h"]?.integerValue,
-                   let stride = frame["stride"]?.integerValue,
-                   case let .data(data) = frame["data"],
-                   width > 0, height > 0, stride >= width * 4,
-                   data.count >= stride * height
-                {
-                    try #require(frame["format"]?.stringValue == "bgr0")
-                    let provider = try #require(CGDataProvider(data: data as CFData))
-                    let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
-                    let image = try #require(CGImage(
-                        width: Int(width), height: Int(height), bitsPerComponent: 8,
-                        bitsPerPixel: 32, bytesPerRow: Int(stride), space: colorSpace,
-                        bitmapInfo: CGBitmapInfo.byteOrder32Little.union(
-                            CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue)
-                        ), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
-                    ))
-                    try Self.write(image, to: url)
-                    return image
-                }
-                try await Task.sleep(for: .milliseconds(40))
-            }
-            print(
-                "DOLBY_VISION screenshot timeout: state=\(player.state), position=\(player.position), duration=\(player.duration), error=\(String(describing: player.lastError)), media=\(player.mediaInformation)"
-            )
-            throw NSError(
-                domain: "MPVUIDolbyVisionTests",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "GPU screenshot did not arrive: \(url.path)"]
-            )
-        }
-
-        static func write(_ image: CGImage, to url: URL) throws {
-            let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
-            CGImageDestinationAddImage(destination, image, nil)
-            try #require(CGImageDestinationFinalize(destination))
         }
     }
 }

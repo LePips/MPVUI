@@ -1,13 +1,13 @@
 import Foundation
 
-/// SDR precision and gamut are independent of extended dynamic range.
-/// - Note: Has no effect with sample-buffer output; AVFoundation manages precision.
+/// SDR output precision and gamut, independent of extended dynamic range.
+/// - Note: Has no effect with sample-buffer output. AVFoundation manages precision.
 public enum MPVSDROutputPolicy: String, CaseIterable, Equatable, Sendable {
-    /// Linear float Display P3 on wide-gamut screens; 8-bit sRGB elsewhere.
+    /// Uses linear floating-point Display P3 on wide-gamut screens and 8-bit sRGB elsewhere.
     case automatic
-    /// Explicit 8-bit sRGB compatibility output, with renderer dithering.
+    /// Uses 8-bit sRGB output with renderer dithering for compatibility.
     case compatibility8Bit
-    /// Linear float output in the screen's supported standard gamut.
+    /// Uses linear floating-point output in the screen's supported standard gamut.
     case highPrecision
 }
 
@@ -19,16 +19,17 @@ public struct MPVColorManagement: Equatable, Sendable {
     /// The profile or calibration used for display color conversion.
     public enum DisplayProfile: Equatable, Sendable {
         /// ColorSync converts the accurately tagged layer to the current display.
-        /// mpv's automatic ICC selection is disabled to avoid a second transform.
+        /// Disables mpv's automatic ICC selection to avoid a second transform.
         case automatic
-        /// macOS SDR Metal only. libplacebo converts to this calibrated RGB display
-        /// profile. The layer is tagged with the current system display profile
-        /// so ColorSync performs an identity display conversion. Use a profile
-        /// calibrated for the connected screen; this does not install it globally.
+        /// A calibrated RGB display profile for SDR Metal output on macOS.
+        /// libplacebo handles the conversion. MPVUI tags the layer with the current
+        /// system display profile so ColorSync performs an identity conversion.
+        /// Use a profile calibrated for the connected screen. This setting does
+        /// not install the profile globally.
         case calibratedICC(URL, intent: RenderingIntent = .relativeColorimetric)
-        /// A calibrated .cube LUT converting the stated input encoding to
-        /// display device RGB. Mutually exclusive with ICC conversion. macOS
-        /// SDR Metal only; the file must be made for the connected display.
+        /// A calibrated `.cube` LUT that converts the stated input encoding to
+        /// display device RGB. Requires SDR Metal output on macOS and a file
+        /// calibrated for the connected display. Cannot be combined with ICC conversion.
         case calibratedLUT(URL, input: LUTInput = .rec709Gamma24)
     }
 
@@ -54,21 +55,21 @@ public struct MPVColorManagement: Equatable, Sendable {
         case absoluteColorimetric = 3
     }
 
-    /// How SDR transfer characteristics are interpreted for display.
+    /// How to interpret SDR transfer characteristics for display.
     public enum SDRViewing: String, CaseIterable, Equatable, Sendable {
-        /// Respect the source's tagged transfer function, including BT.1886.
+        /// Respects the source's tagged transfer function, including BT.1886.
         /// sRGB is its piecewise curve, not an implicit power-2.2 approximation.
         case reference
-        /// Preserve legacy SDR code values when using 8-bit sRGB output.
-        /// Has no effect on linear float output or ICC-managed conversion.
+        /// Preserves legacy SDR code values when using 8-bit sRGB output.
+        /// Has no effect on linear floating-point output or ICC-managed conversion.
         case legacyDisplay
     }
 
     // MARK: - Numeric options
 
     /// SDR reference white used in HDR mapping, in cd/m². This describes the
-    /// rendering model; it does not set or measure physical screen luminance.
-    /// Clamped to `10...1000` and rounded; non-finite values use 203.
+    /// rendering model. It does not set or measure physical screen luminance.
+    /// Clamped to `10...1000` and rounded. Non-finite values use 203.
     /// - Note: Overrides have no effect with sample-buffer output.
     public let referenceWhite: Double
 
@@ -82,7 +83,7 @@ public struct MPVColorManagement: Equatable, Sendable {
     /// - Note: Overrides have no effect with sample-buffer output.
     public let sdrViewing: SDRViewing
 
-    /// Creates color settings with reference white clamped to 10...1000 cd/m².
+    /// Creates color settings with reference white clamped to `10...1000` cd/m².
     public init(
         displayProfile: DisplayProfile = .automatic,
         referenceWhite: Double = 203,
@@ -98,11 +99,11 @@ public struct MPVColorManagement: Equatable, Sendable {
     }
 }
 
-/// Configured output contract, separate from physical display measurements.
+/// The configured color output, separate from physical display measurements.
 public struct MPVRenderColorStatus: Equatable, Sendable {
     /// The component responsible for display color conversion.
     public enum ConversionOwner: String, Equatable, Sendable {
-        /// The conversion owner is not known.
+        /// The component responsible for conversion is unknown.
         case unknown
         /// ColorSync converts the tagged layer for the display.
         case colorSync
@@ -116,7 +117,7 @@ public struct MPVRenderColorStatus: Equatable, Sendable {
 
     /// The configured output pixel precision.
     public enum Precision: String, Equatable, Sendable {
-        /// The output precision is not known.
+        /// The output precision is unknown.
         case unknown
         /// Uses 8-bit normalized color components.
         case unorm8
@@ -126,7 +127,7 @@ public struct MPVRenderColorStatus: Equatable, Sendable {
         case sourceManaged
     }
 
-    /// Why the requested color configuration could not be applied.
+    /// The reason for using a fallback color configuration.
     public enum FallbackReason: String, Equatable, Sendable {
         /// Calibrated ICC output requires macOS.
         case calibratedICCRequiresMacOS
@@ -136,7 +137,7 @@ public struct MPVRenderColorStatus: Equatable, Sendable {
         case invalidRGBDisplayProfile
         /// The selected calibration LUT is invalid or unsupported.
         case invalidCalibrationLUT
-        /// The current system display profile could not be obtained.
+        /// The current system display profile is unavailable.
         case currentDisplayProfileUnavailable
         /// Native output manages pixel precision itself.
         case nativeManagesPrecision
@@ -160,7 +161,7 @@ public struct MPVRenderColorStatus: Equatable, Sendable {
     public let referenceWhite: Double?
     /// The applied SDR viewing behavior, when known.
     public let sdrViewing: MPVColorManagement.SDRViewing?
-    /// Why the requested color configuration was replaced, if any.
+    /// The reason for replacing the requested color configuration, if any.
     public let fallbackReason: FallbackReason?
 
     init(

@@ -19,66 +19,68 @@ class TestMediaPreparationTests(unittest.TestCase):
     def generate(self, command, **kwargs):
         self.calls.append(Path(command[1]).name)
         destination = Path(command[3])
-        group = next(value for value in media.GROUPS.values() if command[1].endswith(value[0]))
-        for name in group[2]:
+        group = next(group for group in media.GROUPS if media.script(group) == Path(command[1]))
+        for name in media.GROUPS[group][1]:
             (destination / name).write_bytes(("encoded fixture " + name).encode())
 
     def prepare(self):
-        with patch.object(media.shutil, "which", return_value="/bin/tool"), \
-                patch.object(media.subprocess, "run", side_effect=self.generate):
+        with (
+            patch.object(media.shutil, "which", return_value="/bin/tool"),
+            patch.object(media.subprocess, "run", side_effect=self.generate),
+        ):
             media.prepare(self.output)
 
     def test_empty_cache_generates_all_required_inputs_and_reuses_verified_files(self):
         self.prepare()
-        self.assertEqual(len(self.calls), len(media.DEFAULT_GROUPS))
-        names = [name for key in media.DEFAULT_GROUPS for name in media.GROUPS[key][2]]
+        self.assertEqual(len(self.calls), len(media.GROUPS))
+        names = [name for key in media.GROUPS for name in media.GROUPS[key][1]]
         self.assertEqual({p.name for p in self.output.iterdir()}, set(names))
         state = json.loads((self.output.parent / "GeneratedMedia.state.json").read_text())
-        for key in media.DEFAULT_GROUPS:
-            for name in media.GROUPS[key][2]:
+        for key in media.GROUPS:
+            for name in media.GROUPS[key][1]:
                 self.assertEqual(state[key]["files"][name], media.digest(self.output / name))
         timestamps = {p.name: p.stat().st_mtime_ns for p in self.output.iterdir()}
         self.prepare()
-        self.assertEqual(len(self.calls), len(media.DEFAULT_GROUPS))
+        self.assertEqual(len(self.calls), len(media.GROUPS))
         self.assertEqual(timestamps, {p.name: p.stat().st_mtime_ns for p in self.output.iterdir()})
 
     def test_missing_or_corrupt_output_regenerates_only_its_group(self):
         self.prepare()
-        (self.output / "webp-animation.webp").unlink()
+        (self.output / "image-webp-animated.webp").unlink()
         self.prepare()
-        self.assertEqual(self.calls[len(media.DEFAULT_GROUPS):], ["generate_webp_fixture.py"])
-        (self.output / "02-h264-multitrack.mkv").write_bytes(b"corrupt")
+        self.assertEqual(self.calls[len(media.GROUPS) :], ["generate_image.py"])
+        (self.output / "multitrack.mkv").write_bytes(b"corrupt")
         self.prepare()
-        self.assertEqual(self.calls[len(media.DEFAULT_GROUPS) + 1:], ["generate_multitrack_fixture.py"])
+        self.assertEqual(self.calls[len(media.GROUPS) + 1 :], ["generate_multitrack.py"])
 
     def test_concurrent_preparation_generates_each_group_once(self):
-        with patch.object(media.shutil, "which", return_value="/bin/tool"), \
-                patch.object(media.subprocess, "run", side_effect=self.generate), \
-                ThreadPoolExecutor(max_workers=2) as executor:
+        with (
+            patch.object(media.shutil, "which", return_value="/bin/tool"),
+            patch.object(media.subprocess, "run", side_effect=self.generate),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
             futures = [executor.submit(media.prepare, self.output) for _ in range(2)]
             for future in futures:
                 future.result(timeout=10)
-        self.assertEqual(len(self.calls), len(media.DEFAULT_GROUPS))
+        self.assertEqual(len(self.calls), len(media.GROUPS))
 
     def test_changed_recipe_regenerates_affected_group(self):
         self.prepare()
         state_path = self.output.parent / "GeneratedMedia.state.json"
         state = json.loads(state_path.read_text())
-        state["webp"]["recipe"] = "old generator"
+        state["image"]["recipe"] = "old generator"
         state_path.write_text(json.dumps(state))
         self.prepare()
-        self.assertEqual(self.calls[len(media.DEFAULT_GROUPS):], ["generate_webp_fixture.py"])
+        self.assertEqual(self.calls[len(media.GROUPS) :], ["generate_image.py"])
 
     def test_missing_tools_fail_with_actionable_error(self):
-        with patch.object(media.shutil, "which", return_value=None), \
-                self.assertRaisesRegex(RuntimeError, "install ffmpeg.*build host"):
+        with patch.object(media.shutil, "which", return_value=None), self.assertRaisesRegex(RuntimeError, "install ffmpeg.*build host"):
             media.prepare(self.output)
         self.assertEqual(list(self.output.iterdir()), [])
 
     def test_verified_cache_does_not_require_installed_encoders(self):
         self.prepare()
-        with patch.object(media.shutil, "which", return_value=None) as lookup, \
-                patch.object(media.subprocess, "run") as generate:
+        with patch.object(media.shutil, "which", return_value=None) as lookup, patch.object(media.subprocess, "run") as generate:
             media.prepare(self.output)
         lookup.assert_not_called()
         generate.assert_not_called()
@@ -88,20 +90,24 @@ class TestMediaPreparationTests(unittest.TestCase):
             self.generate(command, **kwargs)
             raise subprocess.CalledProcessError(1, command)
 
-        with patch.object(media.shutil, "which", return_value="/bin/tool"), \
-                patch.object(media.subprocess, "run", side_effect=fail), \
-                self.assertRaises(subprocess.CalledProcessError):
+        with (
+            patch.object(media.shutil, "which", return_value="/bin/tool"),
+            patch.object(media.subprocess, "run", side_effect=fail),
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
             media.prepare(self.output)
         self.assertEqual(list(self.output.iterdir()), [])
         self.assertFalse((self.output.parent / "GeneratedMedia.state.json").exists())
 
     def test_explicit_group_only_requires_its_tools_and_reuses_cache(self):
-        with patch.object(media.shutil, "which", return_value="/bin/tool"), \
-                patch.object(media.subprocess, "run", side_effect=self.generate):
-            media.prepare(self.output, groups=("native-dovi",))
-            media.prepare(self.output, groups=("native-dovi",))
-        self.assertEqual(self.calls, ["generate_dovi_fixture.py"])
-        self.assertEqual({p.name for p in self.output.iterdir()}, {"profile5.rpu"})
+        with (
+            patch.object(media.shutil, "which", return_value="/bin/tool"),
+            patch.object(media.subprocess, "run", side_effect=self.generate),
+        ):
+            media.prepare(self.output, groups=("image",))
+            media.prepare(self.output, groups=("image",))
+        self.assertEqual(self.calls, ["generate_image.py"])
+        self.assertEqual({p.name for p in self.output.iterdir()}, set(media.GROUPS["image"][1]))
 
     def test_invalid_state_recovers(self):
         self.prepare()
@@ -111,17 +117,47 @@ class TestMediaPreparationTests(unittest.TestCase):
                 state_path.write_text(content)
                 self.calls.clear()
                 self.prepare()
-                self.assertEqual(len(self.calls), len(media.DEFAULT_GROUPS))
+                self.assertEqual(len(self.calls), len(media.GROUPS))
 
     def test_incomplete_generator_does_not_replace_previously_valid_group(self):
         self.prepare()
-        original = (self.output / "webp-still.webp").read_bytes()
-        (self.output / "webp-animation.webp").unlink()
-        with patch.object(media.shutil, "which", return_value="/bin/tool"), \
-                patch.object(media.subprocess, "run"), \
-                self.assertRaisesRegex(RuntimeError, "did not produce webp-still"):
+        original = (self.output / "image-webp-still.webp").read_bytes()
+        (self.output / "image-webp-animated.webp").unlink()
+        with (
+            patch.object(media.shutil, "which", return_value="/bin/tool"),
+            patch.object(media.subprocess, "run"),
+            self.assertRaisesRegex(RuntimeError, "did not produce image-webp-still"),
+        ):
             media.prepare(self.output)
-        self.assertEqual((self.output / "webp-still.webp").read_bytes(), original)
+        self.assertEqual((self.output / "image-webp-still.webp").read_bytes(), original)
+
+    def test_groups_follow_generator_and_file_naming_convention(self):
+        names = [name for _, files in media.GROUPS.values() for name in files]
+        self.assertEqual(len(names), len(set(names)), "Generated file names must be unique")
+        for group, (_, files) in media.GROUPS.items():
+            with self.subTest(group=group):
+                self.assertTrue(media.script(group).is_file())
+                for name in files:
+                    self.assertTrue(name.startswith((group + "-", group + ".")), name)
+
+    def test_retired_generated_files_are_removed_and_other_files_kept(self):
+        self.prepare()
+        state_path = self.output.parent / "GeneratedMedia.state.json"
+        state = json.loads(state_path.read_text())
+        for name in ("retired-group.mkv", "image-retired.webp", "native-sync-configuration.json"):
+            (self.output / name).write_bytes(b"data")
+        state["retired"] = {"recipe": "old", "files": {"retired-group.mkv": "digest"}}
+        state["image"]["files"]["image-retired.webp"] = "digest"
+        state_path.write_text(json.dumps(state))
+        self.prepare()
+        self.assertEqual(len(self.calls), len(media.GROUPS))
+        self.assertFalse((self.output / "retired-group.mkv").exists())
+        self.assertFalse((self.output / "image-retired.webp").exists())
+        # Files added by other tools, such as the device sync probe, stay in place.
+        self.assertTrue((self.output / "native-sync-configuration.json").exists())
+        state = json.loads(state_path.read_text())
+        self.assertNotIn("retired", state)
+        self.assertNotIn("image-retired.webp", state["image"]["files"])
 
 
 if __name__ == "__main__":

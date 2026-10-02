@@ -1,4 +1,4 @@
-/// Playback observations. Missing instrumentation is nil, never an inferred zero.
+/// Playback observations. Missing observations are `nil`, not zero.
 public struct MPVPlaybackDiagnostics: Equatable, Sendable {
     /// Work performed by the Swift engine bridge. Counters are cumulative for
     /// the player's engine lifetime, including loads and renderer replacements.
@@ -49,7 +49,7 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
     public struct Decoder: Equatable, Sendable {
         /// The decoder session reported by mpv.
         public enum Session: Equatable, Sendable {
-            /// The decoder session has not been reported.
+            /// mpv has not reported a decoder session.
             case unknown
             /// mpv reports a software decoder session.
             case software
@@ -61,13 +61,14 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
         public var codec: String?
         /// mpv's chosen decoder API, independent of actual VideoToolbox acceleration.
         public var selectedDecoder: String?
-        /// Public VideoToolbox session-property readback; unknown on unsupported OS/builds.
+        /// Hardware acceleration reported by VideoToolbox's public session API.
+        /// The value is `nil` on unsupported OS versions or builds.
         public var videoToolboxSessionUsesHardware: Bool?
-        /// Codec-level VideoToolbox probe only; it does not validate profile, depth or resolution.
+        /// Codec support reported by VideoToolbox. Does not validate profile, bit depth, or resolution.
         public var videoToolboxSupportsCodec: Bool?
         /// Actual mpv decoder selection after opening this item.
         public var session: Session = .unknown
-        /// The hardware decoder's renderer interop, when reported.
+        /// The hardware decoder's renderer interoperability method, when reported.
         public var interop: String?
         /// The decoder's output pixel format, when reported.
         public var decodedPixelFormat: String?
@@ -79,8 +80,9 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
 
     /// Native sample-buffer output counters and build timings.
     public struct NativeOutputStatistics: Equatable, Sendable {
-        /// Native output uploads/composites/geometry copies only. Excludes decoder,
-        /// Core Image internals, GPU internals and compositor/presentation copies.
+        /// Pixel-buffer copies for native output uploads, composition, and geometry changes.
+        /// Excludes copies within the decoder, Core Image, or GPU, and copies
+        /// made by the compositor or for presentation.
         public var pixelBufferCopies: Int64?
         /// The number of native video samples built since the last reset.
         public var sampleBuildCount: Int64?
@@ -90,7 +92,7 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
         public var totalSampleBuildNanoseconds: Int64?
     }
 
-    /// Counters reset when the native VO resets/reconfigures.
+    /// Counters reset when the native video output resets or reconfigures.
     public var nativeOutputStatistics: NativeOutputStatistics?
     /// Frames dropped by the decoder, when reported.
     public var decoderDroppedFrames: Int64?
@@ -112,7 +114,7 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
     public var estimatedDecodedFramesPerSecond: Double?
     /// The display's nominal refresh rate in frames per second.
     public var nominalDisplayFramesPerSecond: Double?
-    /// Measured display-sync refresh estimate; unavailable on unsupported output routes.
+    /// The refresh rate estimated by display sync, when the output route supports it.
     public var estimatedDisplayFramesPerSecond: Double?
     /// Pass timings for newly rendered frames, when available.
     public var freshRenderPasses: [RenderPass]?

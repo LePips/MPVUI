@@ -4,6 +4,7 @@
 # Swift Package Manager
 .build/
 __pycache__/
+.ruff_cache/
 .build-*/
 .swiftpm/
 
@@ -16,10 +17,12 @@ xcuserdata/
 *.xcresult
 *.dSYM
 
-# Add example media locally; only the folder instructions are checked in.
+# MPVUI - Sandbox
+sandbox/
+
+# MPVUI - Example media
 Example/MPVUIExample/Shared/Resources/Media/*
 !Example/MPVUIExample/Shared/Resources/Media/README.md
 
-# All generated test media belongs in .build or plugin output, never in Git.
-Tests/Resources/Media/
-Build/Tests/NativeHDR/*.rpu
+# Other
+.vale.ini

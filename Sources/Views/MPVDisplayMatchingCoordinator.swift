@@ -59,15 +59,15 @@ struct MPVDisplayMatchingState {
 }
 
 /// A platform's display-mode matching endpoint. Content, ownership, and media
-/// lifecycle stay shared; the endpoint translates requests and OS events.
+/// lifecycle stay shared. The endpoint translates requests and OS events.
 @MainActor
 protocol MPVDisplayMatchingTarget: AnyObject {
     /// Stable across wrappers for the same physical/window-owned endpoint.
     var identity: ObjectIdentifier { get }
     var isMatchingEnabled: Bool { get }
     var isModeSwitchInProgress: Bool { get }
-    /// Returns false when a non-nil hint cannot be represented by the platform.
-    /// A nil hint releases this player's preference.
+    /// Returns `false` when the platform cannot represent a nonempty hint.
+    /// A `nil` hint releases this player's preference.
     @discardableResult
     func apply(_ content: MPVDisplayMatchingContent?) -> Bool
     /// The returned closure cancels observation. The coordinator owns its lifetime.

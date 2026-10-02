@@ -4,6 +4,7 @@
 Compilation, fixture creation, warmup, and output validation are excluded from
 samples. This measures CPU conversion/cache lookup, not GPU rendering/playback.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,14 +37,15 @@ def bounded_integer(minimum: int, maximum: int):
         if not minimum <= value <= maximum:
             raise argparse.ArgumentTypeError(f"must be between {minimum} and {maximum}")
         return value
+
     return parse
 
 
-def command(arguments: list[str], *, cwd: Path | None = None,
-            env: dict[str, str] | None = None, timeout: int = 120) -> str:
+def command(arguments: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None, timeout: int = 120) -> str:
     try:
-        result = subprocess.run(arguments, cwd=cwd, env=env, check=True, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+        result = subprocess.run(
+            arguments, cwd=cwd, env=env, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout
+        )
     except subprocess.CalledProcessError as error:
         raise BenchmarkError(f"{Path(arguments[0]).name} failed:\n{error.stderr[-12000:]}") from error
     except subprocess.TimeoutExpired as error:
@@ -69,8 +71,11 @@ def validate_patches(root: Path, lock: dict) -> str:
 def find_toolchain(lock: dict) -> tuple[Path, Path, dict]:
     expected = lock["toolchain"]["xcode"]
     override = os.environ.get("DEVELOPER_DIR")
-    candidates = [Path(override).expanduser()] if override else [
-        app / "Contents/Developer" for app in sorted(Path("/Applications").glob("Xcode*.app"))]
+    candidates = (
+        [Path(override).expanduser()]
+        if override
+        else [app / "Contents/Developer" for app in sorted(Path("/Applications").glob("Xcode*.app"))]
+    )
     developer = None
     for candidate in candidates:
         # DEVELOPER_DIR may name either the application or Contents/Developer.
@@ -92,8 +97,7 @@ def find_toolchain(lock: dict) -> tuple[Path, Path, dict]:
         raise BenchmarkError(f"Pinned compiler mismatch: expected {expected['clang']!r}, found {compiler!r}")
     if not sdk.is_dir():
         raise BenchmarkError(f"Pinned macOS SDK is missing: {sdk}")
-    return clang, sdk, {"version": compiler, "xcodeBuild": expected["build"],
-                        "optimization": "-O3", "sanitizers": False}
+    return clang, sdk, {"version": compiler, "xcodeBuild": expected["build"], "optimization": "-O3", "sanitizers": False}
 
 
 def find_libplacebo(source_root: Path, explicit: Path | None) -> tuple[Path, dict]:
@@ -105,8 +109,10 @@ def find_libplacebo(source_root: Path, explicit: Path | None) -> tuple[Path, dic
             candidates.extend(sorted(cache.glob("*/include")))
     include = next((path for path in candidates if (path / "libplacebo/colorspace.h").is_file()), None)
     if include is None:
-        raise BenchmarkError("Cached libplacebo headers are missing; build the native macOS slice first "
-                             "or pass --libplacebo-include PATH (no download is attempted)")
+        raise BenchmarkError(
+            "Cached libplacebo headers are missing; build the native macOS slice first "
+            "or pass --libplacebo-include PATH (no download is attempted)"
+        )
     digest = hashlib.sha256()
     for header in sorted((include / "libplacebo").rglob("*.h")):
         digest.update(header.relative_to(include).as_posix().encode() + b"\0")
@@ -136,36 +142,70 @@ def run(args: argparse.Namespace) -> dict:
         env["GIT_CEILING_DIRECTORIES"] = str(work.parent)
         source = next(item for item in lock["sources"] if item["id"] == "mpv")
         for patch in source["patches"]:
-            command(["git", "apply", "--allow-empty", *[f"--include={header}" for header in HEADERS],
-                     str(source_root / patch["path"])], cwd=work, env=env)
+            command(
+                ["git", "apply", "--allow-empty", *[f"--include={header}" for header in HEADERS], str(source_root / patch["path"])],
+                cwd=work,
+                env=env,
+            )
         header = work / HEADERS[0]
         if not header.is_file() or "avf_cached_subtitle_image(" not in header.read_text():
-            raise BenchmarkError("This source revision has no native subtitle cache API; "
-                                 "benchmark a revision containing the subtitle image cache patch")
+            raise BenchmarkError(
+                "This source revision has no native subtitle cache API; benchmark a revision containing the subtitle image cache patch"
+            )
         binary = work / "native_subtitles"
         native_source = Path(__file__).with_suffix(".m")
-        build = [str(clang), "-isysroot", str(sdk), "-I", str(header.parent), "-I", str(include),
-                 "-O3", "-fno-objc-arc", "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
-                 str(native_source), "-o", str(binary)]
+        build = [
+            str(clang),
+            "-isysroot",
+            str(sdk),
+            "-I",
+            str(header.parent),
+            "-I",
+            str(include),
+            "-O3",
+            "-fno-objc-arc",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-Wno-deprecated-declarations",
+            str(native_source),
+            "-o",
+            str(binary),
+        ]
         for framework in ("Foundation", "CoreVideo", "CoreMedia", "CoreGraphics", "CoreImage", "CoreText"):
             build += ["-framework", framework]
         command(build, cwd=work, env=env)
-        raw = command([str(binary), str(args.width), str(args.height), str(args.repetitions),
-                       str(args.warmup), str(args.cold_iterations), str(args.cached_iterations)],
-                      cwd=work, env=env, timeout=300)
+        raw = command(
+            [
+                str(binary),
+                str(args.width),
+                str(args.height),
+                str(args.repetitions),
+                str(args.warmup),
+                str(args.cold_iterations),
+                str(args.cached_iterations),
+            ],
+            cwd=work,
+            env=env,
+            timeout=300,
+        )
         result = json.loads(raw)
         for workload in result["workloads"]:
             for metric in workload["metrics"].values():
                 samples = metric["samples"]
                 if len(samples) != args.repetitions or any(not math.isfinite(value) or value <= 0 for value in samples):
                     raise BenchmarkError("Native benchmark emitted invalid timing samples")
-        result["native"] = {"patchFingerprint": patch_fingerprint, "compiler": compiler,
-                            "libplacebo": libplacebo, "sourceCommit": source["commit"],
-                            "productionHeaderSHA256": hashlib.sha256(header.read_bytes()).hexdigest(),
-                            "harnessSHA256": hashlib.sha256(native_source.read_bytes()).hexdigest(),
-                            "helperSHA256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                            "validation": result.pop("validation"),
-                            "measurement": "CPU subtitle image conversion/cache lookup including frame autorelease pool; excludes GPU rendering"}
+        result["native"] = {
+            "patchFingerprint": patch_fingerprint,
+            "compiler": compiler,
+            "libplacebo": libplacebo,
+            "sourceCommit": source["commit"],
+            "productionHeaderSHA256": hashlib.sha256(header.read_bytes()).hexdigest(),
+            "harnessSHA256": hashlib.sha256(native_source.read_bytes()).hexdigest(),
+            "helperSHA256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            "validation": result.pop("validation"),
+            "measurement": "CPU subtitle image conversion/cache lookup including frame autorelease pool; excludes GPU rendering",
+        }
         return result
 
 
@@ -187,8 +227,7 @@ def main() -> int:
             raise BenchmarkError(f"Output already exists: {output}; choose a new result path")
         result = run(args)
         output.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", dir=output.parent, prefix=f".{output.name}.",
-                                         suffix=".tmp", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(mode="w", dir=output.parent, prefix=f".{output.name}.", suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
             try:
                 json.dump(result, handle, indent=2, sort_keys=True, allow_nan=False)

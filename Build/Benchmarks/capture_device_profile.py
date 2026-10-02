@@ -96,9 +96,7 @@ def validate_steady_window(raw, timing):
     containment rather than treating a fixed launch delay as proof.
     """
     durations = [phase.get("wallSeconds") for phase in raw.get("phases", {}).values()]
-    if not durations or any(
-        not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in durations
-    ):
+    if not durations or any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in durations):
         raise ValueError("Missing finite disjoint phase duration evidence")
     points = [point["elapsedSeconds"] for point in raw.get("timeline", []) if point.get("phase") == "steady"]
     if len(points) < 2 or any(not math.isfinite(v) for v in points):
@@ -156,10 +154,7 @@ def estimate_overhead(report, reference):
     allowed_context = set(mismatches) <= {"backend"}
     if mismatches and not (
         allowed_context
-        and all(
-            raw["configuration"].get("resolvedBackend") == "sampleBuffer"
-            for raw in left["observations"] + right["observations"]
-        )
+        and all(raw["configuration"].get("resolvedBackend") == "sampleBuffer" for raw in left["observations"] + right["observations"])
     ):
         raise ValueError("Overhead reference workload/options differs: " + str(mismatches))
     key = "steadyCpuSecondsPerWallSecond"
@@ -201,9 +196,7 @@ def main():
     p.add_argument("--template", default="Time Profiler")
     p.add_argument("--option", action="append", default=[])
     p.add_argument("--no-trace", action="store_true")
-    p.add_argument(
-        "--reference", type=Path, required=True, help="Matching uninstrumented aggregate JSON for overhead estimate"
-    )
+    p.add_argument("--reference", type=Path, required=True, help="Matching uninstrumented aggregate JSON for overhead estimate")
     a = p.parse_args()
     if any("=" not in v or not v.split("=", 1)[0] for v in a.option):
         p.error("--option requires key=value")
@@ -249,7 +242,7 @@ def main():
             "osBuild": details["deviceProperties"]["osBuildUpdate"],
         }
         # Install/copy the exact stamped app and fixture, rather than trusting a prior run's container.
-        device.mcp("install", {"deviceId": a.device, "appPath": str(app_dir)}, out / "install.json")
+        device.device_command(dev / "devicectl", ["install", "app", "--device", a.device, str(app_dir)], out / "install.json")
         if not url:
             device.command(
                 [
@@ -287,7 +280,11 @@ def main():
         )
         for process in json.loads((out / "processes.json").read_text())["result"]["runningProcesses"]:
             if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample"):
-                device.mcp("stop", {"deviceId": a.device, "processId": process["processIdentifier"]}, out / "stop.json")
+                device.device_command(
+                    dev / "devicectl",
+                    ["process", "terminate", "--device", a.device, "--pid", str(process["processIdentifier"])],
+                    out / "stop.json",
+                )
         name = "profile-" + str(uuid.uuid4()) + ".json"
         args = [
             "--playback-benchmark",
@@ -309,11 +306,34 @@ def main():
         for option in a.option:
             args += ["--benchmark-option", option]
         timing["launchRequestStartMonotonic"] = time.monotonic()
-        launch = device.mcp(
-            "launch", {"deviceId": a.device, "bundleId": device.BUNDLE, "launchArgs": args}, out / "launch.json"
+        device.device_command(
+            dev / "devicectl", ["process", "launch", "--device", a.device, device.BUNDLE, "--", *args], out / "launch.json"
         )
         timing["launchReturnMonotonic"] = time.monotonic()
-        pid = launch["data"]["artifacts"]["processId"]
+        processes = out / "launched-processes.json"
+        device.command(
+            [
+                dev / "devicectl",
+                "device",
+                "info",
+                "processes",
+                "--device",
+                a.device,
+                "--search",
+                "MPVUIExample",
+                "--json-output",
+                processes,
+            ],
+            log=out / "launched-processes.log",
+        )
+        matches = [
+            process["processIdentifier"]
+            for process in json.loads(processes.read_text())["result"]["runningProcesses"]
+            if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample")
+        ]
+        if len(matches) != 1:
+            raise ValueError("Could not identify the launched app process for profiling")
+        pid = matches[0]
         instrumentation = {
             "template": None if a.no_trace else a.template,
             "allProcesses": not a.no_trace,
@@ -447,9 +467,7 @@ def main():
         (out / "instrumentation-overhead.json").write_text(json.dumps(overhead, indent=2))
         print(json.dumps(overhead, indent=2), flush=True)
         if not a.no_trace and not provenance["steadyWindow"]["contained"]:
-            raise ValueError(
-                "Trace containment within steady playback is uncertain; reject attribution, see saved timing bounds"
-            )
+            raise ValueError("Trace containment within steady playback is uncertain; reject attribution, see saved timing bounds")
 
 
 if __name__ == "__main__":

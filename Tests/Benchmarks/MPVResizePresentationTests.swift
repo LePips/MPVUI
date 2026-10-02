@@ -38,7 +38,7 @@ struct MPVResizePresentationTests {
             times.withLock { $0.append(time) }
         }
         defer { layer.observePresentation(nil) }
-        try fixture.player.load(TestPaths.testMedia("feature-120fps.mkv"))
+        try fixture.player.load(TestPaths.testMedia("video-h264-120fps.mkv"))
         try await eventually("playing resize fixture") { fixture.player.state == .playing }
         try await Task.sleep(for: .seconds(2))
         times.withLock { $0.removeAll() }

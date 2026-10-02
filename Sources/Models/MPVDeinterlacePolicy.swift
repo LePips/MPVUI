@@ -1,5 +1,5 @@
 /// Deinterlacing settings applied when creating a player.
-/// Produces one frame per field to preserve temporal motion.
+/// Produces one frame per field to preserve motion.
 public struct MPVDeinterlacePolicy: Equatable, Sendable {
 
     // MARK: - Types
@@ -24,7 +24,7 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
         case bottomFirst = "bff"
     }
 
-    /// When deinterlacing should be applied.
+    /// When to apply deinterlacing.
     public enum Mode: String, CaseIterable, Sendable {
         /// Leaves deinterlacing disabled.
         case disabled
@@ -36,7 +36,7 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
 
     // MARK: - Boolean options
 
-    /// Run idet before an explicitly selected software filter to recover bad field tags.
+    /// Whether to run `idet` before an explicitly selected software filter to correct bad field tags.
     /// Detection itself requires software-accessible pixels, including progressive video.
     public let analyzeFieldOrder: Bool
 
@@ -69,9 +69,9 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
 public struct MPVDeinterlaceStatus: Equatable, Sendable {
     /// The deinterlacing policy requested by the caller.
     public var requested: MPVDeinterlacePolicy = .init()
-    /// Current displayed-frame metadata; nil means mpv cannot report it.
+    /// Whether the displayed frame is interlaced, or `nil` when mpv cannot report it.
     public var outputFrameIsInterlaced: Bool?
-    /// Actual mpv automatic deinterlacer state; explicit lavfi filters may be unknown.
+    /// Whether mpv's automatic deinterlacer is active. Explicit `lavfi` filters may be unknown.
     public var isActive: Bool?
     /// The effective deinterlacing filter description, when available.
     public var effectiveFilter: String?

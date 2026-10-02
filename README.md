@@ -9,12 +9,22 @@ import MPVUI
 import SwiftUI
 
 struct MyVideoPlayer: View {
+
+    @State
+    private var player = MPVPlayer()
+
+    let url: URL
+
     var body: some View {
-        MPVVideoPlayer(player: .init(url: /* video url */))
+        MPVVideoPlayer(player: player)
+            .task(id: url) { player.load(url) }
     }
 }
 ```
 
 ## Development
 
-See [BUILD.md](Build/BUILD.md) for local development and building steps.
+- [Building](Build/BUILD.md): native libraries, local artifact selection, and release candidates.
+- [Patches](Build/PATCHES.md): native changes and their purposes.
+- [Rendering](Build/RENDERING.md): video outputs, HDR, PiP, subtitles, and fonts.
+- [Testing](TESTING.md): automated tests, generated media, and device checks.

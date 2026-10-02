@@ -19,7 +19,7 @@ struct MPVConfigurationPropagationTests {
             autoPlay: false, renderingQuality: quality, videoOutput: output
         ))
         defer { fixture.close() }
-        try await fixture.loadPaused(TestPaths.testMedia("feature-hdr10.mkv"))
+        try await fixture.loadPaused(TestPaths.testMedia("color-hdr10.mkv"))
         let player = fixture.player
         try await eventually("accepted rendering quality diagnostics") {
             player.playbackDiagnostics.renderingQuality.requested == quality

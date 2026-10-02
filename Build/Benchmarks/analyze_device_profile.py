@@ -177,9 +177,7 @@ def validate_symbol_map(mapping, binaries):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("directory", type=Path)
-    p.add_argument(
-        "--output", type=Path, help="New output directory; defaults to input/analysis and never overwrites evidence"
-    )
+    p.add_argument("--output", type=Path, help="New output directory; defaults to input/analysis and never overwrites evidence")
     p.add_argument("--pid", type=int)
     p.add_argument("--products", type=Path, default=ROOT / ".build/device-benchmark/Build/Products/Release-iphoneos")
     p.add_argument("--symbols", type=Path, help="DeviceSupport Symbols directory when building a fresh symbol map")

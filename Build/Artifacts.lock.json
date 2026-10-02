@@ -3,13 +3,13 @@
   "dependencies" : [
 
   ],
-  "nativeInputFingerprint" : "95b1363f51179e29f13a5ccb260930e2f2689d54c1ae74d7543f29e916641f30",
+  "nativeInputFingerprint" : "58ec6aa03f402eeb44551365c5797565a0a15a2fee70a0d8679193b6d21f6807",
   "products" : [
     {
       "archive" : "Libmpv.xcframework.zip",
       "framework" : "Libmpv",
       "module" : "Libmpv",
-      "sha256" : "44bcf2305aaf8d81b7ce08948941d389e6431fdc2c589e52ab2724f73ce1106e",
+      "sha256" : "eda06eeda43fe8f1f1267a311b0e6290c0b747c6649a522881c243eb04c3ced6",
       "slices" : [
         {
           "architectures" : [
@@ -17,7 +17,7 @@
           ],
           "id" : "ios",
           "machOPlatform" : 2,
-          "minimumOS" : "15.0",
+          "minimumOS" : "16.0",
           "platform" : "ios",
           "sdk" : "iphoneos",
           "variant" : ""
@@ -29,7 +29,7 @@
           ],
           "id" : "isimulator",
           "machOPlatform" : 7,
-          "minimumOS" : "15.0",
+          "minimumOS" : "16.0",
           "platform" : "ios",
           "sdk" : "iphonesimulator",
           "variant" : "simulator"
@@ -41,7 +41,7 @@
           ],
           "id" : "maccatalyst",
           "machOPlatform" : 6,
-          "minimumOS" : "15.0",
+          "minimumOS" : "16.0",
           "platform" : "ios",
           "sdk" : "macosx",
           "variant" : "maccatalyst"
@@ -53,7 +53,7 @@
           ],
           "id" : "macos",
           "machOPlatform" : 1,
-          "minimumOS" : "12.0",
+          "minimumOS" : "13.0",
           "platform" : "macos",
           "sdk" : "macosx",
           "variant" : ""
@@ -65,7 +65,7 @@
           ],
           "id" : "tvos",
           "machOPlatform" : 3,
-          "minimumOS" : "15.0",
+          "minimumOS" : "16.0",
           "platform" : "tvos",
           "sdk" : "appletvos",
           "variant" : ""
@@ -77,7 +77,7 @@
           ],
           "id" : "tvsimulator",
           "machOPlatform" : 8,
-          "minimumOS" : "15.0",
+          "minimumOS" : "16.0",
           "platform" : "tvos",
           "sdk" : "appletvsimulator",
           "variant" : "simulator"
@@ -106,8 +106,8 @@
         }
       ],
       "target" : "Libmpv-GPL",
-      "url" : "https://github.com/LePips/MPVUI/releases/download/0.5.0/Libmpv.xcframework.zip"
+      "url" : "https://github.com/LePips/MPVUI/releases/download/0.6.0/Libmpv.xcframework.zip"
     }
   ],
-  "releaseID" : "0.5.0"
+  "releaseID" : "0.6.0"
 }

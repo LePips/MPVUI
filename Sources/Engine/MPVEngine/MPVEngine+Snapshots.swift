@@ -111,6 +111,10 @@ extension MPVEngine {
     func refreshMediaInformation() {
         lifecycleDiagnostics.engineActivity.mediaSnapshots &+= 1
         let tracks = Self.parseTracks(getNode("track-list"))
+        // Keep discovered tracks while a pending load waits for a surface.
+        if isLoading, tracks.isEmpty {
+            return
+        }
         let chapters = Self.parseChapters(getNode("chapter-list"))
         let metadata = Self.parseMetadata(getNode("metadata"))
 

@@ -1,6 +1,6 @@
 /// Immutable playback defaults and output options for ``MPVPlayer``.
 ///
-/// Runtime controls such as volume and playback rate use the player's methods.
+/// Use the player's methods to change runtime controls such as volume and playback rate.
 /// Other settings require a new player.
 ///
 /// Pass the configuration to the player initializer on the main actor:
@@ -19,40 +19,40 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
     /// The hardware-decoding strategy requested from mpv.
     public enum HardwareDecoding: String, CaseIterable, Equatable, Sendable {
-        /// Let mpv select a safe hardware decoder when one is available.
+        /// Selects a safe hardware decoder, preferring VideoToolbox for Metal output.
         case automatic = "auto-safe"
 
-        /// Request Apple's VideoToolbox decoder.
+        /// Requests Apple's VideoToolbox decoder.
         case videoToolbox = "videotoolbox"
 
-        /// Decode video in software.
+        /// Decodes video in software.
         case disabled = "no"
     }
 
     /// How MPVUI configures HDR output and tone mapping.
     public enum HDRPolicy: String, CaseIterable, Equatable, Sendable {
-        /// Match the source, display capabilities, and current output route.
+        /// Matches the source, display capabilities, and current output route.
         case automatic
 
-        /// Request HDR output whenever the platform permits it.
+        /// Requests HDR output whenever the platform permits it.
         case always
 
-        /// Disable HDR output and tone-map HDR sources to SDR.
+        /// Disables HDR output and tone-map HDR sources to SDR.
         case disabled
 
-        /// Request HDR with the system's constrained brightness policy when supported.
+        /// Requests HDR with the system's constrained brightness policy when supported.
         case constrained
 
-        /// Request HDR when the display and platform support it.
+        /// Requests HDR when the display and platform support it.
         public static let hdrWhenAvailable = Self.always
 
-        /// Request SDR conversion when supported by the selected backend.
+        /// Requests SDR conversion when supported by the selected backend.
         public static let sdr = Self.disabled
     }
 
-    /// Minimum forwarded severity; each level includes more severe messages.
+    /// The minimum severity of forwarded log messages. Each level includes more severe messages.
     public enum LogLevel: String, CaseIterable, Equatable, Sendable {
-        /// Disable mpv log forwarding.
+        /// Disables mpv log forwarding.
         case none = "no"
 
         /// Forwards fatal errors only.
@@ -64,7 +64,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         /// Forwards warnings and more severe messages.
         case warning = "warn"
 
-        /// Forwards informational and more severe messages.
+        /// Forwards informational messages and more severe messages.
         case info
 
         /// Also forwards playback status updates.
@@ -76,17 +76,17 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         /// Also forwards debugging diagnostics.
         case debug
 
-        /// Forward all trace messages.
+        /// Forwards all trace messages.
         case trace
     }
 
-    /// The video presentation backend used for the player’s lifetime.
+    /// The video presentation backend used for the player's lifetime.
     public enum VideoOutput: String, CaseIterable, Equatable, Sendable {
-        /// Full gpu-next rendering through Metal/MoltenVK.
+        /// Full `gpu-next` rendering through Metal and MoltenVK.
         case metal
 
-        /// Native AVFoundation output with iOS PiP; requires the native-output Libmpv build.
-        /// AVFoundation handles color conversion, bypassing gpu-next shaders and tone mapping.
+        /// Native AVFoundation output with iOS PiP. Requires the native-output Libmpv build.
+        /// AVFoundation handles color conversion, bypassing `gpu-next` shaders and tone mapping.
         /// Unsupported native formats report a playback error.
         case sampleBuffer
     }
@@ -129,10 +129,10 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public let playbackRate: Double
 
     /// Reference white in nits for native HDR subtitles and overlay graphics.
-    /// Values are clamped to `1...1000`; non-finite values use 203 nits.
+    /// Values are clamped to `1...1000`. Non-finite values use 203 nits.
     public let subtitleLuminance: Double
 
-    /// Volume clamped to `0...100`; NaN uses ``defaultVolume``.
+    /// Volume clamped to `0...100`. NaN uses ``defaultVolume``.
     public let volume: Double
 
     // MARK: - Timing options
@@ -153,31 +153,31 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public let audio: MPVAudioConfiguration
 
     /// Ownership of display conversion and SDR reference viewing behavior.
-    /// - Note: Overrides have no effect with sample-buffer output; AVFoundation owns conversion.
+    /// - Note: Overrides have no effect with sample-buffer output. AVFoundation owns conversion.
     public let colorManagement: MPVColorManagement
 
-    /// Interlace detection, processing and field-order policy.
+    /// Interlace detection, processing, and field-order policy.
     public let deinterlace: MPVDeinterlacePolicy
 
-    /// Strict reproduction eligibility or explicitly lossy Profile 7 compatibility.
+    /// The policy for native Dolby Vision playback and lossy Profile 7 conversion.
     public let dolbyVisionPolicy: MPVDolbyVisionPolicy
 
     /// The requested hardware-decoding strategy.
     public let hardwareDecoding: HardwareDecoding
 
     /// Desired HDR behavior for the selected backend.
-    /// - Note: Sample-buffer overrides require OS 26; earlier systems use automatic HDR.
+    /// - Note: Sample-buffer overrides require OS 26. Earlier systems use automatic HDR.
     public let hdrPolicy: HDRPolicy
 
     /// The minimum severity of forwarded mpv log messages.
     public let logLevel: LogLevel
 
-    /// Renderer cost/quality defaults and optional explicit overrides.
+    /// Rendering quality presets and optional overrides.
     /// - Note: Has no effect with sample-buffer output.
     public let renderingQuality: MPVRenderingQuality
 
     /// SDR gamut and precision, independent of the HDR policy.
-    /// - Note: Has no effect with sample-buffer output; AVFoundation manages precision.
+    /// - Note: Has no effect with sample-buffer output. AVFoundation manages precision.
     public let sdrOutput: MPVSDROutputPolicy
 
     /// The video backend used for the player's lifetime. Defaults to sample buffers.
@@ -186,13 +186,13 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
     // MARK: - Additional options
 
-    /// Extra mpv options applied last. MPVUI's reserved options cannot be overridden.
-    /// - Note: gpu-next picture controls (`brightness`, `contrast`, `gamma`, `hue`,
+    /// Extra mpv options applied last. These cannot override MPVUI's reserved options.
+    /// - Note: `gpu-next` picture controls (`brightness`, `contrast`, `gamma`, `hue`,
     ///   `saturation`) have no effect with sample-buffer output.
     ///
     /// For app-owned subtitle fonts, set `sub-fonts-dir` to a local directory path
     /// and `sub-font` to the font's internal family name. MPVUI ships no fonts.
-    /// These options affect mpv-rendered subtitles; style text from
+    /// These options affect mpv-rendered subtitles. Style text from
     /// ``MPVPlayer/textSubtitleStream()`` in your own UI.
     public let additionalOptions: [String: String]
 

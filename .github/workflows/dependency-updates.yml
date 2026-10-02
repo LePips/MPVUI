@@ -2,7 +2,7 @@ name: Native dependency updates
 
 on:
   schedule:
-    - cron: "17 8 * * 1"
+    - cron: '17 8 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         id: updates
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 Build/update_dependencies.py --all --report .build/dependency-update.md
+        run: make update-dependencies ARGS='--all --report .build/dependency-update.md'
       - name: Open or refresh PR
         uses: peter-evans/create-pull-request@v8
         with:

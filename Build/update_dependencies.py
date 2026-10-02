@@ -169,8 +169,11 @@ def update_source(root, source, android, upstream):
 
 def update_sdk(dependencies, upstream):
     repository, _, _ = release_url(dependencies[0]["url"])
-    releases = [release for release in upstream.releases(repository)
-                if not release["draft"] and not release["prerelease"] and version(release["tag_name"]) is not None]
+    releases = [
+        release
+        for release in upstream.releases(repository)
+        if not release["draft"] and not release["prerelease"] and version(release["tag_name"]) is not None
+    ]
     if not releases:
         raise ValueError(f"No stable releases for {repository}")
     release = max(releases, key=lambda item: version(item["tag_name"]))
@@ -224,8 +227,7 @@ def prepare_update(root, component, upstream):
 
 
 def report(changes):
-    return "".join(f"- {change.dependency}: {change.previous} -> {change.version} ([changes]({change.link}))\n"
-                   for change in changes)
+    return "".join(f"- {change.dependency}: {change.previous} -> {change.version} ([changes]({change.link}))\n" for change in changes)
 
 
 def title(changes):

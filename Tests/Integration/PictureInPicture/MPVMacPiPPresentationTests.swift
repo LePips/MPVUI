@@ -303,7 +303,7 @@ struct MPVMacPiPPresentationTests {
     }
 }
 
-/// Controls only the system boundary; tests use the real player, media, layers,
+/// Controls only the system boundary. Tests use the real player, media, layers,
 /// hosting implementation, and delegate callbacks under test.
 @MainActor
 private final class ControlledPiPPresenter: MPVMacPiPPresenting {

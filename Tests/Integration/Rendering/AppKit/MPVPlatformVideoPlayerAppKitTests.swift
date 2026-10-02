@@ -1038,7 +1038,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         #expect(player.lastError == nil)
     }
 
-    @Test(.enabled(if: TestPaths.hasDolbyVisionMedia, "Add the optional Profile 5 chart; see TESTING.md."))
+    @Test
     @MainActor
     func `hdr surface survives repeated window resizes`() async throws {
         let player = MPVPlayer(
@@ -1068,10 +1068,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             window.contentView = nil
         }
 
-        let mediaURL = TestPaths.dolbyVisionMedia
-        try #require(FileManager.default.fileExists(atPath: mediaURL.path))
-
-        player.load(mediaURL, autoPlay: true)
+        try player.load(TestPaths.testMedia("color-hdr10.mkv"), autoPlay: true)
         let didStartPlayback = try await waitForPlayer(player) {
             $0.state == .playing
         }

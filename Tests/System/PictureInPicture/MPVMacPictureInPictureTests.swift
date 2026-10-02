@@ -206,7 +206,7 @@ struct MPVMacPictureInPictureTests {
     @MainActor
     func `real system host plays resizes and restores one mpv session`() async throws {
         _ = NSApplication.shared
-        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled))
+        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         let sourceWindow = makeWindow()
         sourceWindow.title = "MPVUI PiP validation"

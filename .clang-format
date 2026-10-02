@@ -1,0 +1,5 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 140
+# Preserve header dependencies and the native test harness's include order.
+SortIncludes: Never

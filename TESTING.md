@@ -2,92 +2,82 @@
 
 ## Run tests
 
-[Build and select a native artifact](Build/BUILD.md), then run from the repository root:
+[Build and select the native libraries](Build/BUILD.md), then run these commands from the repository root:
 
 ```sh
-brew install python ffmpeg webp
-make -C Build test-unit  # Unit tests
-make -C Build test       # Unit and integration tests
-make -C Build coverage   # Same tests, with coverage thresholds
+brew install python ffmpeg webp dovi_tool
+make test-unit  # Unit tests
+make test       # Unit and integration tests
+make coverage   # Unit and integration tests with coverage thresholds
 ```
 
-Coverage checks compiled Swift sources against [configured thresholds](Build/Tests/coverage-thresholds.json). Reports go to `.build/coverage`.
+Coverage reports go to `.build/coverage`. The [thresholds](Build/Tests/coverage-thresholds.json) apply to compiled Swift sources, not the prebuilt native libraries.
 
-For a specific suite or the build tools:
+To run one player suite or test the build scripts:
 
 ```sh
-swift test --no-parallel --filter MPVDolbyVisionPolicyTests
-swift test --package-path Build --no-parallel
-python3 -m unittest discover -s Build/Tests -p 'test_*.py'
+make test-swift ARGS='--filter MPVDolbyVisionPolicyTests'
+make test-tools  # Swift build-tool tests and both Python tooling suites
 ```
 
-Run playback and UI tests serially. In Xcode, select the `MPVUI` package scheme and disable parallel testing for iOS and tvOS simulators. macOS frame readback and PiP tests need an awake display and logged-in session; prefix direct runs with `caffeinate -disu`. The Makefile test commands handle this automatically.
+Run playback and UI tests serially. In Xcode, use the `MPVUI` scheme with parallel testing disabled. Stay logged in for macOS rendering and PiP tests. The Makefile runs `caffeinate -disu` to keep the display awake.
 
 ## Test media
 
-No sample media is checked into Git. Tests automatically generate and cache codec, audio, subtitle, chapter, HDR, WebP, and interlaced fixtures before building. Missing, corrupt, or outdated files regenerate. Encoders run on the build host; generated files stay in ignored build output.
+The build generates and caches test media locally, replacing missing, damaged, or outdated files.
 
 To generate media manually in `.build/test-media`:
 
 ```sh
-python3 Build/Tests/prepare_test_media.py
+make media
 ```
 
-Use `--help` for fixture groups and output options. To add a fixture, update its generator, register the outputs in [prepare_test_media.py](Build/Tests/prepare_test_media.py), and update the resource and codec tests.
-
-Optional reference clips belong in the ignored example Media folder or `MPVUI_TEST_MEDIA_DIRECTORY`. Use `MPVUI_DOLBY_VISION_FIXTURE` for a Profile 5 chart override. [import_harness_media.py](Build/Tests/import_harness_media.py) can copy an existing local reference library.
+Use `make help TARGET=media` for groups and output options, then pass them through `ARGS`. See [Test media](TEST_MEDIA.md) for fixtures, additions, and coverage gaps.
 
 ## Write tests
 
-Tests live in `Tests/Unit`, `Tests/Integration`, `Tests/System`, and `Tests/Benchmarks`. Shared helpers are in `Tests/Support`; build-tool tests and generators are in `Build/Tests`.
+Tests live in `Tests/Unit`, `Tests/Integration`, `Tests/System`, and `Tests/Benchmarks`. Shared helpers live in `Tests/Support`. Build-script tests and media generators live in `Build/Tests`.
 
-- Add cases to the feature's existing suite, organized by behavior.
-- Check observable results, including failure and recovery. Parameterize input variants.
-- Reuse `PlaybackFixture`, `NativePlaybackSession`, and temporary directories.
-- Use `eventually` for asynchronous readiness. Require mandatory fixtures and explain optional skips.
+- Add cases to the feature's existing suite when possible.
+- Check what the player does, including how it fails and recovers.
+- Reuse `PlaybackFixture` and `NativePlaybackSession` for playback setup.
+- Use `eventually` to wait for a result instead of a fixed sleep.
+- Fail when required media is missing. Explain skips for optional media or hardware.
 
 ## Native and system checks
 
-After building the native macOS target, run HDR and metadata checks with address and undefined-behavior sanitizers:
+After building the native macOS libraries, run the HDR, metadata, compositor, and buffer-pool tests with AddressSanitizer and UndefinedBehaviorSanitizer:
 
 ```sh
-brew install dovi_tool
-python3 Build/Tests/NativeHDR/run.py
+make test-native
 ```
 
-Opt-in system tests:
+Enable system tests explicitly:
 
 ```sh
-caffeinate -disu env MPVUI_RUN_MAC_PIP_SYSTEM_TESTS=1 swift test --no-parallel --filter MPVMacPictureInPictureTests
-MPVUI_RUN_NATIVE_AUDIO_TESTS=1 swift test --no-parallel --filter MPVNativeAudioIntegrationTests
-MPVUI_RUN_INTERLACE_VALIDATION=1 swift test --no-parallel --filter MPVInterlacedPlaybackTests
+MPVUI_RUN_MAC_PIP_SYSTEM_TESTS=1 make test-swift ARGS='--filter MPVMacPictureInPictureTests'
+MPVUI_RUN_NATIVE_AUDIO_TESTS=1 make test-swift ARGS='--filter MPVNativeAudioIntegrationTests'
+MPVUI_RUN_INTERLACE_VALIDATION=1 make test-swift ARGS='--filter MPVInterlacedPlaybackTests'
 ```
 
-Audio tests use the real route with playback muted. They check channel layouts, spatialization eligibility, Dolby seeking, and PCM fallback. Confirm audible Spatial Audio and head tracking on physical devices with compatible headphones.
+Audio tests use the current output with playback muted. Use compatible headphones to check Spatial Audio and head tracking manually. Check HDR appearance, display switching, PiP, and audio/video sync on real hardware.
 
-Check HDR appearance, display switching, and PiP on physical devices.
-
-Use `Build/benchmark --help` for performance runs and [RenderingValidation/generate.py](Build/Tests/RenderingValidation/generate.py) for optional rendering charts.
+Run `make help TARGET=benchmark` for benchmarks and `make rendering-media` to create rendering charts.
 
 ## Device testing
 
-Use [device benchmarks](Build/Benchmarks/README.md) to measure CPU and memory use, check playback, and profile on an iPhone or iPad.
+See [device benchmarks](Build/Benchmarks/README.md) for CPU, memory, and playback measurements on an iPhone or iPad.
 
-To run package tests on an unlocked device, generate a test host with your Apple development team:
+To run the tests on a connected, unlocked device:
 
 ```sh
 brew install xcodegen
-python3 Build/Tests/generate_device_test_project.py --team APPLE_TEAM_ID
-xcodebuildmcp device list
-caffeinate -disu xcodebuildmcp device test \
-  --project-path .build/device-tests/MPVUIRegressionTests.xcodeproj \
-  --scheme MPVUIRegressionTests --device-id DEVICE_UDID --configuration Release \
-  --derived-data-path .build/device-tests/DerivedData \
-  --extra-args '-allowProvisioningUpdates' 'ENABLE_TESTABILITY=YES' '-parallel-testing-enabled' 'NO'
+make device-project ARGS='--team APPLE_TEAM_ID'
+make test-device ARGS='--device-id DEVICE_UDID'
 ```
 
-Release tests require `ENABLE_TESTABILITY=YES`. To run one suite, add `-only-testing:MPVUITests/SUITE_NAME` to `--extra-args`.
+Replace `APPLE_TEAM_ID` with your development team ID and `DEVICE_UDID` with the identifier shown in Xcode's Devices and Simulators window. Use `make help TARGET=test-device` for additional test options. The target runs tests serially with Release testability and provisioning support.
 
-The generated project stays in `.build/device-tests` and uses the repository's test sources. Regenerate it after adding or removing tests. For simulators, omit `--team` and use `xcodebuildmcp simulator test --simulator-id SIMULATOR_UDID`.
+You can also open the generated project in Xcode, select `MPVUIRegressionTests` and your device, and choose **Product > Test**. Regenerate the project after adding or removing tests.
 
-`MPVNativePresentationTests` checks frame delivery, motion, pause, and exact seeking on physical iOS devices. Some GPU readback tests also require a device. Confirm screen output and audible synchronization manually.
+For a simulator, use `make device-project` without a team and `make test-simulator ARGS='--simulator-id SIMULATOR_UDID'`. Presentation and some GPU readback tests require a physical device.

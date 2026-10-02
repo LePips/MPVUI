@@ -3,7 +3,7 @@ public enum MPVPlaybackState: Equatable, Sendable {
     /// No media has been loaded.
     case idle
 
-    /// A media source is being opened.
+    /// The player is opening a media source.
     case loading
 
     /// Media is loaded and can begin playback.
@@ -18,7 +18,7 @@ public enum MPVPlaybackState: Equatable, Sendable {
     /// Playback is waiting for enough media data.
     case buffering
 
-    /// The player is applying a seek operation.
+    /// The player is seeking.
     case seeking
 
     /// Playback reached the end of the media.
@@ -30,7 +30,7 @@ public enum MPVPlaybackState: Equatable, Sendable {
     /// Playback failed and cannot continue without another operation.
     case failed(MPVPlayerError)
 
-    /// Whether media is currently advancing.
+    /// Whether playback is advancing.
     public var isPlaying: Bool {
         self == .playing
     }

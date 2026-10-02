@@ -25,7 +25,7 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         return layer
     }
 
-    /// Whether this exact surface currently owns the player's render target.
+    /// Whether this surface owns the player's render target.
     var isActiveRenderingSurface: Bool {
         player.isRenderSurfaceActive(token: surfaceToken)
     }
@@ -205,13 +205,13 @@ public final class MPVPlatformVideoPlayer: PlatformView {
         configureBaseLayer()
     }
 
-    /// Unavailable; create the surface with ``init(player:)``.
+    /// Unavailable. Use ``init(player:)`` to create the surface.
     @available(*, unavailable, message: "Use init(player:) to inject an MPVPlayer.")
     override public init(frame _: CGRect) {
         fatalError("Use init(player:) to inject an MPVPlayer")
     }
 
-    /// Unavailable; create the surface with ``init(player:)``.
+    /// Unavailable. Use ``init(player:)`` to create the surface.
     @available(*, unavailable, message: "Use init(player:) to inject an MPVPlayer.")
     public required init?(coder _: NSCoder) {
         fatalError("Use init(player:) to inject an MPVPlayer")
@@ -493,13 +493,16 @@ extension MPVPlatformVideoPlayer {
     private func updateSampleBufferSurface() {
         guard isActiveRenderingSurface, bounds.width > 0, bounds.height > 0 else { return }
         let displayLayer = player.sampleBufferDisplayLayer
-        applyWithoutImplicitAnimations {
-            if displayLayer.superlayer !== metalLayer {
-                displayLayer.removeFromSuperlayer()
-                metalLayer.insertSublayer(displayLayer, at: 0)
-                (metalLayer as? MPVMetalLayer)?.videoSublayer = displayLayer
+        let scale = platformScale
+        if displayLayer.superlayer !== metalLayer || displayLayer.contentsScale != scale {
+            applyWithoutImplicitAnimations {
+                if displayLayer.superlayer !== metalLayer {
+                    displayLayer.removeFromSuperlayer()
+                    metalLayer.insertSublayer(displayLayer, at: 0)
+                    (metalLayer as? MPVMetalLayer)?.videoSublayer = displayLayer
+                }
+                displayLayer.contentsScale = scale
             }
-            displayLayer.contentsScale = platformScale
         }
         let configuration = makeSurfaceConfiguration()
         configureNativeLayerPolicy(displayLayer)
@@ -515,15 +518,18 @@ extension MPVPlatformVideoPlayer {
     }
 
     private func configureNativeLayerPolicy(_ displayLayer: AVSampleBufferDisplayLayer) {
-        applyWithoutImplicitAnimations {
-            if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+            let dynamicRange: CALayer.DynamicRange = switch player.configuration.hdrPolicy {
+            case .automatic: .automatic
+            case .disabled: .standard
+            case .always: .high
+            case .constrained: .constrainedHigh
+            }
+            guard displayLayer.toneMapMode != .ifSupported
+                || displayLayer.preferredDynamicRange != dynamicRange else { return }
+            applyWithoutImplicitAnimations {
                 displayLayer.toneMapMode = .ifSupported
-                switch player.configuration.hdrPolicy {
-                case .automatic: displayLayer.preferredDynamicRange = .automatic
-                case .disabled: displayLayer.preferredDynamicRange = .standard
-                case .always: displayLayer.preferredDynamicRange = .high
-                case .constrained: displayLayer.preferredDynamicRange = .constrainedHigh
-                }
+                displayLayer.preferredDynamicRange = dynamicRange
             }
         }
     }
@@ -1253,7 +1259,7 @@ private extension MPVPlatformVideoPlayer {
     #endif
 }
 
-/// The display link retains this target; its closure holds the surface weakly.
+/// The display link retains this target. Its closure holds the surface weakly.
 @MainActor
 private final class MPVGeometryDisplayLinkTarget: NSObject {
     private let update: () -> Void

@@ -141,21 +141,27 @@ extension MPVEngine {
             case .subtitle: "sub-add"
             }
 
-        let previousIDs = track.type == .subtitle
+        let selectsAfterAdding = track.type == .subtitle || (track.type == .video && renderTarget == nil)
+        let previousIDs = selectsAfterAdding
             ? Set(Self.parseTracks(getNode("track-list")).map(\.id)) : []
         let status = runCommand([
             commandName,
             path,
-            track.select && track.type != .subtitle ? "select" : "auto",
+            track.select && !selectsAfterAdding ? "select" : "auto",
         ])
         if status < 0 {
             publishCommandError(status, context: "Load external \(track.type.rawValue) track")
-        } else if track.type == .subtitle, track.select,
+        } else if selectsAfterAdding, track.select,
                   let added = Self.parseTracks(getNode("track-list")).first(where: {
-                      $0.type == .subtitle && !previousIDs.contains($0.id)
+                      $0.type == track.type && !previousIDs.contains($0.id)
                   })
         {
-            selectSubtitleImmediatelyOrDefer(added.id, for: track.subtitleRole)
+            if track.type == .subtitle {
+                selectSubtitleImmediatelyOrDefer(added.id, for: track.subtitleRole)
+            } else {
+                // Save the selection without starting video decoding.
+                setPropertyImmediatelyOrDefer("vid", to: String(added.mpvID))
+            }
         }
     }
 

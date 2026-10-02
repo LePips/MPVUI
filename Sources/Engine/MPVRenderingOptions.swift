@@ -15,6 +15,23 @@ enum MPVRenderingOptions {
         var shaderPaths: [String] = []
     }
 
+    static func hardwareDecodingOptions(
+        _ decoding: MPVPlayerConfiguration.HardwareDecoding,
+        backend: MPVPlayerConfiguration.VideoOutput
+    ) -> [String: String] {
+        // gpu-next exposes a Vulkan device, but MoltenVK has no Vulkan video
+        // decoder. Try the zero-copy Apple decoder before mpv's safe fallback
+        // list, which otherwise probes Vulkan first and fails in FFmpeg.
+        var options = ["hwdec": decoding == .automatic && backend == .metal ? "videotoolbox,auto-safe" : decoding.rawValue]
+        if backend == .metal, decoding != .disabled {
+            // Retain decode parallelism without four FFmpeg frame-thread
+            // contexts and their extra VideoToolbox surfaces. Hosts can
+            // override this through additionalOptions for heavier workloads.
+            options["hwdec-threads"] = "2"
+        }
+        return options
+    }
+
     static func resolve(
         _ quality: MPVRenderingQuality,
         backend: MPVPlayerConfiguration.VideoOutput,
@@ -55,6 +72,9 @@ enum MPVRenderingOptions {
             peak = .automatic
         }
         var options = [
+            // Waiting for presentation with depth 1 prevents timely rendering
+            // of the next frame on iPhone. Keep two frames in flight.
+            "swapchain-depth": "2",
             "scale": (quality.scaling ?? scale).rawValue,
             "cscale": (quality.chromaScaling ?? cscale).rawValue,
             "scale-antiring": normalized(quality.antiringing, fallback: antiring),

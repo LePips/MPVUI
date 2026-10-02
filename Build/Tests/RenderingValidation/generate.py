@@ -4,6 +4,7 @@
 This creates synthetic encoded color values, not measured reference-display
 captures. No downloaded media or external font assets are required.
 """
+
 import argparse
 from array import array
 import hashlib
@@ -33,8 +34,7 @@ def chart(path, hdr=False, width=1920, height=1080):
         for x in range(width):
             t = x / (width - 1)
             if hdr:
-                luminance = ([0, 100, 203, 400, 1000][min(4, int(t * 5))]
-                             if band == 0 else (1000 * t if band == 1 else 10 * t))
+                luminance = [0, 100, 203, 400, 1000][min(4, int(t * 5))] if band == 0 else (1000 * t if band == 1 else 10 * t)
                 v = pq(luminance)
                 rgb = (v, v, v) if band < 3 else (pq(203) * t, pq(203) * (1 - t), 0)
             elif band == 0:
@@ -75,24 +75,84 @@ def main():
             x265 = "log-level=error:pools=2:repeat-headers=1"
             if hdr:
                 x265 += ":master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400"
-            run(["-loop", "1", "-framerate", "24", "-i", str(ppm), "-t", str(args.duration),
-                 "-vf", f"scale=out_color_matrix={matrix}:out_range=tv,format=yuv420p10le",
-                 "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", x265,
-                 "-crf", "10",
-                 "-color_primaries", "bt2020" if hdr else "smpte432",
-                 "-color_trc", "smpte2084" if hdr else "iec61966-2-1",
-                 "-colorspace", "bt2020nc" if hdr else "bt709", "-color_range", "tv",
-                 "-bsf:v", "hevc_metadata=colour_primaries=" + ("9:transfer_characteristics=16:matrix_coefficients=9" if hdr else "12:transfer_characteristics=13:matrix_coefficients=1"),
-                 "-tag:v", "hvc1", "-map_metadata", "-1", "-metadata", f"title={name}",
-                 str(args.output / f"{name}.mp4")])
+            run(
+                [
+                    "-loop",
+                    "1",
+                    "-framerate",
+                    "24",
+                    "-i",
+                    str(ppm),
+                    "-t",
+                    str(args.duration),
+                    "-vf",
+                    f"scale=out_color_matrix={matrix}:out_range=tv,format=yuv420p10le",
+                    "-c:v",
+                    "libx265",
+                    "-preset",
+                    "ultrafast",
+                    "-x265-params",
+                    x265,
+                    "-crf",
+                    "10",
+                    "-color_primaries",
+                    "bt2020" if hdr else "smpte432",
+                    "-color_trc",
+                    "smpte2084" if hdr else "iec61966-2-1",
+                    "-colorspace",
+                    "bt2020nc" if hdr else "bt709",
+                    "-color_range",
+                    "tv",
+                    "-bsf:v",
+                    "hevc_metadata=colour_primaries="
+                    + (
+                        "9:transfer_characteristics=16:matrix_coefficients=9"
+                        if hdr
+                        else "12:transfer_characteristics=13:matrix_coefficients=1"
+                    ),
+                    "-tag:v",
+                    "hvc1",
+                    "-map_metadata",
+                    "-1",
+                    "-metadata",
+                    f"title={name}",
+                    str(args.output / f"{name}.mp4"),
+                ]
+            )
     if not args.only_charts:
-        run(["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=60000/1001",
-         "-t", str(args.duration), "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-         "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709",
-         "-colorspace", "bt709", "-color_range", "tv", "-map_metadata", "-1",
-         "-bsf:v", "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
-         "-metadata", "title=Rendering cost 1080p motion",
-         str(args.output / "render-cost-1080p60.mp4")])
+        run(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=1920x1080:rate=60000/1001",
+                "-t",
+                str(args.duration),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-colorspace",
+                "bt709",
+                "-color_range",
+                "tv",
+                "-map_metadata",
+                "-1",
+                "-bsf:v",
+                "h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+                "-metadata",
+                "title=Rendering cost 1080p motion",
+                str(args.output / "render-cost-1080p60.mp4"),
+            ]
+        )
     ass = """[Script Info]
 Title: HDR overlay validation
 ScriptType: v4.00+
@@ -119,8 +179,7 @@ Dialogue: 0,0:00:00.00,0:01:00.00,Default,,0,0,0,,Reference white | {\\c&H0000FF
             assert stream["color_primaries"] == "bt2020" and stream["color_transfer"] == "smpte2084"
         if name.startswith("render-") and not args.only_charts:
             assert stream["color_primaries"] == "bt709" and stream["color_transfer"] == "bt709"
-        metadata.append({"filename": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                         "probe": json.loads(probe)})
+        metadata.append({"filename": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "probe": json.loads(probe)})
     (args.output / "manifest.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Generated media and verified tags: {args.output.resolve()}")
 

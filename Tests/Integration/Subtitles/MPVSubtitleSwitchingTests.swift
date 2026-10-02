@@ -79,12 +79,12 @@ struct MPVSubtitleSwitchingTests {
         }
     }
 
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_SUBTITLE_SWITCH_FIXTURE"] != nil))
+    @Test
     func `switching embedded text subtitles preserves playback`() async throws {
-        let environment = ProcessInfo.processInfo.environment
-        let reference = try URL(fileURLWithPath: #require(environment["MPVUI_SUBTITLE_SWITCH_FIXTURE"]))
-        var options = ["sub-auto": "no", "sid": "no", "mute": "yes"]
-        if let log = environment["MPVUI_SUBTITLE_SWITCH_LOG"] {
+        // A small packet cache keeps unselected subtitle packets behind the
+        // demuxer, as in long real files.
+        var options = ["sub-auto": "no", "sid": "no", "mute": "yes", "demuxer-max-bytes": "65536"]
+        if let log = ProcessInfo.processInfo.environment["MPVUI_SUBTITLE_SWITCH_LOG"] {
             options["log-file"] = log
         }
         let fixture = PlaybackFixture(configuration: .init(
@@ -102,7 +102,7 @@ struct MPVSubtitleSwitchingTests {
         defer { observation.cancel() }
         var logs: [String] = []
         player.logHandler = { logs.append("\($0.prefix): \($0.message)") }
-        try await fixture.loadPaused(reference, at: .seconds(300))
+        try await fixture.loadPaused(TestPaths.multitrackMedia, at: .seconds(1))
         let tracks = player.subtitleTracks.filter { $0.codec == "subrip" }
         try #require(tracks.count >= 2)
         player.play()

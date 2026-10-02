@@ -15,7 +15,7 @@ struct MPVDisplayMatchingContent: Equatable {
     let dolbyVision: DolbyVision?
 
     /// A display hint for the validated, single-layer native output. This is
-    /// never passed to a decoder; the decoder owns the actual HEVC parameter
+    /// never passed to a decoder. The decoder owns the actual HEVC parameter
     /// sets and per-frame RPU. In particular, a source Profile 7 declaration
     /// cannot advertise the converted Profile 8.1 output without evidence.
     struct DolbyVision: Equatable {

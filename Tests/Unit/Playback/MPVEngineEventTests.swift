@@ -39,7 +39,7 @@ struct MPVEngineEventTests {
     @Test @MainActor
     func `native output rejection reports one fatal error without requesting a replacement`() async throws {
         var rejected: [String] = []
-        let engine = MPVEngine(configuration: .init(videoOutput: .sampleBuffer)) { emission in
+        let engine = MPVEngine(configuration: .init(additionalOptions: ["ao": "null"], videoOutput: .sampleBuffer)) { emission in
             if case let .error(.nativeVideoOutputUnavailable(reason), fatal: true) = emission.update {
                 rejected.append(reason)
             }
@@ -81,7 +81,8 @@ struct MPVEngineEventTests {
             #expect(!engine.didRejectNativeOutput)
             #expect(engine.fatalPlaybackError == nil)
             #expect(engine.videoOutput == .sampleBuffer)
-            #expect(engine.needsSourceLoad)
+            #expect(!engine.needsSourceLoad && engine.handle != nil)
+            #expect(engine.lifecycleDiagnostics.loadCommands == 1)
         }
     }
 

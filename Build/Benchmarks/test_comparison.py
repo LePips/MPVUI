@@ -14,12 +14,13 @@ def report(samples=None, *, label="baseline", direction="lower"):
         "environment": {"comparisonKey": {"host": "test-host", "architecture": "arm64"}},
         "configuration": {"repetitions": 3},
         "source": {"revision": "a"},
-        "workloads": [{
-            "id": "decode",
-            "parameters": {"frames": 100, "mediaSHA256": "abc"},
-            "metrics": {"elapsed": {"unit": "ms", "direction": direction,
-                                     "samples": [8, 10, 12] if samples is None else samples}},
-        }],
+        "workloads": [
+            {
+                "id": "decode",
+                "parameters": {"frames": 100, "mediaSHA256": "abc"},
+                "metrics": {"elapsed": {"unit": "ms", "direction": direction, "samples": [8, 10, 12] if samples is None else samples}},
+            }
+        ],
     }
 
 
@@ -144,13 +145,18 @@ class ComparisonTests(unittest.TestCase):
 
     def test_threshold_direction_and_strict_boundary(self):
         for direction, value, expected in (
-            ("lower", 111, True), ("lower", 110, False), ("lower", 89, False),
-            ("higher", 89, True), ("higher", 90, False), ("higher", 111, False),
+            ("lower", 111, True),
+            ("lower", 110, False),
+            ("lower", 89, False),
+            ("higher", 89, True),
+            ("higher", 90, False),
+            ("higher", 111, False),
             ("neutral", 200, None),
         ):
             with self.subTest(direction=direction, value=value):
                 comparison = compare_reports(
-                    report([100], direction=direction), report([value], direction=direction),
+                    report([100], direction=direction),
+                    report([value], direction=direction),
                     regression_percent=10,
                 )
                 self.assertIs(metric(comparison)["regression"], expected)
@@ -166,7 +172,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(comparison["hasRegressions"])
 
     def test_invalid_samples_are_rejected_even_with_override(self):
-        for samples in ([], [float("nan")], [float("inf")], [-float("inf")], [True], ["1"], [None], [10 ** 1000], "123"):
+        for samples in ([], [float("nan")], [float("inf")], [-float("inf")], [True], ["1"], [None], [10**1000], "123"):
             with self.subTest(samples=str(samples)[:50]):
                 with self.assertRaisesRegex(ValueError, "samples"):
                     compare_reports(report(), report(samples), allow_mismatch=True)

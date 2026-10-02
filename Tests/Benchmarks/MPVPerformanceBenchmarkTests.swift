@@ -11,8 +11,8 @@ import Libmpv
 import QuartzCore
 import Testing
 
-/// Run through `Build/benchmark`; deliberately absent from ordinary tests.
-/// Measurements describe this process, fixture and display, not energy use.
+/// Run through `make benchmark`. Excluded from ordinary tests.
+/// Measurements describe this process, fixture, and display, not energy use.
 @Suite(.tags(.benchmark), .serialized)
 @MainActor
 struct MPVPerformanceBenchmarkTests {

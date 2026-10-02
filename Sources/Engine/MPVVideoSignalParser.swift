@@ -43,7 +43,7 @@ enum MPVVideoSignalParser {
     }
 
     /// `average-bpp` includes chroma packing and is not component depth.
-    /// Recognize only unambiguous formats; hardware handles alone stay unknown.
+    /// Recognize only unambiguous formats. Hardware handles alone stay unknown.
     static func pixelFormatDescription(_ format: String?) -> (depth: Int?, chroma: String?) {
         guard let format = format?.lowercased() else { return (nil, nil) }
         switch format {

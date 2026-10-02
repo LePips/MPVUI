@@ -1,7 +1,7 @@
 /// WebVTT cue placement in normalized video coordinates.
 ///
-/// Positions may extend outside `0...1`. Maximum dimensions constrain the cue box;
-/// they do not measure it. Snap-to-line positions are approximate; exact placement
+/// Positions may extend outside `0...1`. Maximum dimensions limit the cue box size
+/// rather than measure it. Snap-to-line positions are approximate. Exact placement
 /// depends on the client's font and collision layout.
 public struct WebVTTPlacement: Sendable, Hashable {
     /// The point on the cue box selected along the horizontal axis.
@@ -34,7 +34,7 @@ public struct WebVTTPlacement: Sendable, Hashable {
         case right
     }
 
-    /// The direction in which lines are laid out.
+    /// The direction of text lines.
     public enum WritingDirection: Sendable, Hashable {
         /// Horizontal text lines.
         case horizontal

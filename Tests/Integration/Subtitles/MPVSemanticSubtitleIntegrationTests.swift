@@ -308,7 +308,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
     @Test
     func `semantic snapshots exclude styled and bitmap subtitle tracks`() throws {
-        let media = try TestPaths.testMedia("subtitle-formats.mkv")
+        let media = try TestPaths.testMedia("subtitles.mkv")
         let handle = try #require(mpv_create())
         var initialized = false
         defer {

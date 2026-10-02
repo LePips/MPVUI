@@ -17,21 +17,21 @@ public enum MPVVideoFeature: String, CaseIterable, Hashable, Sendable {
 }
 
 /// Renderer capabilities, not AVKit's current ability to start PiP. Consult
-/// `player.pictureInPicture.isSupported` and `isPossible` for device/session state.
+/// `player.pictureInPicture.isSupported` and `isPossible` for device and session state.
 public struct MPVVideoFeatureCapabilities: Equatable, Sendable {
-    /// Whether a feature can be used with the current item and renderer.
+    /// Whether the current item and renderer support a feature.
     public enum Availability: String, Equatable, Sendable {
-        /// The feature is supported for the current item and renderer.
+        /// The current item and renderer support the feature.
         case available
-        /// A known restriction prevents the feature from being used.
+        /// A known restriction prevents use of the feature.
         case unavailable
-        /// There is not enough information to determine support.
+        /// There is too little information to determine support.
         case unknown
     }
 
     /// A condition preventing a video feature from being available.
     public enum Restriction: String, Equatable, Sendable {
-        /// Video metadata is needed to determine support.
+        /// Determining support requires video metadata.
         case awaitingVideoMetadata
         /// Modifying native Dolby Vision pixels would invalidate RPU metadata.
         case nativeDolbyVisionPreservesRPU
@@ -118,7 +118,7 @@ public struct MPVVideoFeatureRequestResult: Equatable, Sendable {
         case available
         /// The request is waiting for video metadata.
         case awaitingVideoMetadata
-        /// The requested features cannot be provided by the selected renderer.
+        /// The selected renderer cannot provide the requested features.
         case unavailable
     }
 

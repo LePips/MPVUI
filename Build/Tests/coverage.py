@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run a test lane and report coverage of the active MPVUI Swift sources only."""
+
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -13,6 +14,9 @@ import subprocess
 import sys
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from validation import failure_excerpt, publish_evidence, test_summary
+
 ROOT = Path(__file__).resolve().parents[2]
 METRICS = ("lines", "functions", "regions")
 
@@ -23,6 +27,7 @@ def input_digest(root):
         inputs.extend(path for path in (root / folder).rglob("*") if path.is_file())
     inputs.extend((root / "Plugins").rglob("*.swift"))
     inputs.extend((root / "Build/Tests").rglob("*.py"))
+    inputs.extend(path for path in (root / "Build/validation.py", root / "Build/result.schema.json") if path.exists())
     digest = hashlib.sha256()
     for path in sorted(inputs):
         digest.update(str(path.relative_to(root)).encode())
@@ -70,7 +75,7 @@ def summarize(document, root):
         areas.setdefault(area, []).append(metrics)
     return dict(
         scope="Active compiled Sources only; excludes tests, helpers, generated code and prebuilt Libmpv. "
-              "Inactive platform branches and native patches require separate validation.",
+        "Inactive platform branches and native patches require separate validation.",
         metrics=aggregate(list(files.values())),
         areas={name: aggregate(entries) for name, entries in sorted(areas.items())},
         files=files,
@@ -78,9 +83,11 @@ def summarize(document, root):
 
 
 def violations(summary, minimums):
-    return [f"{metric}: {summary['metrics'][metric]['percent']:.2f}% < {minimum:.2f}%"
-            for metric, minimum in minimums.items()
-            if summary["metrics"][metric]["percent"] < minimum]
+    return [
+        f"{metric}: {summary['metrics'][metric]['percent']:.2f}% < {minimum:.2f}%"
+        for metric, minimum in minimums.items()
+        if summary["metrics"][metric]["percent"] < minimum
+    ]
 
 
 def suites(root, folders):
@@ -107,6 +114,7 @@ def main():
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     output = ROOT / ".build" / "coverage" / stamp
     output.mkdir(parents=True)
+    publish_evidence(summary=dict(lane=args.lane, coverageGate="not_evaluated"), artifacts=dict(coverageDirectory=output))
     if args.report:
         report = args.report
     else:
@@ -117,9 +125,18 @@ def main():
         for old in scratch.glob("*/debug/codecov"):
             shutil.rmtree(old)
         command = ["swift", "test", "--scratch-path", str(scratch), "--enable-code-coverage", "--no-parallel"]
-        folders = ["Unit", "Integration"] if args.lane == "default" else [{
-            "unit": "Unit", "integration": "Integration", "system": "System", "benchmarks": "Benchmarks",
-        }[args.lane]]
+        folders = (
+            ["Unit", "Integration"]
+            if args.lane == "default"
+            else [
+                {
+                    "unit": "Unit",
+                    "integration": "Integration",
+                    "system": "System",
+                    "benchmarks": "Benchmarks",
+                }[args.lane]
+            ]
+        )
         command += ["--filter", suites(ROOT, folders)]
         if sys.platform == "darwin" and args.lane != "unit":
             # AVFoundation readback and system PiP need an awake display. Keep
@@ -127,15 +144,29 @@ def main():
             # user's persistent power settings or weakening frame assertions.
             command = ["/usr/bin/caffeinate", "-disu", *command]
         print(f"Running {args.lane} lane; log: {output / 'tests.log'}", flush=True)
+        publish_evidence(artifacts=dict(testLog=output / "tests.log"))
         with (output / "tests.log").open("w") as log:
             result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
         after = input_digest(ROOT)
-        (output / "run.json").write_text(json.dumps(dict(
-            command=command, exitCode=result.returncode, inputDigestBefore=before, inputDigestAfter=after,
-        ), indent=2) + "\n")
+        (output / "run.json").write_text(
+            json.dumps(
+                dict(
+                    command=command,
+                    exitCode=result.returncode,
+                    inputDigestBefore=before,
+                    inputDigestAfter=after,
+                ),
+                indent=2,
+            )
+            + "\n"
+        )
+        publish_evidence(
+            summary=dict(tests=test_summary(output / "tests.log"), inputsUnchanged=before == after),
+            artifacts=dict(testRun=output / "run.json"),
+        )
         if result.returncode:
             print("Tests failed; no passing coverage report was produced.", file=sys.stderr)
-            print((output / "tests.log").read_text()[-12000:], file=sys.stderr)
+            print(failure_excerpt(output / "tests.log"), file=sys.stderr)
             return result.returncode
         if before != after:
             raise ValueError("Sources, tests, manifest or fixtures changed during validation; run again")
@@ -143,9 +174,19 @@ def main():
         match = re.search(r"Test run with (\d+) tests.*passed", logs)
         if not match or int(match[1]) == 0:
             raise ValueError("Test selection did not execute any Swift Testing tests")
-        report = Path(subprocess.check_output([
-            "swift", "test", "--scratch-path", str(scratch), "--show-codecov-path",
-        ], cwd=ROOT, text=True).strip())
+        report = Path(
+            subprocess.check_output(
+                [
+                    "swift",
+                    "test",
+                    "--scratch-path",
+                    str(scratch),
+                    "--show-codecov-path",
+                ],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+        )
 
     document = json.loads(report.read_text())
     summary = summarize(document, ROOT)
@@ -155,11 +196,15 @@ def main():
         summary["skippedTests"] = [line.strip() for line in logs.splitlines() if "skipped" in line]
     shutil.copyfile(report, output / "llvm-coverage.json")
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    publish_evidence(
+        summary=dict(coverage=summary["metrics"], coverageGate="not_requested"), artifacts=dict(coverageReport=output / "summary.json")
+    )
     for metric, value in summary["metrics"].items():
         print(f"{metric}: {value['covered']}/{value['count']} ({value['percent']:.2f}%)")
     print(f"Report: {output / 'summary.json'}")
     if args.check:
         failures = violations(summary, json.loads((ROOT / "Build/Tests/coverage-thresholds.json").read_text()))
+        publish_evidence(summary=dict(coverageGate="failed" if failures else "passed", coverageViolations=failures))
         if failures:
             print("Coverage gate failed: " + "; ".join(failures), file=sys.stderr)
             return 1

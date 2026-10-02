@@ -72,5 +72,53 @@ struct MPVVideoPlayerCompositionTests {
         }
         return view.subviews.lazy.compactMap { findSurface(in: $0) }.first
     }
+
+    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
+    func `track discovery controls surface attachment across media changes`(
+        output: MPVPlayerConfiguration.VideoOutput
+    ) async throws {
+        let player = MPVPlayer(configuration: .init(
+            additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: output
+        ))
+        let host = NSHostingView(rootView: TrackDrivenPlayerView(player: player))
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = host
+        window.orderFront(nil)
+        defer {
+            player.stop()
+            findSurface(in: host)?.detach()
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+
+        for media in ["audio-pcm-stereo.mka", "video-hevc-8bit.mkv", "audio-pcm-stereo.mka", "baseline.mp4"] {
+            try player.load(TestPaths.testMedia(media))
+            let hasVideo = media != "audio-pcm-stereo.mka"
+            try await eventually("surface follows tracks for \(media)") {
+                player.state == .paused
+                    && player.hasActiveRenderSurface == hasVideo
+                    && (findSurface(in: host) != nil) == hasVideo
+                    && (player.mediaInformation.dimensions != nil) == hasVideo
+            }
+            #expect(player.lastError == nil)
+            #expect(player.videoTracks.isEmpty == !hasVideo)
+        }
+    }
+}
+
+@MainActor
+private struct TrackDrivenPlayerView: View {
+    let player: MPVPlayer
+
+    var body: some View {
+        if player.videoTracks.isEmpty {
+            Image(systemName: "music.note")
+        } else {
+            MPVVideoPlayer(player: player)
+        }
+    }
 }
 #endif

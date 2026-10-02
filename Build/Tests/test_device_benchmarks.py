@@ -93,8 +93,9 @@ class DeviceBenchmarkTests(unittest.TestCase):
         runner = self.write("Build/Benchmarks/device_playback.py", "host protocol v1")
         self.write("Package.swift", "// remote binary selection")
         self.write("Example/MPVUIExample/MPVUIExample.xcodeproj/project.pbxproj", "project configuration")
-        with patch.object(device, "ROOT", self.root), patch.object(
-            benchmark, "source_identity", side_effect=lambda _: {"files": {"Sources/Player.swift": "source"}}
+        with (
+            patch.object(device, "ROOT", self.root),
+            patch.object(benchmark, "source_identity", side_effect=lambda _: {"files": {"Sources/Player.swift": "source"}}),
         ):
             initial = device.source_identity()
             app.write_text("app protocol v2")
@@ -307,9 +308,7 @@ class DeviceBenchmarkTests(unittest.TestCase):
         for field, value in (("thermalState", 1), ("isSimulator", True)):
             raw = self.raw()
             raw["environment"][field] = value
-            with self.subTest(field=field), self.assertRaisesRegex(
-                ValueError, "physical device at nominal thermal state"
-            ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "physical device at nominal thermal state"):
                 self.aggregate([raw])
         raw = self.raw()
         raw["timeline"] = [{"thermalState": 0}, {"thermalState": 1}, {"thermalState": 0}]
@@ -334,9 +333,7 @@ class DeviceBenchmarkTests(unittest.TestCase):
                 }
             )
         )
-        with patch.object(device, "ROOT", self.root), patch.object(
-            benchmark, "source_identity", side_effect=lambda _: {"files": {}}
-        ):
+        with patch.object(device, "ROOT", self.root), patch.object(benchmark, "source_identity", side_effect=lambda _: {"files": {}}):
             before = device.source_identity()
             binary.write_text("binary version two")
             self.assertNotEqual(before["sourceSHA256"], device.source_identity()["sourceSHA256"])

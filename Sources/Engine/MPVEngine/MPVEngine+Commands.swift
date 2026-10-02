@@ -78,7 +78,8 @@ extension MPVEngine {
     }
 
     private static func canonicalOptionName(_ name: String) -> String {
-        name.hasPrefix("options/") ? String(name.dropFirst("options/".count)) : name
+        let property = name.hasPrefix("options/") ? String(name.dropFirst("options/".count)) : name
+        return property == "video" ? "vid" : property
     }
 
     func snapshotRuntimeProperties() {
@@ -89,6 +90,10 @@ extension MPVEngine {
             "sub-visibility", "secondary-sub-visibility",
         ]
         for name in names {
+            // Preserve the user's video selection while no surface is attached.
+            if name == "vid", renderTarget == nil {
+                continue
+            }
             if let value = getString(name) {
                 desiredProperties[name] = value
             }
@@ -121,7 +126,7 @@ extension MPVEngine {
 
     private func createStoppedClientForExplicitCommandIfNeeded() {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard handle == nil, isStoppedForResourceRelease, renderTarget != nil,
+        guard handle == nil, isStoppedForResourceRelease,
               !needsSourceLoad, !playbackRequestIsActive else { return }
         // Explicit raw commands retain native option and command ordering even
         // after stop retired the old session. This idle client does not reopen
@@ -215,7 +220,9 @@ extension MPVEngine {
     func setPropertyImmediately(_ name: String, to value: String) -> Int32 {
         dispatchPrecondition(condition: .onQueue(queue))
         guard let handle else { return MPV_ERROR_UNINITIALIZED.rawValue }
-        return mpv_set_property_string(handle, name, value)
+        let property = MPVOptionOwnership.normalizedProperty(name)
+        let effectiveValue = renderTarget == nil && ["vid", "video"].contains(property) ? "no" : value
+        return mpv_set_property_string(handle, name, effectiveValue)
     }
 
     func getFlag(_ name: String) -> Bool? {

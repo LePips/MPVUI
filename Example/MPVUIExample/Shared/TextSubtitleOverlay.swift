@@ -39,8 +39,8 @@ struct TextSubtitleOverlay: View {
         .accessibilityIdentifier("textSubtitleOverlay")
     }
 
-    /// Video overlays scale a reference canvas; ordinary overlays lay out at
-    /// the displayed video size so caption fonts and effects retain their point sizes.
+    /// Video overlays scale a reference canvas. Ordinary overlays use the
+    /// displayed video size so caption fonts and effects retain their point sizes.
     private var referenceCanvasSize: CGSize {
         let referenceHeight: CGFloat = 540
         let fallback = CGSize(width: 960, height: referenceHeight)

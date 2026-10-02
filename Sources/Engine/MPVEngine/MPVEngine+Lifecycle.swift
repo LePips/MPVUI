@@ -32,7 +32,7 @@ extension MPVEngine {
         }
     }
 
-    /// Retire rendering before the final player owner disappears. Enqueueing a
+    /// Retire rendering before the final player owner disappears. Enqueuing a
     /// weak asynchronous shutdown can leave VO work alive through app/test
     /// teardown, after native shader/compiler globals begin destruction.
     func shutdownSynchronously() {
@@ -46,7 +46,7 @@ extension MPVEngine {
     func createHandle(allowStopped: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
 
-        guard let renderTarget, !didRejectNativeOutput, allowStopped || !isStoppedForResourceRelease else { return }
+        guard handle == nil, !didRejectNativeOutput, allowStopped || !isStoppedForResourceRelease else { return }
         resetMediaObservations()
         liveConfigurationFailure = nil
         fatalPlaybackError = nil
@@ -75,14 +75,16 @@ extension MPVEngine {
         _ = mpv_request_log_messages(newHandle, requestedLogLevel)
 
         do {
-            var windowID = renderTarget.layerAddress
-            try check(
-                mpv_set_option(newHandle, "wid", MPV_FORMAT_INT64, &windowID),
-                context: "Set Metal render surface"
-            )
+            if let renderTarget {
+                var windowID = renderTarget.layerAddress
+                try check(
+                    mpv_set_option(newHandle, "wid", MPV_FORMAT_INT64, &windowID),
+                    context: "Set render surface"
+                )
+            }
 
             if videoOutput == .sampleBuffer {
-                try setInitialOption("vo", value: "avfoundation")
+                try setInitialOption("vo", value: renderTarget == nil ? "null" : "avfoundation")
                 try setInitialOption("avfoundation-presentation", value: "media")
                 try setInitialOption(
                     "avfoundation-native-dovi-profile7",
@@ -99,13 +101,15 @@ extension MPVEngine {
                     try check(subtitleStatus, context: "Set native subtitle luminance")
                 }
             } else {
-                try setInitialOption("vo", value: "gpu-next")
+                try setInitialOption("vo", value: renderTarget == nil ? "null" : "gpu-next")
                 try setInitialOption("gpu-api", value: "vulkan")
                 try setInitialOption("gpu-context", value: "moltenvk")
-                try setInitialOption(
-                    "external-surface-size",
-                    value: "\(renderTarget.drawableWidth)x\(renderTarget.drawableHeight)"
-                )
+                if let renderTarget {
+                    try setInitialOption(
+                        "external-surface-size",
+                        value: "\(renderTarget.drawableWidth)x\(renderTarget.drawableHeight)"
+                    )
+                }
                 try setInitialOption("target-colorspace-hint", value: "no")
             }
             try setInitialOption("input-default-bindings", value: "no")
@@ -124,7 +128,9 @@ extension MPVEngine {
                 try setInitialOption(name, value: value)
             }
 
-            try setInitialOption("hwdec", value: configuration.hardwareDecoding.rawValue)
+            for (name, value) in MPVRenderingOptions.hardwareDecodingOptions(configuration.hardwareDecoding, backend: videoOutput) {
+                try setInitialOption(name, value: value)
+            }
             renderingResolution = MPVRenderingOptions.resolve(
                 configuration.renderingQuality, backend: videoOutput,
                 lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -161,7 +167,7 @@ extension MPVEngine {
             // The Core Animation layer and mpv output descriptions must agree.
             // Extended linear P3 retains EDR values; the sRGB target deliberately
             // makes mpv tone-map HDR on displays where EDR is unavailable.
-            if videoOutput == .metal {
+            if videoOutput == .metal, let renderTarget {
                 for (name, value) in Self.colorTargetOptions(for: renderTarget) {
                     try setInitialOption(name, value: value)
                 }
@@ -173,7 +179,14 @@ extension MPVEngine {
                 try setInitialOption(name, value: value)
             }
 
+            // Play audio without creating a video window or decoder.
+            try setInitialOption("force-window", value: "no")
+            if renderTarget == nil {
+                try setInitialOption("vid", value: "no")
+            }
+
             try check(mpv_initialize(newHandle), context: "Initialize mpv")
+            try check(mpv_hook_add(newHandle, 0, "on_preloaded", 0), context: "Observe available tracks")
         } catch {
             publishFatalError(error, globally: true)
             mpv_destroy(newHandle)
@@ -182,10 +195,12 @@ extension MPVEngine {
         }
 
         lifecycleDiagnostics.handlesCreated &+= 1
-        publishRenderSurfaceDiagnostic(
-            "mpv renderer attached output=\(renderTarget.drawableWidth)x"
-                + "\(renderTarget.drawableHeight) lifecycle=\(lifecycleDiagnostics)"
-        )
+        if let renderTarget {
+            publishRenderSurfaceDiagnostic(
+                "mpv renderer attached output=\(renderTarget.drawableWidth)x"
+                    + "\(renderTarget.drawableHeight) lifecycle=\(lifecycleDiagnostics)"
+            )
+        }
 
         observeProperties()
         startDiagnosticsTimer()
@@ -206,21 +221,18 @@ extension MPVEngine {
         return layer?.invalidateDrawablePoolAfterNativeTeardown() ?? false
     }
 
-    func destroyHandle(preservePlayback: Bool) {
+    func destroyHandle(preservePlayback: Bool, alreadyShuttingDown: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
         cancelSubtitleQueries()
         diagnosticsTimer?.cancel()
         diagnosticsTimer = nil
         completePiPSeek(false)
-        guard let oldHandle = handle else {
-            if !preservePlayback {
-                stopSecurityScopedAccess()
-                stopExternalSecurityScopedAccess()
-            }
+        // A deferred load has no native session to retire. Preserve its
+        // pending state across surface changes, but fully clear it on shutdown.
+        if handle == nil, preservePlayback {
             return
         }
-
-        if preservePlayback, isFileLoaded || isLoading {
+        if handle != nil, preservePlayback, isFileLoaded || isLoading {
             lastPosition =
                 pendingSeekAfterLoad
                     ?? getDouble("time-pos").flatMap(Duration.init(mpvSeconds:))
@@ -235,13 +247,19 @@ extension MPVEngine {
             pendingExternalTracks = externalTracks
         }
 
-        handle = nil
-        mpv_set_wakeup_callback(oldHandle, nil, nil)
-        mpv_wakeup(oldHandle)
-        withNativeSurfaceRetirement {
-            mpv_terminate_destroy(oldHandle)
+        if let oldHandle = handle {
+            handle = nil
+            mpv_set_wakeup_callback(oldHandle, nil, nil)
+            mpv_wakeup(oldHandle)
+            withNativeSurfaceRetirement {
+                if alreadyShuttingDown {
+                    mpv_destroy(oldHandle)
+                } else {
+                    mpv_terminate_destroy(oldHandle)
+                }
+            }
+            lifecycleDiagnostics.handlesDestroyed &+= 1
         }
-        lifecycleDiagnostics.handlesDestroyed &+= 1
         clearTextSubtitleSnapshot()
 
         isLoading = false
@@ -259,6 +277,10 @@ extension MPVEngine {
 
         if !preservePlayback {
             playbackRequestIsActive = false
+            isStoppedForResourceRelease = true
+            isPaused = true
+            shouldAutoPlay = false
+            didReachEnd = false
             sourceURL = nil
             pendingStartTime = nil
             pendingSeekAfterLoad = nil
@@ -266,6 +288,8 @@ extension MPVEngine {
             lastPosition = .zero
             lastDuration = .zero
             lastSeekable = false
+            requestedLoadUptime = nil
+            seekUptime = nil
             stopSecurityScopedAccess()
             stopExternalSecurityScopedAccess()
             externalTracks.removeAll()

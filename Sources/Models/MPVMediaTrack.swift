@@ -20,10 +20,10 @@ public struct MPVMediaTrack: Identifiable, Hashable, Sendable {
     /// The codec name reported by mpv, when present.
     public let codec: String?
 
-    /// Whether mpv currently selected this track.
+    /// Whether mpv has selected this track.
     public let isSelected: Bool
 
-    /// The selected subtitle slot, or nil for unselected and non-subtitle tracks.
+    /// The selected subtitle slot, or `nil` for unselected and non-subtitle tracks.
     /// Both subtitle slots can have a selected track at the same time.
     public let subtitleRole: MPVSubtitleRole?
 
@@ -33,7 +33,7 @@ public struct MPVMediaTrack: Identifiable, Hashable, Sendable {
     /// Whether the container marks this as a forced track.
     public let isForced: Bool
 
-    /// Whether the track was loaded from outside the primary media source.
+    /// Whether the track comes from outside the primary media source.
     public let isExternal: Bool
 
     /// Creates a track with mpv's integer `id`, stored as ``mpvID``.

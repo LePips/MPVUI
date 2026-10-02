@@ -1,7 +1,7 @@
 import Foundation
 
 /// Decoder evidence for this item, separate from a requested conversion policy.
-/// Unknown fields must not be interpreted as proof of a successful conversion.
+/// Unknown fields do not confirm a successful conversion.
 public struct MPVDolbyVisionStatus: Equatable, Sendable {
     /// The result of native frame-level Dolby Vision validation.
     public enum NativeValidation: String, Equatable, Sendable {
@@ -21,11 +21,11 @@ public struct MPVDolbyVisionStatus: Equatable, Sendable {
         case pending
         /// Native evidence confirms compatibility conversion.
         case converted
-        /// Compatibility conversion could not be completed.
+        /// Compatibility conversion failed.
         case unavailable
     }
 
-    /// What is known about the source enhancement layer.
+    /// Known information about the source enhancement layer.
     public enum EnhancementLayer: String, Equatable, Sendable {
         /// Neither MEL/FEL classification nor complete reproduction is established.
         case unknown

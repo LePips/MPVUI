@@ -37,14 +37,7 @@ def verify_media(path, expected):
 
 def validate_url(url, playlist):
     parts = urlsplit(url)
-    if (
-        parts.scheme not in ("http", "https")
-        or not parts.hostname
-        or parts.username
-        or parts.password
-        or parts.query
-        or parts.fragment
-    ):
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
         raise ValueError("HLS URL must be an explicit HTTP(S) URL without credentials, query or fragment")
     if unquote(parts.path).split("/")[-1] != playlist.name:
         raise ValueError("HLS URL must name the verified playlist")

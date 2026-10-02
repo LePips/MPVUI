@@ -3,8 +3,7 @@
 #include <libavutil/frame.h>
 #include "avfoundation_hdr10plus.h"
 
-static AVDynamicHDRPlus fixture(int windows, int version, int scene)
-{
+static AVDynamicHDRPlus fixture(int windows, int version, int scene) {
     AVDynamicHDRPlus h = {0};
     h.num_windows = windows;
     h.application_version = version;
@@ -15,7 +14,8 @@ static AVDynamicHDRPlus fixture(int windows, int version, int scene)
         p->window_upper_left_corner_y = (AVRational){w * 20, 1};
         p->window_lower_right_corner_x = (AVRational){1000, 1};
         p->window_lower_right_corner_y = (AVRational){500, 1};
-        for (int c = 0; c < 3; c++) p->maxscl[c] = (AVRational){10000 + scene + w + c, 100000};
+        for (int c = 0; c < 3; c++)
+            p->maxscl[c] = (AVRational){10000 + scene + w + c, 100000};
         p->average_maxrgb = (AVRational){5000 + scene, 100000};
         p->fraction_bright_pixels = (AVRational){250, 1000};
         p->num_distribution_maxrgb_percentiles = 2;
@@ -34,8 +34,7 @@ static AVDynamicHDRPlus fixture(int windows, int version, int scene)
     return h;
 }
 
-static CMSampleBufferRef sample(int pts)
-{
+static CMSampleBufferRef sample(int pts) {
     CVPixelBufferRef pixels = NULL;
     assert(CVPixelBufferCreate(NULL, 2, 2, kCVPixelFormatType_32BGRA, NULL, &pixels) == noErr);
     CMVideoFormatDescriptionRef format = NULL;
@@ -48,16 +47,15 @@ static CMSampleBufferRef sample(int pts)
     return out;
 }
 
-static CFDataRef payload(CMSampleBufferRef s)
-{
+static CFDataRef payload(CMSampleBufferRef s) {
     CFArrayRef array = CMSampleBufferGetSampleAttachmentsArray(s, false);
-    if (!array) return NULL;
+    if (!array)
+        return NULL;
     CFDictionaryRef d = CFArrayGetValueAtIndex(array, 0);
     return CFDictionaryGetValue(d, kCMSampleAttachmentKey_HDR10PlusPerFrameData);
 }
 
-static AVDynamicHDRPlus readback(CMSampleBufferRef s)
-{
+static AVDynamicHDRPlus readback(CMSampleBufferRef s) {
     CFDataRef data = payload(s);
     assert(data && CFGetTypeID(data) == CFDataGetTypeID());
     const uint8_t *bytes = CFDataGetBytePtr(data);
@@ -73,8 +71,7 @@ static AVDynamicHDRPlus readback(CMSampleBufferRef s)
     return out;
 }
 
-static void serialization(void)
-{
+static void serialization(void) {
     for (int version = 0; version <= 1; version++) {
         for (int windows = 1; windows <= 3; windows++) {
             AVDynamicHDRPlus h = fixture(windows, version, 17);
@@ -87,8 +84,10 @@ static void serialization(void)
                 assert(out.params[w].tone_mapping_flag == (w & 1));
                 assert(out.params[w].color_saturation_mapping_flag == !(w & 1));
                 assert(out.params[w].maxscl[2].num == 10019 + w);
-                if (w & 1) assert(out.params[w].bezier_curve_anchors[1].num == 800);
-                else assert(out.params[w].color_saturation_weight.num == 12);
+                if (w & 1)
+                    assert(out.params[w].bezier_curve_anchors[1].num == 800);
+                else
+                    assert(out.params[w].color_saturation_weight.num == 12);
             }
             CFRelease(s);
         }
@@ -101,10 +100,11 @@ static void serialization(void)
     h.num_cols_targeted_system_display_actual_peak_luminance = 25;
     h.num_rows_mastering_display_actual_peak_luminance = 25;
     h.num_cols_mastering_display_actual_peak_luminance = 25;
-    for (int i = 0; i < 25; i++) for (int j = 0; j < 25; j++) {
-        h.targeted_system_display_actual_peak_luminance[i][j] = (AVRational){15, 15};
-        h.mastering_display_actual_peak_luminance[i][j] = (AVRational){7, 15};
-    }
+    for (int i = 0; i < 25; i++)
+        for (int j = 0; j < 25; j++) {
+            h.targeted_system_display_actual_peak_luminance[i][j] = (AVRational){15, 15};
+            h.mastering_display_actual_peak_luminance[i][j] = (AVRational){7, 15};
+        }
     for (int w = 0; w < 3; w++) {
         AVHDRPlusColorTransformParams *p = &h.params[w];
         p->tone_mapping_flag = p->color_saturation_mapping_flag = 1;
@@ -122,8 +122,7 @@ static void serialization(void)
     CFRelease(s);
 }
 
-static void association(void)
-{
+static void association(void) {
     AVFrame *decoded[3];
     for (int i = 0; i < 3; i++) {
         AVFrame *f = decoded[i] = av_frame_alloc();
@@ -139,8 +138,10 @@ static void association(void)
     // frame's side data after decoder-owned frames are released.
     const int order[] = {2, 0, 1};
     AVFrame *reordered[3];
-    for (int i = 0; i < 3; i++) reordered[i] = av_frame_clone(decoded[order[i]]);
-    for (int i = 0; i < 3; i++) av_frame_free(&decoded[i]);
+    for (int i = 0; i < 3; i++)
+        reordered[i] = av_frame_clone(decoded[order[i]]);
+    for (int i = 0; i < 3; i++)
+        av_frame_free(&decoded[i]);
     CMSampleBufferRef queued[3];
     for (int i = 0; i < 3; i++) {
         assert(reordered[i]);
@@ -164,8 +165,7 @@ static void association(void)
     CFRelease(next);
 }
 
-static void invalidation(void)
-{
+static void invalidation(void) {
     CMSampleBufferRef s = sample(0);
     AVDynamicHDRPlus h = fixture(1, 1, 0);
     assert(avf_attach_hdr10plus(s, &h, sizeof(h), false) == AVF_HDR10PLUS_ATTACHED);
@@ -176,14 +176,29 @@ static void invalidation(void)
     for (int n = 0; n < 7; n++) {
         h = fixture(1, 1, 0);
         switch (n) {
-        case 0: h.num_windows = 4; break;
-        case 1: h.params[0].num_distribution_maxrgb_percentiles = 16; break;
-        case 2: h.params[0].maxscl[0].den = 0; break;
-        case 3: h.params[0].fraction_bright_pixels.num = INT_MAX; break;
-        case 4: h.params[0].tone_mapping_flag = 1; h.params[0].num_bezier_curve_anchors = 16; break;
-        case 5: h.targeted_system_display_actual_peak_luminance_flag = 1;
-                h.num_rows_targeted_system_display_actual_peak_luminance = 26; break;
-        case 6: h.application_version = 2; break;
+        case 0:
+            h.num_windows = 4;
+            break;
+        case 1:
+            h.params[0].num_distribution_maxrgb_percentiles = 16;
+            break;
+        case 2:
+            h.params[0].maxscl[0].den = 0;
+            break;
+        case 3:
+            h.params[0].fraction_bright_pixels.num = INT_MAX;
+            break;
+        case 4:
+            h.params[0].tone_mapping_flag = 1;
+            h.params[0].num_bezier_curve_anchors = 16;
+            break;
+        case 5:
+            h.targeted_system_display_actual_peak_luminance_flag = 1;
+            h.num_rows_targeted_system_display_actual_peak_luminance = 26;
+            break;
+        case 6:
+            h.application_version = 2;
+            break;
         }
         assert(avf_attach_hdr10plus(s, &h, sizeof(h), false) == AVF_HDR10PLUS_INVALID);
         assert(!payload(s));
@@ -194,8 +209,7 @@ static void invalidation(void)
     CFRelease(s);
 }
 
-int main(void)
-{
+int main(void) {
     serialization();
     association();
     invalidation();

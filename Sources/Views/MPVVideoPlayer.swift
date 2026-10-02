@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// A SwiftUI video surface for `MPVPlayer`.
+/// A SwiftUI video surface for ``MPVPlayer``.
 ///
-/// Add your own playback controls. Use `videoOverlay(alignment:content:)`
+/// Add your own playback controls. Use ``videoOverlay(alignment:content:)``
 /// for content that follows the video into picture in picture.
 ///
 /// ```swift
@@ -38,9 +38,9 @@ public struct MPVVideoPlayer: View {
     /// Places content inside the video surface, including picture in picture.
     ///
     /// macOS moves the live view into PiP. iOS rasterizes SwiftUI drawing into
-    /// native frames; ImageRenderer cannot capture platform views such as web or
-    /// video views. The iOS copy is noninteractive with separate local state;
-    /// use a shared observable model for changing content.
+    /// native frames. `ImageRenderer` cannot capture platform views such as web or
+    /// video views. The iOS copy is noninteractive and has separate local state.
+    /// Use a shared observable model for changing content.
     ///
     /// Supports custom subtitles from ``MPVPlayer/textSubtitleStream()`` without
     /// changing interception. Repeated calls replace the previous overlay.

@@ -49,7 +49,11 @@ extension MPVEngine {
             let format: mpv_format = switch property {
             case "hwdec-current":
                 MPV_FORMAT_STRING
-            case "time-pos", "duration", "estimated-vf-fps", "container-fps":
+            case "paused-for-cache":
+                MPV_FORMAT_FLAG
+            case "cache-buffering-state":
+                MPV_FORMAT_INT64
+            case "time-pos", "duration", "estimated-vf-fps", "container-fps", "demuxer-cache-duration":
                 // Scalar observations suppress notifications for unchanged
                 // values. Position events also carry the value into Swift.
                 MPV_FORMAT_DOUBLE
@@ -79,24 +83,72 @@ extension MPVEngine {
     }
 
     func scheduleEventDrain() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.lifecycleDiagnostics.engineActivity.nativeWakeups &+= 1
-            self.drainEvents()
-        }
+        // Native callbacks can arrive concurrently or while a drain is in
+        // progress. Dispatch merges pending wakeups without allocating one
+        // work item per callback, and rearms if more arrive during the handler.
+        eventDrainSource.add(data: 1)
     }
 
     func drainEvents() {
         dispatchPrecondition(condition: .onQueue(queue))
         lifecycleDiagnostics.engineActivity.eventDrainPasses &+= 1
 
-        while let handle {
-            guard let eventPointer = mpv_wait_event(handle, 0) else { return }
-            let event = eventPointer.pointee
-            if event.event_id == MPV_EVENT_NONE {
-                return
+        coalescingPropertySnapshots {
+            while let handle {
+                guard let eventPointer = mpv_wait_event(handle, 0) else { return }
+                let event = eventPointer.pointee
+                if event.event_id == MPV_EVENT_NONE {
+                    return
+                }
+                handleEvent(event)
             }
-            handleEvent(event)
+        }
+    }
+
+    private enum PropertySnapshot {
+        case buffer
+        case media
+    }
+
+    // A single native update invalidates several properties backed by the same
+    // snapshot. Read that snapshot once per burst, before leaving the drain.
+    // Only property-derived snapshots are replaceable; lifecycle and command
+    // events remain ordered and flush pending work before changing state.
+    func coalescingPropertySnapshots(_ body: () -> Void) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        precondition(!isCoalescingPropertySnapshots)
+        isCoalescingPropertySnapshots = true
+        defer {
+            flushPropertySnapshots()
+            isCoalescingPropertySnapshots = false
+        }
+        body()
+    }
+
+    private func refreshPropertySnapshot(_ snapshot: PropertySnapshot) {
+        if isCoalescingPropertySnapshots {
+            switch snapshot {
+            case .buffer: pendingBufferSnapshot = true
+            case .media: pendingMediaSnapshot = true
+            }
+        } else {
+            switch snapshot {
+            case .buffer: refreshBuffer()
+            case .media: refreshMediaInformation()
+            }
+        }
+    }
+
+    private func flushPropertySnapshots() {
+        let buffer = pendingBufferSnapshot
+        let media = pendingMediaSnapshot
+        pendingBufferSnapshot = false
+        pendingMediaSnapshot = false
+        if buffer {
+            refreshBuffer()
+        }
+        if media {
+            refreshMediaInformation()
         }
     }
 
@@ -104,10 +156,25 @@ extension MPVEngine {
     // boundary separate from polling also lets tests deliver rare/stale events.
     func handleEvent(_ event: mpv_event) {
         dispatchPrecondition(condition: .onQueue(queue))
+        if event.event_id != MPV_EVENT_PROPERTY_CHANGE {
+            flushPropertySnapshots()
+        }
         if event.event_id != MPV_EVENT_NONE {
             lifecycleDiagnostics.engineActivity.nativeEvents &+= 1
         }
         switch event.event_id {
+        case MPV_EVENT_HOOK:
+            guard let handle, let data = event.data else { return }
+            let hook = data.assumingMemoryBound(to: mpv_event_hook.self).pointee
+            // Report tracks before decoder selection can reject video-only media.
+            if isRequestedPlaylistEntryActive {
+                refreshMediaInformation()
+            }
+            let status = mpv_hook_continue(handle, hook.id)
+            if status < 0 {
+                publishCommandError(status, context: "Continue media loading")
+            }
+
         case MPV_EVENT_COMMAND_REPLY:
             guard let query = subtitleQueries.removeValue(forKey: event.reply_userdata) else { return }
             if query.cancellation.isCancelled {
@@ -213,7 +280,7 @@ extension MPVEngine {
             // Target parameters can contain an unknown pixel aspect ratio
             // represented as NaN. Native node equality considers NaN unequal
             // to itself, so compare the target signal we actually publish.
-            let needsValue = propertyName == "time-pos" || propertyName == "sub-text-snapshot"
+            let needsValue = propertyName == "time-pos" || propertyName == "paused-for-cache" || propertyName == "sub-text-snapshot"
                 || propertyName == "video-target-params" || propertyName == "hwdec-current"
             let copiedNode = needsValue ? MPVNodeValue(copying: property) : nil
             handlePropertyChange(propertyName, copiedNode: copiedNode)
@@ -237,16 +304,9 @@ extension MPVEngine {
             }
 
         case MPV_EVENT_SHUTDOWN:
-            cancelSubtitleQueries()
-            completePiPSeek(false)
-            guard let oldHandle = handle else { return }
-            handle = nil
-            playbackRequestIsActive = false
-            clearTextSubtitleSnapshot()
-            mpv_set_wakeup_callback(oldHandle, nil, nil)
-            mpv_destroy(oldHandle)
-            lifecycleDiagnostics.handlesDestroyed &+= 1
-            publishState(.stopped)
+            // Native quit must retire the same timers, file access, pending
+            // work and rendering resources as explicit engine shutdown.
+            destroyHandle(preservePlayback: false, alreadyShuttingDown: true)
 
         default:
             break
@@ -266,6 +326,15 @@ extension MPVEngine {
 
     private func handlePropertyChange(_ name: String, copiedNode: MPVNodeValue? = nil) {
         switch name {
+        case "pause", "core-idle", "idle-active", "seeking", "eof-reached",
+             "hwdec-current", "sub-text-snapshot":
+            // Preserve the snapshot/state ordering around playback, decoder,
+            // and semantic-subtitle transitions, even within one native drain.
+            flushPropertySnapshots()
+        default:
+            break
+        }
+        switch name {
         case "pause":
             isPaused = isDisplaySwitchInProgress ? !shouldAutoPlay : (getFlag(name) ?? isPaused)
             publish(.paused(isPaused))
@@ -280,7 +349,10 @@ extension MPVEngine {
             refreshState()
 
         case "paused-for-cache":
-            isPausedForCache = getFlag(name) ?? isPausedForCache
+            let pausedForCache = copiedNode?.boolValue ?? getFlag(name) ?? isPausedForCache
+            guard pausedForCache != isPausedForCache else { return }
+            flushPropertySnapshots()
+            isPausedForCache = pausedForCache
             refreshBuffer()
             refreshState()
 
@@ -298,10 +370,10 @@ extension MPVEngine {
 
         case "duration":
             refreshTiming()
-            refreshMediaInformation()
+            refreshPropertySnapshot(.media)
 
         case "cache-buffering-state", "demuxer-cache-duration", "demuxer-cache-state":
-            refreshBuffer()
+            refreshPropertySnapshot(.buffer)
 
         case "volume", "mute", "speed":
             refreshAudioState()
@@ -311,7 +383,7 @@ extension MPVEngine {
             // cannot change it while that authoritative value is available;
             // playback diagnostics still sample the estimator independently.
             if lastContainerFramesPerSecond == nil {
-                refreshMediaInformation()
+                refreshPropertySnapshot(.media)
             }
 
         case "video-target-params":
@@ -320,7 +392,7 @@ extension MPVEngine {
             } ?? .unavailable
             guard observation != lastVideoTargetObservation else { return }
             lastVideoTargetObservation = observation
-            refreshMediaInformation()
+            refreshPropertySnapshot(.media)
 
         case "hwdec-current":
             let selectedDecoder = copiedNode?.stringValue
@@ -330,7 +402,7 @@ extension MPVEngine {
                 videoToolboxSessionUsesHardware = nil
             }
             refreshDecoderDiagnostics(hardwareDecoder: selectedDecoder)
-            refreshMediaInformation()
+            refreshPropertySnapshot(.media)
 
         case "track-list", "current-tracks/audio/id", "current-tracks/video/id",
              "current-tracks/sub/id", "media-title", "metadata", "chapter-list",
@@ -338,8 +410,9 @@ extension MPVEngine {
              "audio-params", "video-codec", "video-format",
              "audio-codec-name", "file-format", "file-size",
              "container-fps":
-            refreshMediaInformation()
+            refreshPropertySnapshot(.media)
             if name == "track-list" || name == "current-tracks/sub/id" {
+                flushPropertySnapshots()
                 refreshTextSubtitleSnapshot()
             }
 
@@ -393,6 +466,25 @@ extension MPVEngine {
         // command, so any STOP that reaches this active-request path belongs
         // to an internal or advanced raw command and must not override state.
         if endEvent.reason == MPV_END_FILE_REASON_STOP {
+            return
+        }
+
+        if renderTarget == nil || sourceLoadWasHeadless, endEvent.reason == MPV_END_FILE_REASON_ERROR,
+           endEvent.error == MPV_ERROR_NOTHING_TO_PLAY.rawValue
+        {
+            // Keep video-only media pending until a view attaches.
+            requestedPlaylistEntryID = nil
+            activePlaylistEntryID = nil
+            isFileLoaded = false
+            isLoading = true
+            needsSourceLoad = true
+            pendingStartTime = pendingSeekAfterLoad ?? lastPosition
+            pendingSeekAfterLoad = nil
+            publishState(.loading)
+            // Retry if a view attached before this END_FILE event arrived.
+            if renderTarget != nil {
+                loadPendingSourceIfPossible()
+            }
             return
         }
 

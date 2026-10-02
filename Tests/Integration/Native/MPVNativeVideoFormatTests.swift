@@ -13,7 +13,7 @@ import AppKit
 import UIKit
 #endif
 
-/// Verifies decoded pixels, filter output and native presentation formats.
+/// Verifies decoded pixels, filter output, and native presentation formats.
 /// Pixel assertions cover format/range tags and composition, not display fidelity.
 // The iOS Simulator can report a rendering, ready AVFoundation output while
 // copyDisplayedPixelBuffer remains unavailable. Keep clock/readiness integration
@@ -28,13 +28,105 @@ private let nativePixelReadbackUnavailable: Bool = {
 
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVNativeVideoFormatTests {
+    #if os(macOS)
+    @MainActor @Test(arguments: [false, true], [60, 120])
+    func `software presentation keeps uploads available at high frame rates`(overlay: Bool, frameRate: Int) async throws {
+        let fixture = NativeFormatFixture(options: [
+            "vf": "lavfi=[fps=\(frameRate)],scale=1920:1080,format=fmt=nv12",
+            "loop-file": "inf", "sub-visibility": "no", "osd-level": "0",
+        ])
+        defer { fixture.close() }
+        fixture.player.load(TestPaths.baselineMedia, autoPlay: true)
+        try await eventually("software presentation starts") {
+            fixture.player.state == .playing
+                && (fixture.player.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount ?? 0) > 0
+        }
+        if overlay {
+            fixture.player.command("show-text", arguments: ["Persistent native overlay", "100000", "1"])
+        }
+        for cycle in 0 ..< 2 {
+            if cycle > 0 {
+                fixture.player.play()
+            }
+            // Startup can miss a presentation deadline while the media clock is
+            // anchoring. Measure pool reuse after a second of scheduled frames.
+            let warmupStart = fixture.player.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount ?? 0
+            try await eventually("software presentation warms up") {
+                (fixture.player.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount ?? 0) >= warmupStart + Int64(frameRate)
+            }
+            let initial = try #require(fixture.player.playbackDiagnostics.nativeOutputStatistics)
+            let initialSamples = try #require(initial.sampleBuildCount)
+            let initialUploads = try #require(initial.pixelBufferCopies)
+            let initialDrops = try #require(fixture.player.playbackDiagnostics.outputDroppedFrames)
+            if initialUploads != initialSamples || initialDrops > 0 {
+                print(
+                    "Native \(frameRate) fps warmup, overlay=\(overlay): uploads=\(initialUploads), samples=\(initialSamples), drops=\(initialDrops)"
+                )
+            }
+            fixture.nativeLogs.removeAll()
+            try await eventually("several native buffer reuse cycles", timeout: .seconds(8)) {
+                (fixture.player.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount ?? 0) >= initialSamples + 180
+            }
+            let statistics = try #require(fixture.player.playbackDiagnostics.nativeOutputStatistics)
+            let samples = try #require(statistics.sampleBuildCount) - initialSamples
+            let uploads = try #require(statistics.pixelBufferCopies) - initialUploads
+            #expect(
+                uploads == samples,
+                "Every software sample must upload once without exhausting the presentation pool: \(uploads)/\(samples)."
+            )
+            #expect(!fixture.nativeLogs.contains { $0.contains("Failed to get upload buffer") }, "\(fixture.nativeLogs.suffix(5))")
+            #expect(fixture.player.playbackDiagnostics.outputDroppedFrames == initialDrops)
+            #expect(fixture.player.lastError == nil)
+
+            // A paused seek must replace queued presentation buffers even when the
+            // upload pool was full immediately before the media clock stopped.
+            fixture.player.pause()
+            try await eventually("pause after sustained software playback") { fixture.player.isPaused }
+            // Leave enough media after the first seek for the next steady interval.
+            let target = fixture.player.duration.seconds * (cycle == 0 ? 0.25 : 0.75)
+            defer {
+                if fixture.layer.controlTimebase.map({ abs(CMTimebaseGetTime($0).seconds - target) >= 0.15 }) != false {
+                    print(
+                        "Paused native seek: target=\(target), clock=\(fixture.layer.controlTimebase.map { CMTimebaseGetTime($0).seconds } ?? -1), "
+                            + "statistics=\(String(describing: fixture.player.playbackDiagnostics.nativeOutputStatistics)), "
+                            + "drops=\(String(describing: fixture.player.playbackDiagnostics.outputDroppedFrames))"
+                    )
+                    for message in fixture.nativeLogs {
+                        print("Native seek: \(message)")
+                    }
+                }
+            }
+            let completed = await fixture.player.seekForPictureInPicture(to: .seconds(target))
+            try #require(completed)
+            try await eventually("paused seek presents a fresh native frame") {
+                fixture.layer.isReadyForDisplay && fixture.buffer != nil
+                    && fixture.layer.controlTimebase.map {
+                        CMTimebaseGetRate($0) == 0 && abs(CMTimebaseGetTime($0).seconds - target) < 0.15
+                    } == true
+            }
+            // Diagnostics poll independently of seek completion. Observe the
+            // reset before the next cycle can use a cached pre-seek count.
+            let preSeekSamples = try #require(statistics.sampleBuildCount)
+            try await eventually("native statistics reflect the paused seek") {
+                guard let count = fixture.player.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount else { return false }
+                return count > 0 && count < preSeekSamples
+            }
+        }
+    }
+    #endif
+
     @MainActor @Test(.disabled(
         if: nativePixelReadbackUnavailable,
         "AVFoundation displayed-pixel readback is unavailable in the iOS Simulator; run on macOS or physical iOS."
-    ), arguments: [0.0, 0.25])
-    func `SwiftUI bitmap updates and clears on the same paused native frame`(zoom: Double) async throws {
+    ), arguments: [0.0, 0.25], [
+        "format=fmt=nv12:colorlevels=limited:convert=yes",
+        "format=fmt=nv12:colorlevels=full:convert=yes",
+        "format=fmt=p010:colorlevels=limited:convert=yes",
+        "format=fmt=p010:colorlevels=full:convert=yes",
+    ])
+    func `SwiftUI bitmap updates and clears on the same paused native frame`(zoom: Double, filter: String) async throws {
         let fixture = NativeFormatFixture(options: [
-            "vf": "format=fmt=nv12", "sub-visibility": "no", "osd-level": "0",
+            "vf": filter, "sub-visibility": "no", "osd-level": "0",
             // Repeat the overlay checks with zoom configured. Native frame-space
             // OSD can bypass geometry; this does not prove the CI cache path ran.
             "video-zoom": String(zoom),
@@ -74,7 +166,8 @@ struct MPVNativeVideoFormatTests {
         renderer.invalidate()
         fixture.player.clearPictureInPictureOverlay()
         try await eventually("overlay removal restores every source pixel") {
-            (try? fixture.snapshot().luma) == source.luma
+            guard let frame = try? fixture.snapshot() else { return false }
+            return frame.luma == source.luma && frame.chroma == source.chroma
         }
         #expect(fixture.player.isPaused)
         #expect(fixture.player.lastError == nil)
@@ -149,7 +242,7 @@ struct MPVNativeVideoFormatTests {
         "AVFoundation displayed-pixel readback is unavailable in the iOS Simulator; run on macOS or physical iOS."
     ), arguments: 0 ..< 5)
     func `subtitle and OSD groups remain visible together on paused frame`(repetition: Int) async throws {
-        let media = try TestPaths.testMedia("subtitle-formats.mkv")
+        let media = try TestPaths.testMedia("subtitles.mkv")
         let fixture = NativeFormatFixture(options: [
             "vf": "format=fmt=nv12", "sid": "1", "sub-visibility": "no", "osd-duration": "0",
             "osd-level": "1", "osd-align-x": "left", "osd-align-y": "top",
@@ -229,7 +322,7 @@ struct MPVNativeVideoFormatTests {
     func `WebP still image decodes losslessly`() async throws {
         let session = try NativePlaybackSession()
         defer { session.close() }
-        try await session.load(TestPaths.testMedia("webp-still.webp"))
+        try await session.load(TestPaths.testMedia("image-webp-still.webp"))
         try await expectWebPFrame(session, time: 0, left: [255, 0, 0], right: [255, 0, 0])
     }
 
@@ -237,7 +330,7 @@ struct MPVNativeVideoFormatTests {
     func `animated WebP preserves partial frames and variable timing`() async throws {
         let session = try NativePlaybackSession()
         defer { session.close() }
-        try await session.load(TestPaths.testMedia("webp-animation.webp"))
+        try await session.load(TestPaths.testMedia("image-webp-animated.webp"))
         try await expectWebPFrame(session, time: 0, left: [255, 0, 0], right: [255, 0, 0])
         try session.command(["frame-step"])
         try await expectWebPFrame(session, time: 0.25, left: [255, 0, 0], right: [0, 0, 255])
@@ -370,13 +463,15 @@ private final class NativeFormatFixture {
     struct Frame {
         let width: Int
         let height: Int
+        let bytesPerPixel: Int
         let luma: Data
+        let chroma: Data
         var upperBand: Data {
-            luma.subdata(in: 0 ..< width * (height / 3))
+            luma.subdata(in: 0 ..< width * bytesPerPixel * (height / 3))
         }
 
         var lowerBand: Data {
-            luma.subdata(in: width * (2 * height / 3) ..< luma.count)
+            luma.subdata(in: width * bytesPerPixel * (2 * height / 3) ..< luma.count)
         }
     }
 
@@ -388,17 +483,34 @@ private final class NativeFormatFixture {
         // A redraw can briefly expose no buffer. Polling callers retry this
         // condition; #require would record a failure even when try? catches it.
         guard let buffer else { throw SnapshotError.frameUnavailable }
-        try #require(CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
+        let format = CVPixelBufferGetPixelFormatType(buffer)
+        try #require([
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+            kCVPixelFormatType_420YpCbCr10BiPlanarFullRange,
+        ].contains(format))
+        let bytesPerPixel = format == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+            || format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange ? 2 : 1
         try #require(CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let width = CVPixelBufferGetWidthOfPlane(buffer, 0)
         let height = CVPixelBufferGetHeightOfPlane(buffer, 0)
         let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
         let base = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, 0))
-        var luma = Data(capacity: width * height)
+        var luma = Data(capacity: width * height * bytesPerPixel)
         for row in 0 ..< height {
-            luma.append(base.advanced(by: row * stride).assumingMemoryBound(to: UInt8.self), count: width)
+            luma.append(base.advanced(by: row * stride).assumingMemoryBound(to: UInt8.self), count: width * bytesPerPixel)
         }
-        return Frame(width: width, height: height, luma: luma)
+        let chromaWidth = CVPixelBufferGetWidthOfPlane(buffer, 1)
+        let chromaHeight = CVPixelBufferGetHeightOfPlane(buffer, 1)
+        let chromaStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
+        let chromaBase = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, 1))
+        let chromaRowBytes = chromaWidth * 2 * bytesPerPixel
+        var chroma = Data(capacity: chromaRowBytes * chromaHeight)
+        for row in 0 ..< chromaHeight {
+            chroma.append(chromaBase.advanced(by: row * chromaStride).assumingMemoryBound(to: UInt8.self), count: chromaRowBytes)
+        }
+        return Frame(width: width, height: height, bytesPerPixel: bytesPerPixel, luma: luma, chroma: chroma)
     }
 }

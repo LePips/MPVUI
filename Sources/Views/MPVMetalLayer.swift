@@ -266,8 +266,8 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 
     /// Called after the renderer has joined all native presentation threads.
-    /// MoltenVK only writes its retirement sentinel for outstanding presents;
-    /// completed drawables may still belong to CAMetalLayer's reusable pool.
+    /// MoltenVK only writes its retirement sentinel for outstanding presents.
+    /// Completed drawables may still belong to CAMetalLayer's reusable pool.
     /// Invalidate that pool without exposing a permanent invalid host extent.
     @discardableResult
     func invalidateDrawablePoolAfterNativeTeardown() -> Bool {

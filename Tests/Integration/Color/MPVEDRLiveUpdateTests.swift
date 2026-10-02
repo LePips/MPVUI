@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 @testable import MPVUI
+import os
 import Testing
 
 @Suite(.tags(.integration, .hdr), .serialized)
@@ -47,6 +48,25 @@ struct MPVEDRLiveUpdateTests {
             #expect(player.sampleBufferDisplayLayer.preferredDynamicRange == expected)
             #expect(player.sampleBufferDisplayLayer.toneMapMode == .ifSupported)
             #expect(player.videoOutput == .sampleBuffer)
+            let layer = player.sampleBufferDisplayLayer
+            let scaleChanges = OSAllocatedUnfairLock(initialState: 0)
+            let scaleObservation = layer.observe(\.contentsScale) { _, _ in
+                scaleChanges.withLock { $0 += 1 }
+            }
+            for _ in 0 ..< 10 {
+                surface.updateRenderingConfiguration()
+            }
+            #expect(scaleChanges.withLock { $0 } == 0)
+            // Equality checks must read the layer's current policy rather than
+            // cache a previous write: native lifecycle work can replace it.
+            layer.contentsScale = 0.5
+            layer.preferredDynamicRange = expected == .standard ? .high : .standard
+            layer.toneMapMode = .never
+            surface.updateRenderingConfiguration()
+            #expect(layer.contentsScale == max(window.backingScaleFactor, 1))
+            #expect(layer.preferredDynamicRange == expected)
+            #expect(layer.toneMapMode == .ifSupported)
+            withExtendedLifetime(scaleObservation) {}
             surface.detach()
             window.contentView = nil
         }

@@ -2,7 +2,7 @@ import Foundation
 @testable import MPVUI
 import Testing
 
-/// The full coordinator runs on every supported platform; only OS translation
+/// The full coordinator runs on every supported platform. Only OS translation
 /// belongs in the adapter integration tests.
 @Suite(.tags(.unit), .serialized)
 @MainActor

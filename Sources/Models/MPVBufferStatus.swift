@@ -1,6 +1,6 @@
 /// A snapshot of mpv's network and demuxer buffering state.
 public struct MPVBufferStatus: Equatable, Sendable {
-    /// Whether playback is currently waiting for buffered media.
+    /// Whether playback is waiting for buffered media.
     public let isBuffering: Bool
 
     /// Progress toward resuming playback, from `0...1`, rather than total download progress.
@@ -16,17 +16,17 @@ public struct MPVBufferStatus: Equatable, Sendable {
     public let bytesAhead: Int64
 
     /// Total demuxer-cache bytes, including retained data behind the current
-    /// position. Nil means the native cache did not report its allocation.
+    /// position. `nil` means the native cache did not report its allocation.
     public let totalBytes: Int64?
 
     /// The current input rate in bytes per second.
     public let inputRate: Int64
 
-    /// Timeline ranges to which the current source can seek.
+    /// The timeline ranges available for seeking in the current source.
     public let seekableRanges: [ClosedRange<Duration>]
 
     /// Creates a snapshot, clamping negative bytes, input rate, and buffered duration to zero.
-    /// Progress is clamped to `0...1`; non-finite progress becomes zero.
+    /// Clamps progress to `0...1` and replaces non-finite progress with zero.
     init(
         isBuffering: Bool = false,
         progress: Double = 0,

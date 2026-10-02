@@ -1,7 +1,7 @@
 import Foundation
 
-/// GPU rendering choices. Presets are workload choices, not measured battery-life guarantees.
-/// Configure before creating the player; changes require a new player.
+/// GPU rendering settings. Presets control rendering workload but do not guarantee battery life.
+/// Configure before creating the player. Changes require a new player.
 public struct MPVRenderingQuality: Equatable, Sendable {
 
     // MARK: - Types
@@ -52,7 +52,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
 
     /// A base set of GPU rendering options.
     public enum Preset: String, CaseIterable, Sendable {
-        /// Selects battery in Low Power Mode, otherwise balanced, when the renderer is created.
+        /// Selects ``battery`` in Low Power Mode or ``balanced`` otherwise, at renderer creation.
         case automatic
         /// Uses lower-cost rendering options.
         case battery
@@ -95,7 +95,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
     }
 
     /// A creative input LUT. Display calibration belongs to ``MPVColorManagement``.
-    /// Conversion LUTs are deliberately excluded because they replace output color management.
+    /// Excludes conversion LUTs because they replace output color management.
     public struct LUT: Equatable, Sendable {
         /// The input encoding used by a creative LUT.
         public enum Domain: String, CaseIterable, Sendable {
@@ -119,35 +119,35 @@ public struct MPVRenderingQuality: Equatable, Sendable {
 
     // MARK: - Boolean options
 
-    /// Whether to reduce color banding; nil uses the preset.
+    /// Whether to reduce color banding. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let debanding: Bool?
 
     // MARK: - Numeric options
 
-    /// Clamped to 0...1 by the resolver; nil uses the preset.
+    /// Antiringing strength, clamped to `0...1`. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let antiringing: Double?
 
-    /// Chroma antiringing strength, clamped to 0...1; nil uses the preset.
+    /// Chroma antiringing strength, clamped to `0...1`. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let chromaAntiringing: Double?
 
     // MARK: - Policies
 
-    /// The chroma scaling filter; nil uses the preset.
+    /// The chroma scaling filter. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let chromaScaling: Scaling?
 
-    /// Output dithering; nil uses the preset.
+    /// Output dithering. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let dithering: Dithering?
 
-    /// The gamut-mapping method; nil uses the preset.
+    /// The gamut-mapping method. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let gamutMapping: GamutMapping?
 
-    /// Peak brightness detection; nil uses the preset.
+    /// Peak brightness detection. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let peakDetection: PeakDetection?
 
@@ -155,11 +155,11 @@ public struct MPVRenderingQuality: Equatable, Sendable {
     /// - Note: Has no effect with sample-buffer output.
     public let preset: Preset
 
-    /// The video scaling filter; nil uses the preset.
+    /// The video scaling filter. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let scaling: Scaling?
 
-    /// The tone-mapping curve; nil uses the preset.
+    /// The tone-mapping curve. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
     public let toneMapping: ToneMapping?
 
@@ -211,11 +211,11 @@ public struct MPVRenderingQualityStatus: Equatable, Sendable {
     public var resolvedPreset: MPVRenderingQuality.Preset
     /// The video output used by the renderer.
     public var backend: MPVPlayerConfiguration.VideoOutput
-    /// Accepted mpv option readback. This describes configuration, not measured image quality.
+    /// Option values reported by mpv after configuration. These do not measure image quality.
     public var effectiveOptions: [String: String]
     /// Requested features that the renderer cannot apply.
     public var unsupportedFeatures: [String]
-    /// Automatic resolves Low Power Mode once when the renderer is created.
+    /// Automatic preset selection checks Low Power Mode once at renderer creation.
     public var requiresReload: Bool {
         true
     }

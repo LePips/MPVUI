@@ -3,26 +3,30 @@ import CoreMedia
 import Foundation
 @testable import MPVUI
 import Testing
+import VideoToolbox
 #if os(tvOS)
 import AVKit
 #endif
 
-/// Opt-in real media check. MPVUI_DISPLAY_MATCHING_FIXTURE accepts a local path
-/// or an HTTP URL for a 23.976 fps native-supported Dolby Vision HEVC reference
-/// clip. `bundle:filename` selects a clip bundled in a device test host.
-/// HDMI mode and the TV's Dolby Vision indicator still require physical checks.
+/// Uses the generated 23.976 fps Profile 8.4 clip. MPVUI_DISPLAY_MATCHING_FIXTURE
+/// may instead name a local path or an HTTP URL for another 23.976 fps
+/// native-supported Dolby Vision HEVC clip. HDMI mode and the TV's Dolby Vision
+/// indicator still require physical checks.
 @Suite(.tags(.system, .dolbyVision), .serialized)
 @MainActor
 struct MPVDisplayMatchingPlaybackTests {
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_DISPLAY_MATCHING_FIXTURE"] != nil))
+    @Test(.enabled(
+        if: VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC),
+        "Requires a hardware Dolby Vision HEVC decoder."
+    ))
     func `native reference playback produces Dolby Vision and fractional cadence criteria`() async throws {
-        let location = try #require(ProcessInfo.processInfo.environment["MPVUI_DISPLAY_MATCHING_FIXTURE"])
-        let url: URL = if location.hasPrefix("bundle:") {
-            try TestPaths.testMedia(String(location.dropFirst("bundle:".count)))
-        } else if location.hasPrefix("http") {
+        let url: URL = switch ProcessInfo.processInfo.environment["MPVUI_DISPLAY_MATCHING_FIXTURE"] {
+        case let location? where location.hasPrefix("http"):
             try #require(URL(string: location))
-        } else {
+        case let location?:
             URL(fileURLWithPath: location)
+        case nil:
+            try TestPaths.testMedia("dolby-vision-p84.mp4")
         }
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no"],

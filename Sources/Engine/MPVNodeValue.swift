@@ -23,6 +23,8 @@ indirect enum MPVNodeValue: Equatable, Sendable {
             self = .string(String(cString: value))
         case MPV_FORMAT_DOUBLE:
             self = .double(data.assumingMemoryBound(to: Double.self).pointee)
+        case MPV_FORMAT_FLAG:
+            self = .bool(data.assumingMemoryBound(to: Int32.self).pointee != 0)
         case MPV_FORMAT_NODE:
             self.init(copying: data.assumingMemoryBound(to: mpv_node.self).pointee)
         default:

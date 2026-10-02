@@ -59,9 +59,7 @@ class DeviceRegressionTests(unittest.TestCase):
                 ]
             )
         checks.extend([self.segment("typed-load-resume"), {"stage": "release", "playerDeallocated": True}])
-        checks.extend(
-            self.segment("rate-" + name, rate) for name, rate in (("slow", 0.5), ("fast", 1.5), ("normal", 1))
-        )
+        checks.extend(self.segment("rate-" + name, rate) for name, rate in (("slow", 0.5), ("fast", 1.5), ("normal", 1)))
         return {
             "schemaVersion": 2,
             "status": "passed",

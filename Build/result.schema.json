@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MPVUI validation command result",
+  "description": "One UTF-8 JSON document on stdout and in result.json. Running snapshots exist only on disk. Command success does not imply a benchmark regression check occurred; inspect summary. Artifacts use absolute filesystem paths, timestamps use RFC 3339, and durations use seconds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "status",
+    "command",
+    "cwd",
+    "startedAt",
+    "durationSeconds",
+    "exitCode",
+    "summary",
+    "diagnostics",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "enum": ["build", "test", "benchmark", "command"] },
+    "status": { "enum": ["running", "succeeded", "failed", "timed_out", "interrupted"] },
+    "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "cwd": { "type": "string" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "durationSeconds": { "type": "number", "minimum": 0 },
+    "exitCode": { "type": ["integer", "null"], "minimum": 0 },
+    "summary": {
+      "type": "object",
+      "description": "Runner-specific evidence. Missing evidence is unknown, never implicitly passed. Extra fields allow command-specific summaries without discarding evidence.",
+      "properties": {
+        "tests": {
+          "type": "object",
+          "properties": {
+            "framework": { "type": "string" },
+            "count": { "type": "integer", "minimum": 0 },
+            "suites": { "type": "integer", "minimum": 0 },
+            "outcome": { "enum": ["passed", "failed"] },
+            "issues": { "type": "integer", "minimum": 0 },
+            "failures": { "type": "integer", "minimum": 0 },
+            "skippedCount": { "type": "integer", "minimum": 0 },
+            "skipped": { "type": "array", "maxItems": 20, "items": { "type": "string" } },
+            "omittedSkipped": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "inputsUnchanged": { "type": "boolean" },
+        "coverageGate": { "enum": ["not_evaluated", "not_requested", "passed", "failed"] },
+        "coverageViolations": { "type": "array", "items": { "type": "string" } },
+        "measurementStatus": { "enum": ["not_evaluated", "valid"] },
+        "comparisonStatus": { "const": "not_requested" },
+        "measurements": { "$ref": "#/$defs/metricSummary" },
+        "benchmarkComparison": {
+          "allOf": [{ "$ref": "#/$defs/metricSummary" }],
+          "type": "object",
+          "required": ["comparable", "thresholdsEvaluated", "hasRegressions", "regressionPercent", "mismatches"],
+          "properties": {
+            "comparable": { "type": "boolean" },
+            "thresholdsEvaluated": { "type": "boolean" },
+            "hasRegressions": { "type": "boolean" },
+            "regressionPercent": { "type": ["number", "null"], "minimum": 0 },
+            "mismatches": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "artifacts": { "type": "object", "required": ["commandLog", "result"], "additionalProperties": { "type": "string" } },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "omitted"],
+      "properties": {
+        "omitted": { "type": "integer", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "message", "log", "logLine", "occurrences", "context", "truncated"],
+            "properties": {
+              "severity": { "enum": ["error", "warning"] },
+              "message": { "type": "string", "maxLength": 2000 },
+              "log": { "type": "string" },
+              "logLine": { "type": "integer", "minimum": 1 },
+              "occurrences": { "type": "integer", "minimum": 1 },
+              "context": { "type": "array", "items": { "type": "string" } },
+              "truncated": { "type": "boolean" },
+              "location": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "line"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "line": { "type": "integer", "minimum": 1 },
+                  "column": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metricSummary": {
+      "type": "object",
+      "required": ["metricCount", "metrics", "omittedMetrics"],
+      "properties": {
+        "metricCount": { "type": "integer", "minimum": 0 },
+        "omittedMetrics": { "type": "integer", "minimum": 0 },
+        "metrics": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["workload", "metric", "unit"],
+            "properties": {
+              "workload": { "type": "string" },
+              "metric": { "type": "string" },
+              "unit": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "running" } } },
+      "then": { "properties": { "exitCode": { "type": "null" } } },
+      "else": { "properties": { "exitCode": { "type": "integer" } } }
+    },
+    { "if": { "properties": { "status": { "const": "succeeded" } } }, "then": { "properties": { "exitCode": { "const": 0 } } } },
+    {
+      "if": { "properties": { "status": { "enum": ["failed", "timed_out", "interrupted"] } } },
+      "then": { "properties": { "exitCode": { "minimum": 1 } } }
+    }
+  ]
+}

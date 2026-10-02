@@ -7,5 +7,5 @@ updates:
       day: monday
     groups:
       github-actions:
-        patterns: ["*"]
+        patterns: ['*']
     open-pull-requests-limit: 5

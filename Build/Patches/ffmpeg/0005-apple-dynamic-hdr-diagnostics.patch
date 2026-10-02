@@ -1,20 +1,45 @@
+diff --git a/configure b/configure
+index 0807630..52b3c4b 100755
+--- a/configure
++++ b/configure
+@@ -3467,7 +3467,7 @@ hevc_vaapi_hwaccel_select="hevc_decoder"
+ hevc_vdpau_hwaccel_deps="vdpau VdpPictureInfoHEVC"
+ hevc_vdpau_hwaccel_select="hevc_decoder"
+ hevc_videotoolbox_hwaccel_deps="videotoolbox"
+-hevc_videotoolbox_hwaccel_select="hevc_decoder"
++hevc_videotoolbox_hwaccel_select="dovi_rpuenc hevc_decoder"
+ hevc_videotoolbox_hwaccel_suggest="libdovi"
+ hevc_vulkan_hwaccel_deps="vulkan"
+ hevc_vulkan_hwaccel_select="hevc_decoder"
 diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
-index c103325..b587d99 100644
+index 1d887ae..42b0243 100644
 --- a/libavcodec/videotoolbox.c
 +++ b/libavcodec/videotoolbox.c
-@@ -891,8 +891,9 @@ static int videotoolbox_dovi_is_apple_hevc(const AVDOVIDecoderConfigurationRecor
+@@ -36,6 +36,8 @@
+ #include "libavutil/pixdesc.h"
+ #include "bytestream.h"
+ #include "decode.h"
++#include "dovi_rpu.h"
++#include "golomb.h"
+ #include "internal.h"
+ #include "h264dec.h"
+ #include "hevc/hevcdec.h"
+@@ -892,9 +894,11 @@ static int videotoolbox_dovi_is_apple_hevc(const AVDOVIDecoderConfigurationRecor
+     case 5:
          return dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
      case 8:
-         /* Native HDR bases: known HDR10/HLG only. */
+-        /* Native HDR bases: known HDR10/HLG only. */
 -        return dovi->dv_bl_signal_compatibility_id == 1 ||
 -               dovi->dv_bl_signal_compatibility_id == 4;
-+        return dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE &&
++        /* Native HDR bases: known HDR10/HLG only. Compressed metadata is
++         * submitted as standalone RPUs; see videotoolbox_hevc_append_dovi_rpus. */
++        return dovi->dv_md_compression != AV_DOVI_COMPRESSION_RESERVED &&
 +               (dovi->dv_bl_signal_compatibility_id == 1 ||
 +                dovi->dv_bl_signal_compatibility_id == 4);
      default:
          return 0;
      }
-@@ -963,6 +964,21 @@ static void videotoolbox_dovi_tag_output_attachments(AVCodecContext *avctx,
+@@ -965,6 +969,21 @@ static void videotoolbox_dovi_tag_output_attachments(AVCodecContext *avctx,
                                kCFBooleanTrue, kCVAttachmentMode_ShouldPropagate);
      else
          CVBufferRemoveAttachment(pixbuf, CFSTR("MPVUI.NativeDolbyVisionProfile7To81"));
@@ -36,7 +61,19 @@ index c103325..b587d99 100644
      if (!dovi || dovi->dv_profile != 8)
          return; // P5 is IPT; never tag ordinary BT.2020 YCbCr.
      CFStringRef transfer = dovi->dv_bl_signal_compatibility_id == 4 ?
-@@ -1134,6 +1150,17 @@ static int videotoolbox_start(AVCodecContext *avctx)
+@@ -997,8 +1016,9 @@ static CFDataRef videotoolbox_dovi_extradata_create(const AVDOVIDecoderConfigura
+             (!!dovi->el_present_flag) << 1 |
+             !!dovi->bl_present_flag;
+     AV_WB16(buf + 2, flags);
+-    /* Compatible P8 metadata is uncompressed. Old TS descriptors may set
+-     * reserved bits; omit these from dvvC. */
++    /* VideoToolbox rejects declared metadata compression, and submitted RPUs
++     * are always standalone. Old TS descriptors may set reserved bits; omit
++     * compression and reserved bits from dvvC. */
+     buf[4] = (dovi->dv_bl_signal_compatibility_id & 0x0f) << 4;
+ 
+     return CFDataCreate(kCFAllocatorDefault, buf, sizeof(buf));
+@@ -1137,6 +1157,17 @@ static int videotoolbox_start(AVCodecContext *avctx)
                         "(profile %u, compatibility %u).\n",
                         dovi->dv_profile, dovi->dv_bl_signal_compatibility_id);
              } else {
@@ -54,7 +91,7 @@ index c103325..b587d99 100644
                  videotoolbox->cm_codec_type = kCMVideoCodecType_HEVC;
              }
          }
-@@ -1219,6 +1246,21 @@ static int videotoolbox_start(AVCodecContext *avctx)
+@@ -1225,6 +1256,21 @@ static int videotoolbox_start(AVCodecContext *avctx)
                                            &decoder_cb,               // outputCallback
                                            &videotoolbox->session);   // decompressionSessionOut
  
@@ -76,7 +113,7 @@ index c103325..b587d99 100644
      if (!status && videotoolbox_session_is_dovi(avctx)) {
          if (__builtin_available(macOS 11.0, iOS 14.0, tvOS 14.0, *)) {
              VTSessionSetProperty(videotoolbox->session,
-@@ -1356,6 +1398,16 @@ static int videotoolbox_hevc_decode_params(AVCodecContext *avctx,
+@@ -1362,6 +1408,75 @@ static int videotoolbox_hevc_decode_params(AVCodecContext *avctx,
      return videotoolbox_common_decode_slice(avctx, buffer, size);
  }
  
@@ -90,10 +127,69 @@ index c103325..b587d99 100644
 +           !memcmp(validated->data, buffer + 2, size - 2);
 +}
 +
++/* Whether an RPU reuses a previous RPU's mapping or omits static DM
++ * metadata. Unrecognized syntax is left to FFmpeg's validated passthrough. */
++static int videotoolbox_dovi_rpu_is_compressed(const H2645NAL *nal)
++{
++    GetBitContext gb;
++    int rpu_format, dm_compression;
++    if (nal->size <= 3 || nal->data[2] != 25 ||
++        init_get_bits8(&gb, nal->data + 3, nal->size - 3) < 0 ||
++        get_bits(&gb, 6) != 2)
++        return 0;
++    rpu_format = get_bits(&gb, 11);
++    skip_bits(&gb, 8); // vdr_rpu_profile, vdr_rpu_level
++    if (!get_bits1(&gb) || (rpu_format & 0x700))
++        return 0;
++    skip_bits1(&gb); // chroma_resampling_explicit_filter_flag
++    if (!get_bits(&gb, 2)) // fixed-point coefficient_data_type
++        get_ue_golomb_long(&gb);
++    skip_bits(&gb, 3); // vdr_rpu_normalized_idc, bl_video_full_range_flag
++    for (int i = 0; i < 3; i++)
++        get_ue_golomb_long(&gb); // BL, EL/ext mapping and VDR bit depths
++    skip_bits1(&gb); // spatial_resampling_filter_flag
++    dm_compression = get_bits(&gb, 3);
++    skip_bits(&gb, 3); // EL resampling, disable_residual, vdr_dm_metadata_present
++    return get_bits_left(&gb) > 0 && (dm_compression || get_bits1(&gb));
++}
++
++/* Serialize the frame's decoded metadata as one standalone RPU. The HEVC
++ * decoder has already resolved previous-RPU and static DM references. */
++static int videotoolbox_hevc_append_expanded_dovi_rpu(AVCodecContext *avctx,
++                                                      const H2645NAL *nal)
++{
++    HEVCContext *h = avctx->priv_data;
++    const AVFrameSideData *metadata = av_frame_get_side_data(
++        h->cur_frame->f, AV_FRAME_DATA_DOVI_METADATA);
++    const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_get_conf(avctx);
++    DOVIContext writer = { .logctx = avctx };
++    uint8_t *rpu = NULL, *unit = NULL;
++    int rpu_size = 0, ret;
++    if (!metadata || !dovi)
++        return AVERROR_INVALIDDATA;
++    writer.cfg = *dovi;
++    writer.cfg.dv_md_compression = AV_DOVI_COMPRESSION_NONE;
++    ret = ff_dovi_rpu_generate(&writer, (const AVDOVIMetadata *)metadata->data,
++                               FF_DOVI_WRAP_NAL, &rpu, &rpu_size);
++    ff_dovi_ctx_unref(&writer);
++    if (ret >= 0 && (!rpu || rpu_size <= 0))
++        ret = AVERROR_INVALIDDATA;
++    if (ret >= 0 && !(unit = av_malloc(rpu_size + 2)))
++        ret = AVERROR(ENOMEM);
++    if (ret >= 0) {
++        memcpy(unit, nal->raw_data, 2); // UNSPEC62 NAL header
++        memcpy(unit + 2, rpu, rpu_size);
++        ret = videotoolbox_common_decode_slice(avctx, unit, rpu_size + 2);
++    }
++    av_free(unit);
++    av_free(rpu);
++    return ret;
++}
++
  #if CONFIG_LIBDOVI
  /* Append only complete, validated P8.1 RPU. libdovi mode 2 also accepts
   * P5/P8; verify bitstream source profile independently of container before
-@@ -1370,8 +1422,7 @@ static int videotoolbox_hevc_append_converted_p7_rpu(AVCodecContext *avctx,
+@@ -1376,8 +1491,7 @@ static int videotoolbox_hevc_append_converted_p7_rpu(AVCodecContext *avctx,
      // and stale metadata.
      const AVFrameSideData *validated = av_frame_get_side_data(
          h->cur_frame->f, AV_FRAME_DATA_DOVI_RPU_BUFFER);
@@ -103,7 +199,7 @@ index c103325..b587d99 100644
          return AVERROR_INVALIDDATA;
      DoviRpuOpaque *rpu = dovi_parse_unspec62_nalu(buffer, size);
      if (!rpu)
-@@ -1422,13 +1473,13 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+@@ -1428,13 +1542,13 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
          H2645NAL *nal = &h->pkt.nals[i];
          if (nal->type != HEVC_NAL_UNSPEC62)
              continue;
@@ -123,7 +219,14 @@ index c103325..b587d99 100644
              return AVERROR_INVALIDDATA;
          int ret;
  #if CONFIG_LIBDOVI
-@@ -1440,7 +1491,7 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+@@ -1442,11 +1556,14 @@ static int videotoolbox_hevc_append_dovi_rpus(AVCodecContext *avctx)
+             ret = videotoolbox_hevc_append_converted_p7_rpu(avctx, nal->raw_data, nal->raw_size);
+         else
+ #endif
++        if (videotoolbox_dovi_rpu_is_compressed(nal))
++            ret = videotoolbox_hevc_append_expanded_dovi_rpu(avctx, nal);
++        else
+             ret = videotoolbox_common_decode_slice(avctx, nal->raw_data, nal->raw_size);
          if (ret < 0)
              return ret; // Never submit stripped native DV sample.
      }
@@ -132,7 +235,7 @@ index c103325..b587d99 100644
  }
  
  static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
-@@ -1451,6 +1502,11 @@ static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
+@@ -1457,6 +1574,11 @@ static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
      int ret;
  
      ret = videotoolbox_hevc_append_dovi_rpus(avctx);
@@ -157,10 +260,10 @@ index b1eb073..77a7407 100644
      void *logctx;
  } VTContext;
 diff --git a/libavutil/hdr_dynamic_metadata.c b/libavutil/hdr_dynamic_metadata.c
-index 7033f06..bbaf493 100644
+index 9c89625..7054d29 100644
 --- a/libavutil/hdr_dynamic_metadata.c
 +++ b/libavutil/hdr_dynamic_metadata.c
-@@ -236,13 +236,77 @@ int av_dynamic_hdr_plus_from_t35(AVDynamicHDRPlus *s, const uint8_t *data,
+@@ -234,13 +234,77 @@ int av_dynamic_hdr_plus_from_t35(AVDynamicHDRPlus *s, const uint8_t *data,
      return 0;
  }
  
@@ -239,7 +342,7 @@ index 7033f06..bbaf493 100644
          return AVERROR(EINVAL);
      if ((!data || *data) && !size)
         return AVERROR(EINVAL);
-@@ -314,8 +378,8 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+@@ -312,8 +376,8 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
  
      init_put_bits(pb, buf, size_bytes);
  
@@ -250,7 +353,7 @@ index 7033f06..bbaf493 100644
  
      // Payload as per CTA-861-H p.253-254
      put_bits(pb, 2, s->num_windows);
-@@ -334,7 +398,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+@@ -332,7 +396,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
          put_bits(pb, 1, s->params[w].overlap_process_option);
      }
  
@@ -259,7 +362,7 @@ index 7033f06..bbaf493 100644
          s->targeted_system_display_maximum_luminance.den);
      put_bits(pb, 1, s->targeted_system_display_actual_peak_luminance_flag);
      if (s->targeted_system_display_actual_peak_luminance_flag) {
-@@ -342,22 +406,22 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+@@ -340,22 +404,22 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
          put_bits(pb, 5, s->num_cols_targeted_system_display_actual_peak_luminance);
          for (int i = 0; i < s->num_rows_targeted_system_display_actual_peak_luminance; i++) {
              for (int j = 0; j < s->num_cols_targeted_system_display_actual_peak_luminance; j++)
@@ -287,7 +390,7 @@ index 7033f06..bbaf493 100644
              s->params[w].fraction_bright_pixels.den);
      }
  
-@@ -367,7 +431,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+@@ -365,7 +429,7 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
          put_bits(pb, 5, s->num_cols_mastering_display_actual_peak_luminance);
          for (int i = 0; i < s->num_rows_mastering_display_actual_peak_luminance; i++) {
              for (int j = 0; j < s->num_cols_mastering_display_actual_peak_luminance; j++)
@@ -296,7 +399,7 @@ index 7033f06..bbaf493 100644
                      s->mastering_display_actual_peak_luminance[i][j].den);
          }
      }
-@@ -375,17 +439,18 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
+@@ -373,17 +437,18 @@ int av_dynamic_hdr_plus_to_t35(const AVDynamicHDRPlus *s, uint8_t **data, size_t
      for (int w = 0; w < s->num_windows; w++) {
          put_bits(pb, 1, s->params[w].tone_mapping_flag);
          if (s->params[w].tone_mapping_flag) {
@@ -323,7 +426,7 @@ index 7033f06..bbaf493 100644
  
      flush_put_bits(pb);
 diff --git a/libavutil/hdr_dynamic_metadata.h b/libavutil/hdr_dynamic_metadata.h
-index 5100ed6..e2d1389 100644
+index a051ac7..ddcb5e8 100644
 --- a/libavutil/hdr_dynamic_metadata.h
 +++ b/libavutil/hdr_dynamic_metadata.h
 @@ -357,7 +357,7 @@ int av_dynamic_hdr_plus_from_t35(AVDynamicHDRPlus *s, const uint8_t *data,

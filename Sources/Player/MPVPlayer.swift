@@ -29,7 +29,7 @@ public final class MPVPlayer {
     /// Current playback position.
     public private(set) var position: Duration = .zero
 
-    /// Current media duration, or zero when it is unknown.
+    /// Current media duration, or zero when unknown.
     public private(set) var duration: Duration = .zero
 
     /// Whether the current source supports seeking.
@@ -66,7 +66,7 @@ public final class MPVPlayer {
     @ObservationIgnored
     private weak var renderingPlatformSurface: MPVPlatformVideoPlayer?
 
-    /// Current demuxer/network buffer state.
+    /// Current demuxer and network buffer state.
     public private(set) var bufferStatus: MPVBufferStatus = .empty
 
     /// Metadata, tracks, codecs, dimensions, and HDR information.
@@ -78,11 +78,11 @@ public final class MPVPlayer {
     /// Configured color target and its evidence, separate from screen luminance.
     public private(set) var renderColorStatus: MPVRenderColorStatus = .unknown
 
-    /// This item's source profile, validated native output and lossy conversion.
+    /// The current item's source profile, validated native output, and lossy conversion status.
     public private(set) var dolbyVisionStatus: MPVDolbyVisionStatus = .unknown
 
-    /// Capabilities of the current item and backend. Inline SwiftUI content is
-    /// distinguished from graphics that must be baked into native video samples.
+    /// Features supported by the current item and backend. Distinguishes inline
+    /// SwiftUI content from graphics composited into native video samples.
     public var videoFeatureCapabilities: MPVVideoFeatureCapabilities {
         MPVVideoFeatureCapabilities(
             backend: videoOutput,
@@ -93,7 +93,7 @@ public final class MPVPlayer {
         )
     }
 
-    /// The latest feature request evaluated against the configured renderer.
+    /// The most recent feature request evaluated against the configured renderer.
     public private(set) var videoFeatureRequestResult: MPVVideoFeatureRequestResult?
 
     @ObservationIgnored
@@ -137,7 +137,7 @@ public final class MPVPlayer {
         }
     }
 
-    /// Creates a player and loads the URL once a render surface is ready.
+    /// Creates a player and loads the URL. No video view is required.
     public convenience init(
         url: URL,
         configuration: MPVPlayerConfiguration = .init()
@@ -152,10 +152,10 @@ public final class MPVPlayer {
         engine?.shutdownSynchronously()
     }
 
-    /// Replaces the current media once a render surface is ready.
+    /// Loads new media. Audio plays without a video view.
     ///
-    /// May be called before attaching a view. Omitted options use the configuration;
-    /// negative start times are clamped to zero.
+    /// Omitted options use the configuration. Negative start times become zero.
+    /// Media without audio waits for a video view.
     public func load(
         _ url: URL,
         autoPlay: Bool? = nil,
@@ -271,7 +271,7 @@ public final class MPVPlayer {
     }
 
     /// Selects a video, audio, or subtitle track using its ``MPVMediaTrack/id``.
-    /// Subtitle tracks are selected as primary. Use ``selectSubtitle(_:for:)``
+    /// Selects subtitle tracks as primary. Use ``selectSubtitle(_:for:)``
     /// to choose a secondary track.
     public func selectTrack(_ id: MPVMediaTrackIdentifier) {
         if id.type == .subtitle {
@@ -287,10 +287,10 @@ public final class MPVPlayer {
         engine?.disableTrack(type)
     }
 
-    /// Selects a subtitle track for one role, or turns that role off with nil.
+    /// Selects a subtitle track for one role, or turns that role off with `nil`.
     /// Identifiers must come from ``subtitleTracks`` for the current item.
     /// Selecting a track already used by the other role moves it to this role.
-    /// Selection is asynchronous; observe ``selectedSubtitle(for:)`` for the result.
+    /// Selection is asynchronous. Observe ``selectedSubtitle(for:)`` for the result.
     /// Invalid identifiers report ``MPVPlayerError/invalidSubtitleTrack(_:)`` via ``lastError``.
     public func selectSubtitle(
         _ id: MPVMediaTrackIdentifier?,
@@ -310,7 +310,7 @@ public final class MPVPlayer {
         engine?.selectSubtitle(id, for: role)
     }
 
-    /// The track currently selected in a subtitle role, including when hidden.
+    /// Returns the selected track for a subtitle role, including when hidden.
     public func selectedSubtitle(for role: MPVSubtitleRole = .primary) -> MPVMediaTrack? {
         subtitleTracks.first { $0.subtitleRole == role }
     }
@@ -325,8 +325,8 @@ public final class MPVPlayer {
     }
 
     /// Loads an external subtitle file and selects its first track in the given
-    /// role. Pass nil to add the file without selecting it. Can be queued after
-    /// ``load(_:)`` before the media or render surface is ready.
+    /// role. Pass `nil` to add the file without selecting it. You can queue this
+    /// after ``load(_:autoPlay:startTime:)``, before the media or render surface is ready.
     public func loadExternalSubtitle(_ url: URL, selecting role: MPVSubtitleRole? = .primary) {
         engine?.loadExternalTrack(
             url, type: .subtitle, select: role != nil, subtitleRole: role ?? .primary
@@ -351,12 +351,12 @@ public final class MPVPlayer {
     /// Streams semantic text subtitles for custom presentation.
     ///
     /// The first call enables interception for the player's lifetime. mpv stops
-    /// drawing SubRip, WebVTT, TTML, and `mov_text`; ASS/SSA and image subtitles
+    /// drawing SubRip, WebVTT, TTML, and `mov_text`. ASS/SSA and image subtitles
     /// still use mpv's renderer. Call before loading to avoid a native text flash.
     ///
-    /// Each stream immediately yields the latest complete snapshot (initially empty),
-    /// skips duplicates, and buffers only the newest pending value. Empty snapshots
-    /// clear the client's subtitle presentation.
+    /// Each stream immediately yields the most recent complete snapshot, which is
+    /// initially empty. It skips duplicates and buffers only the newest pending
+    /// value. Empty snapshots clear the client's subtitle presentation.
     public func textSubtitleStream() -> AsyncStream<TextSubtitleSnapshot> {
         if !isTextSubtitleInterceptionEnabled {
             isTextSubtitleInterceptionEnabled = true
@@ -369,14 +369,14 @@ public final class MPVPlayer {
     ///
     /// Works for selected or disabled SubRip, WebVTT, TTML, and `mov_text`
     /// tracks, including external files. Does not enable interception or change
-    /// selection, visibility, pause state, or playback position. Results are
-    /// ordered, nonoverlapping intervals containing all overlapping cue regions.
-    /// Gaps are omitted. Times exclude subtitle delay and speed adjustments.
+    /// selection, visibility, pause state, or playback position. Returns ordered,
+    /// nonoverlapping intervals containing all overlapping cue regions. The result
+    /// omits gaps. Times exclude subtitle delay and speed adjustments.
     ///
     /// This scans the subtitle source asynchronously, potentially reading the
     /// whole container or downloading it again. Retain the result for repeated
-    /// lookups. Requires a finite, seekable source; unsupported tracks and read
-    /// failures throw. Cancelling the task, replacing the source, or stopping
+    /// lookups. Requires a finite, seekable source. Unsupported tracks and read
+    /// failures throw. Canceling the task, replacing the source, or stopping
     /// playback cancels an outstanding query.
     public func textSubtitleSnapshots(
         for track: MPVMediaTrackIdentifier
@@ -402,9 +402,9 @@ public final class MPVPlayer {
         return snapshots.first { $0.contains(timestamp) }?.snapshot ?? TextSubtitleSnapshot()
     }
 
-    /// Requests capabilities before selecting native subtitles or configuring
-    /// zoom/overlays. A request made before metadata arrives is reevaluated when
-    /// the item is identified. Requests apply only to the current item.
+    /// Requests features before selecting native subtitles or configuring zoom and
+    /// overlays. The player reevaluates requests made before metadata arrives
+    /// once it identifies the item. Requests apply only to the current item.
     ///
     /// - Note: Native Dolby Vision does not support baked subtitles, overlays, or geometry changes.
     /// Unavailable features never switch the renderer or reload the item.
@@ -427,8 +427,8 @@ public final class MPVPlayer {
     /// Sets an mpv property not covered by the typed API.
     ///
     /// Values persist before surface attachment and across native client recreation.
-    /// Use typed methods for normalization and immediate state updates. Properties
-    /// managed by MPVUI's renderer or playback state are rejected through ``lastError``.
+    /// Use typed methods for normalization and immediate state updates. MPVUI rejects
+    /// properties it manages for rendering or playback and reports them through ``lastError``.
     /// - Note: Renderer-specific properties have no effect on outputs that do not support them.
     public func setProperty(_ name: String, to value: String) {
         let property = MPVOptionOwnership.normalizedProperty(name)
@@ -445,7 +445,7 @@ public final class MPVPlayer {
     }
 
     /// Runs an mpv command on the configured renderer. Commands require an attached
-    /// surface; ``setProperty(_:to:)`` supports deferred settings.
+    /// surface. ``setProperty(_:to:)`` supports deferred settings.
     /// Commands cannot override the configured video output or its surface wiring.
     /// A command sent after stop creates an idle native client without reopening
     /// the source. Another ``stop()`` releases that client.
@@ -453,7 +453,7 @@ public final class MPVPlayer {
         engine?.performCommand(name, arguments: arguments)
     }
 
-    /// Clears the last non-fatal command error.
+    /// Clears the last nonfatal command error.
     public func clearLastError() {
         if case .failed = state {
             return
@@ -461,17 +461,17 @@ public final class MPVPlayer {
         lastError = nil
     }
 
-    /// All currently reported video tracks.
+    /// All reported video tracks.
     public var videoTracks: [MPVMediaTrack] {
         mediaInformation.tracks.filter { $0.type == .video }
     }
 
-    /// All currently reported audio tracks.
+    /// All reported audio tracks.
     public var audioTracks: [MPVMediaTrack] {
         mediaInformation.tracks.filter { $0.type == .audio }
     }
 
-    /// All currently reported subtitle tracks.
+    /// All reported subtitle tracks.
     public var subtitleTracks: [MPVMediaTrack] {
         mediaInformation.tracks.filter { $0.type == .subtitle }
     }
@@ -769,8 +769,15 @@ extension MPVPlayer {
     }
 
     func detachRenderTarget(token: UUID, layerAddress: Int64?) {
-        if activeRenderSurfaceToken == token {
+        let wasActive = activeRenderSurfaceToken == token
+        if wasActive {
             activeRenderSurfaceToken = nil
+        }
+        if wasActive, videoOutput == .sampleBuffer, hasAttachedSampleBufferOutput {
+            hasAttachedSampleBufferOutput = false
+            if let target = sampleBufferRenderTarget {
+                engine?.detach(fromLayerAddress: target.layerAddress)
+            }
         }
         if let layerAddress, videoOutput == .metal {
             // The engine validates the address against its current target.

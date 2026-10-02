@@ -1,7 +1,6 @@
 """Release playback measurements made inside the example app on a physical iPad/iPhone.
 
-Build/install/launch use XcodeBuildMCP. File transfer uses devicectl because the
-CLI has no app-container transfer operation. Host CPU/RSS are never measured.
+Builds use Xcode; device operations use devicectl. Host CPU/RSS are never measured.
 """
 
 import contextlib
@@ -26,30 +25,20 @@ BUNDLE = "com.lepips.MPVUIExample"
 def add_arguments(commands, *, label, bounded_int, finite_range):
     parser = commands.add_parser("device", help="Profile Release playback on an explicitly selected physical device")
     parser.add_argument("--label", type=label, required=True)
-    parser.add_argument(
-        "--device", required=True, help="Physical UDID/CoreDevice identifier; never selects a device implicitly"
-    )
-    parser.add_argument(
-        "--media", type=Path, required=True, help="Local MP4, or self-contained HLS playlist served with --host"
-    )
-    parser.add_argument(
-        "--host", help="Mac LAN address reachable by the device; serves only this media directory over HTTP"
-    )
+    parser.add_argument("--device", required=True, help="Physical UDID/CoreDevice identifier; never selects a device implicitly")
+    parser.add_argument("--media", type=Path, required=True, help="Local MP4, or self-contained HLS playlist served with --host")
+    parser.add_argument("--host", help="Mac LAN address reachable by the device; serves only this media directory over HTTP")
     parser.add_argument("--players", default="mpv,avplayer", help="mpv,avplayer or one player")
     parser.add_argument("--backend", choices=("default", "sampleBuffer", "metal"), default="default")
     parser.add_argument("--sdr-output", choices=("automatic", "compatibility8Bit"), default="automatic")
     parser.add_argument("--software-decoding", action="store_true")
-    parser.add_argument(
-        "--option", action="append", default=[], help="MPV key=value override; repeat for controlled experiments"
-    )
+    parser.add_argument("--option", action="append", default=[], help="MPV key=value override; repeat for controlled experiments")
     parser.add_argument("--seconds", type=finite_range(2, 300), default=30.0)
     parser.add_argument("--warmup", type=finite_range(1, 60), default=5.0)
     parser.add_argument("--repetitions", type=bounded_int(1, 20), default=3)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--derived-data", type=Path, default=ROOT / ".build/device-benchmark")
-    parser.add_argument(
-        "--skip-build", action="store_true", help="Reuse only a build stamped with the current source digest"
-    )
+    parser.add_argument("--skip-build", action="store_true", help="Reuse only a build stamped with the current source digest")
 
 
 def digest(path):
@@ -87,9 +76,7 @@ def source_identity():
 
 
 def command(arguments, *, log=None, optional=False, timeout=180):
-    result = subprocess.run(
-        [str(x) for x in arguments], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout
-    )
+    result = subprocess.run([str(x) for x in arguments], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
     if log:
         Path(log).write_text(result.stdout)
     if result.returncode and not optional:
@@ -97,16 +84,11 @@ def command(arguments, *, log=None, optional=False, timeout=180):
     return result
 
 
-def mcp(operation, parameters, log):
-    result = command(
-        ["xcodebuildmcp", "device", operation, "--json", json.dumps(parameters), "--output", "json"],
-        log=log,
-        timeout=1200,
-    )
-    payload = json.loads(result.stdout)
-    if payload.get("didError") or payload.get("isError"):
-        raise ValueError(f"Device {operation} failed; see {log}")
-    return payload
+def device_command(devicectl, arguments, output):
+    command([devicectl, "device", "--json-output", output, *arguments], log=output.with_suffix(".log"), timeout=1200)
+    if not output.is_file():
+        raise ValueError(f"Device operation produced no result: {output}")
+    return json.loads(output.read_text())
 
 
 def media_identity(path):
@@ -132,9 +114,7 @@ def media_identity(path):
             refs = re.findall(r'URI="([^"]+)"', line) if line.startswith("#") else [line] if line else []
             for ref in refs:
                 if ":" in ref or "?" in ref or "#" in ref:
-                    raise ValueError(
-                        "Use captured HLS with local segment/key references, without credentials or remote resources"
-                    )
+                    raise ValueError("Use captured HLS with local segment/key references, without credentials or remote resources")
                 resource = (current.parent / ref).resolve()
                 if not resource.is_relative_to(path.parent):
                     raise ValueError("HLS resource escapes the media directory")
@@ -333,14 +313,10 @@ def aggregate(raw_runs, *, source, media, args, device, xcode, app_hash):
         for key, value in raw["metrics"].items():
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 continue
-            workload["metrics"].setdefault(key, {"unit": metric_unit(key), "direction": "lower", "samples": []})[
-                "samples"
-            ].append(value)
+            workload["metrics"].setdefault(key, {"unit": metric_unit(key), "direction": "lower", "samples": []})["samples"].append(value)
         workload["observations"].append(raw)
         environment_keys.append(raw["environment"])
-    protocol = {
-        p.name: digest(p) for p in (Path(__file__), ROOT / "Example/MPVUIExample/Shared/PlaybackBenchmark.swift")
-    }
+    protocol = {p.name: digest(p) for p in (Path(__file__), ROOT / "Example/MPVUIExample/Shared/PlaybackBenchmark.swift")}
     return {
         "label": args.label,
         "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -371,7 +347,8 @@ def aggregate(raw_runs, *, source, media, args, device, xcode, app_hash):
 
 
 def run(args):
-    from benchmark import measurement_lock, write_json
+    from benchmark import compare_reports, measurement_lock, measurement_summary, write_json
+    from validation import publish_evidence
 
     players = args.players.split(",")
     if not players or len(players) != len(set(players)) or set(players) - {"mpv", "avplayer"}:
@@ -386,6 +363,7 @@ def run(args):
         raise ValueError(f"Report already exists: {output}")
     logs = ROOT / f".build/benchmarks/logs/{stamp}-{args.label}"
     logs.mkdir(parents=True)
+    publish_evidence(summary=dict(measurementStatus="not_evaluated", comparisonStatus="not_requested"), artifacts=dict(benchmarkLogs=logs))
     developer = Path(os.environ.get("DEVELOPER_DIR") or command(["xcode-select", "-p"]).stdout.strip())
     devicectl = developer / "usr/bin/devicectl"
     xcode = plistlib.loads((developer.parent / "version.plist").read_bytes())["ProductBuildVersion"]
@@ -420,23 +398,31 @@ def run(args):
                 raise ValueError("Stale or missing device build; omit --skip-build")
         else:
             print("Building Release device benchmark…", flush=True)
-            mcp(
-                "build",
-                {
-                    "projectPath": str(ROOT / "Example/MPVUIExample/MPVUIExample.xcodeproj"),
-                    "scheme": "iOS",
-                    "configuration": "Release",
-                    "derivedDataPath": str(derived),
-                    "extraArgs": ["-allowProvisioningUpdates"],
-                },
-                logs / "build.json",
+            command(
+                [
+                    "xcodebuild",
+                    "-project",
+                    ROOT / "Example/MPVUIExample/MPVUIExample.xcodeproj",
+                    "-scheme",
+                    "iOS",
+                    "-configuration",
+                    "Release",
+                    "-derivedDataPath",
+                    derived,
+                    "-destination",
+                    "generic/platform=iOS",
+                    "-allowProvisioningUpdates",
+                    "build",
+                ],
+                log=logs / "build.log",
+                timeout=1200,
             )
             if not app.exists():
                 raise ValueError(f"Build produced no app: {app}")
             if source_identity()["sourceSHA256"] != before["sourceSHA256"]:
                 raise ValueError("Source changed while building; rerun with a stable checkout")
             build_stamp.write_text(json.dumps(dict(build_identity, appSHA256=digest(app / "MPVUIExample"))))
-        mcp("install", {"deviceId": args.device, "appPath": str(app)}, logs / "install.json")
+        device_command(devicectl, ["install", "app", "--device", args.device, str(app)], logs / "install.json")
         app_hash = digest(app / "MPVUIExample")
         if not url:
             command(
@@ -483,9 +469,9 @@ def run(args):
                 )
                 for process in json.loads(process_list.read_text())["result"]["runningProcesses"]:
                     if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample"):
-                        mcp(
-                            "stop",
-                            {"deviceId": args.device, "processId": process["processIdentifier"]},
+                        device_command(
+                            devicectl,
+                            ["process", "terminate", "--device", args.device, "--pid", str(process["processIdentifier"])],
                             logs / (name + ".stop.json"),
                         )
                 launch = [
@@ -509,10 +495,8 @@ def run(args):
                     launch.append("--benchmark-software-decoding")
                 for option in args.option if player == "mpv" else []:
                     launch += ["--benchmark-option", option]
-                mcp(
-                    "launch",
-                    {"deviceId": args.device, "bundleId": BUNDLE, "launchArgs": launch},
-                    logs / (name + ".launch.json"),
+                device_command(
+                    devicectl, ["process", "launch", "--device", args.device, BUNDLE, "--", *launch], logs / (name + ".launch.json")
                 )
                 deadline = time.monotonic() + args.seconds + args.warmup + 120
                 destination = logs / name
@@ -542,19 +526,26 @@ def run(args):
                     if copied.returncode == 0 and destination.exists():
                         break
                 else:
-                    raise ValueError(
-                        f"No on-device completion report (device must remain unlocked and foreground); see {logs}"
-                    )
+                    raise ValueError(f"No on-device completion report (device must remain unlocked and foreground); see {logs}")
                 raw = json.loads(destination.read_text())
+                publish_evidence(artifacts=dict(deviceObservation=destination))
                 runs.append(raw)
                 if raw.get("status") != "passed":
                     raise ValueError(f"Device validation failed: {raw.get('error')}; see {destination}")
                 print(f"  {raw['metrics']}", flush=True)
         if source_identity()["sourceSHA256"] != before["sourceSHA256"] or media_identity(media) != identity:
             raise ValueError(f"Source/media changed during measurement; raw evidence kept in {logs}")
-        report = aggregate(
-            runs, source=before, media=identity, args=args, device=device, xcode=xcode, app_hash=app_hash
-        )
+        report = aggregate(runs, source=before, media=identity, args=args, device=device, xcode=xcode, app_hash=app_hash)
+        validated = compare_reports(report, report)
         write_json(output, report)
+        publish_evidence(
+            summary=dict(
+                measurementStatus="valid",
+                inputsUnchanged=True,
+                measurements=measurement_summary(validated),
+                limitations=report["runtime"]["limitations"],
+            ),
+            artifacts=dict(benchmarkReport=output),
+        )
         print(f"Device report: {output}", flush=True)
     return 0

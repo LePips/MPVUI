@@ -14,7 +14,7 @@ import plistlib
 import time
 from urllib.parse import unquote, urlsplit
 
-from device_playback import BUNDLE, ROOT, command, digest, mcp, media_identity, serve_media, source_identity
+from device_playback import BUNDLE, ROOT, command, device_command, digest, media_identity, serve_media, source_identity
 
 
 def add_arguments(commands):
@@ -26,9 +26,7 @@ def add_arguments(commands):
     parser.add_argument("--software-decoding", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--derived-data", type=Path, default=ROOT / ".build/device-regression")
-    parser.add_argument(
-        "--skip-build", action="store_true", help="Reuse only the current source/Xcode/app-stamped build"
-    )
+    parser.add_argument("--skip-build", action="store_true", help="Reuse only the current source/Xcode/app-stamped build")
 
 
 def launch_arguments(args, media, filename):
@@ -85,8 +83,7 @@ def validate_report(raw, args, media, served_url):
             raise ValueError(f"Replay did not establish playback from zero: {prefix}")
         stopped = checks.get(f"{prefix}-stop-retained", {})
         if not all(
-            stopped.get(key) is True
-            for key in ("stateRemainedStopped", "publishedActivityUnchanged", "publishedNativeSamplesUnchanged")
+            stopped.get(key) is True for key in ("stateRemainedStopped", "publishedActivityUnchanged", "publishedNativeSamplesUnchanged")
         ):
             raise ValueError(f"Missing stopped-player evidence: {prefix}")
         pause = checks.get(f"{prefix}-pause", {}).get("positionDeltaSeconds")
@@ -155,6 +152,7 @@ def validate_build(saved, expected, app):
 
 def run(args):
     from benchmark import measurement_lock, write_json
+    from validation import publish_evidence
 
     media = args.media.resolve()
     identity = media_identity(media)
@@ -164,6 +162,7 @@ def run(args):
         raise ValueError(f"Report already exists: {output}")
     logs = ROOT / f".build/benchmarks/logs/{stamp}-device-regression"
     logs.mkdir(parents=True)
+    publish_evidence(summary=dict(functionalStatus="not_evaluated"), artifacts=dict(benchmarkLogs=logs))
     developer = Path(os.environ.get("DEVELOPER_DIR") or command(["xcode-select", "-p"]).stdout.strip())
     devicectl = developer / "usr/bin/devicectl"
     xcode = plistlib.loads((developer.parent / "version.plist").read_bytes())["ProductBuildVersion"]
@@ -193,16 +192,24 @@ def run(args):
             validate_build(saved, build_identity, app)
         else:
             print("Building Release device regression…", flush=True)
-            mcp(
-                "build",
-                {
-                    "projectPath": str(ROOT / "Example/MPVUIExample/MPVUIExample.xcodeproj"),
-                    "scheme": "iOS",
-                    "configuration": "Release",
-                    "derivedDataPath": str(derived),
-                    "extraArgs": ["-allowProvisioningUpdates"],
-                },
-                logs / "build.json",
+            command(
+                [
+                    "xcodebuild",
+                    "-project",
+                    ROOT / "Example/MPVUIExample/MPVUIExample.xcodeproj",
+                    "-scheme",
+                    "iOS",
+                    "-configuration",
+                    "Release",
+                    "-derivedDataPath",
+                    derived,
+                    "-destination",
+                    "generic/platform=iOS",
+                    "-allowProvisioningUpdates",
+                    "build",
+                ],
+                log=logs / "build.log",
+                timeout=1200,
             )
             if not (app / "MPVUIExample").is_file():
                 raise ValueError(f"Build produced no app: {app}")
@@ -210,7 +217,7 @@ def run(args):
                 raise ValueError("Source changed while building; rerun with a stable checkout")
             build_stamp.write_text(json.dumps(dict(build_identity, appSHA256=digest(app / "MPVUIExample"))))
         app_hash = digest(app / "MPVUIExample")
-        mcp("install", {"deviceId": args.device, "appPath": str(app)}, logs / "install.json")
+        device_command(devicectl, ["install", "app", "--device", args.device, str(app)], logs / "install.json")
         if not url:
             command(
                 [
@@ -250,15 +257,15 @@ def run(args):
         )
         for process in json.loads(process_list.read_text())["result"]["runningProcesses"]:
             if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample"):
-                mcp("stop", {"deviceId": args.device, "processId": process["processIdentifier"]}, logs / "stop.json")
+                device_command(
+                    devicectl,
+                    ["process", "terminate", "--device", args.device, "--pid", str(process["processIdentifier"])],
+                    logs / "stop.json",
+                )
         print("Running foreground functional regression…", flush=True)
-        mcp(
-            "launch",
-            {
-                "deviceId": args.device,
-                "bundleId": BUNDLE,
-                "launchArgs": launch_arguments(args, url or media.name, name),
-            },
+        device_command(
+            devicectl,
+            ["process", "launch", "--device", args.device, BUNDLE, "--", *launch_arguments(args, url or media.name, name)],
             logs / "launch.json",
         )
         destination = logs / name
@@ -320,6 +327,10 @@ def run(args):
             "observation": raw,
         }
         write_json(output, report)
+        publish_evidence(
+            summary=dict(functionalStatus=report["status"], functionalFailure=failure),
+            artifacts=dict(deviceRegressionReport=output, deviceObservation=destination),
+        )
         print(f"Device regression report: {output}", flush=True)
         if failure:
             raise ValueError(f"{failure}; raw evidence retained in {destination}")

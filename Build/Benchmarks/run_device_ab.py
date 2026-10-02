@@ -46,9 +46,7 @@ def checkout_identity(checkout, derived):
     checkout, derived = Path(checkout).resolve(), Path(derived).resolve()
     code = "import json,sys;sys.path.insert(0,'Build/Benchmarks');from device_playback import source_identity;print(json.dumps(source_identity()))"
     source = json.loads(
-        subprocess.check_output(
-            [sys.executable, "-c", code], cwd=checkout, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        )
+        subprocess.check_output([sys.executable, "-c", code], cwd=checkout, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     )
     stamp = read(derived / "mpvui-benchmark-build.json")
     app = derived / "Build/Products/Release-iphoneos/MPVUIExample.app/MPVUIExample"
@@ -110,10 +108,7 @@ def validate_single(report, expected_cohort, expected_workload, expected_key, ha
     if len(report["workloads"]) != 1:
         raise ValueError("Input must have exactly one MPV workload")
     workload = report["workloads"][0]
-    if (
-        workload["parameters"] != expected_workload["parameters"]
-        or report["runtime"]["media"] != expected_workload["media"]
-    ):
+    if workload["parameters"] != expected_workload["parameters"] or report["runtime"]["media"] != expected_workload["media"]:
         raise ValueError("Input media/configuration differs")
     if len(workload["observations"]) != 1:
         raise ValueError("Input must contain exactly one independent observation")
@@ -152,9 +147,7 @@ def assemble(plan_path):
     for step in plan["steps"]:
         path = directory / step["report"]
         report = read(path)
-        raw = validate_single(
-            report, plan["cohorts"][step["cohort"]], plan["workloads"][step["workload"]], plan["comparisonKey"], harness
-        )
+        raw = validate_single(report, plan["cohorts"][step["cohort"]], plan["workloads"][step["workload"]], plan["comparisonKey"], harness)
         identity = (raw["createdAt"], digest(path))
         if raw["createdAt"] in seen:
             raise ValueError("Duplicate raw process observation timestamp")
@@ -225,9 +218,7 @@ def run(args):
             raise ValueError("Cohort Xcode differs from reference")
         for filename, sha in key["protocol"].items():
             path = Path(cohort["checkout"]) / (
-                "Build/Benchmarks/" + filename
-                if filename.endswith(".py")
-                else "Example/MPVUIExample/Shared/" + filename
+                "Build/Benchmarks/" + filename if filename.endswith(".py") else "Example/MPVUIExample/Shared/" + filename
             )
             if digest(path) != sha:
                 raise ValueError("Cohort protocol files differ")
@@ -286,10 +277,7 @@ def run(args):
                 {
                     "status": "validated dry run; no device operations or files written",
                     "steps": steps,
-                    "cohorts": {
-                        k: {"sourceSHA256": v["source"]["sourceSHA256"], "appSHA256": v["appSHA256"]}
-                        for k, v in cohorts.items()
-                    },
+                    "cohorts": {k: {"sourceSHA256": v["source"]["sourceSHA256"], "appSHA256": v["appSHA256"]} for k, v in cohorts.items()},
                 },
                 indent=2,
             )

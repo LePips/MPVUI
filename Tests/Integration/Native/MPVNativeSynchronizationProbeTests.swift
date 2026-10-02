@@ -458,7 +458,6 @@ struct MPVNativeSynchronizationProbeTests {
                 switch emission.update {
                 case let .state(state): recorder.add("state:\(state)")
                 case let .error(error, fatal): recorder.add("error:\(error), fatal:\(fatal)")
-                case .nativeVideoOutputUnavailable: recorder.add("nativeVideoOutputUnavailable")
                 case let .log(log): recorder.addLog(log)
                 default: break
                 }

@@ -95,36 +95,46 @@ struct PlayerView: View {
             Color.black
                 .ignoresSafeArea()
 
-            MPVVideoPlayer(player: player)
-                .videoOverlay {
-                    if player.pictureInPicture.isActive, let textSubtitles = seekSubtitles.snapshot ?? textSubtitles {
-                        TextSubtitleOverlay(
-                            snapshot: textSubtitles,
-                            videoSize: subtitleVideoSize,
-                            scalesWithVideo: true,
-                            bottomClearance: seekSubtitles.snapshot != nil && isShowingControls
-                                ? bottomControlsHeight + bottomSafeAreaInset + 16 : 0
-                        )
-                    }
+            Group {
+                if player.videoTracks.isEmpty {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 96, weight: .light))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Audio playback")
+                        .accessibilityIdentifier("exampleAudioArtwork")
+                } else {
+                    MPVVideoPlayer(player: player)
+                        .videoOverlay {
+                            if player.pictureInPicture.isActive, let textSubtitles = seekSubtitles.snapshot ?? textSubtitles {
+                                TextSubtitleOverlay(
+                                    snapshot: textSubtitles,
+                                    videoSize: subtitleVideoSize,
+                                    scalesWithVideo: true,
+                                    bottomClearance: seekSubtitles.snapshot != nil && isShowingControls
+                                        ? bottomControlsHeight + bottomSafeAreaInset + 16 : 0
+                                )
+                            }
+                        }
+                        .overlay {
+                            if !player.pictureInPicture.isActive, let textSubtitles = seekSubtitles.snapshot ?? textSubtitles {
+                                TextSubtitleOverlay(
+                                    snapshot: textSubtitles,
+                                    videoSize: subtitleVideoSize,
+                                    scalesWithVideo: false,
+                                    bottomClearance: isShowingControls
+                                        ? bottomControlsHeight + bottomSafeAreaInset + 16 : 0
+                                )
+                            }
+                        }
+                        .accessibilityIdentifier("exampleVideoPlayer")
                 }
-                .overlay {
-                    if !player.pictureInPicture.isActive, let textSubtitles = seekSubtitles.snapshot ?? textSubtitles {
-                        TextSubtitleOverlay(
-                            snapshot: textSubtitles,
-                            videoSize: subtitleVideoSize,
-                            scalesWithVideo: false,
-                            bottomClearance: isShowingControls
-                                ? bottomControlsHeight + bottomSafeAreaInset + 16 : 0
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-                .accessibilityIdentifier("exampleVideoPlayer")
-                #if os(iOS) || os(macOS)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: toggleControls)
-                #endif
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            #if os(iOS) || os(macOS)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggleControls)
+            #endif
 
             #if os(tvOS)
             if !isShowingControls {

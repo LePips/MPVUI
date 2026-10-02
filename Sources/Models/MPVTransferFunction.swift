@@ -43,7 +43,7 @@ public enum MPVTransferFunction: Equatable, Hashable, Sendable {
     case other(String)
 
     /// Parses an mpv transfer/gamma value, normalizing known spelling variants.
-    /// Missing or blank values become ``unknown``; unrecognized values use ``other(_:)``.
+    /// Missing or blank values become ``unknown``. Unrecognized values use ``other(_:)``.
     init(mpvValue: String?) {
         guard let value = mpvValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty

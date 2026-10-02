@@ -1,6 +1,6 @@
 /// A complete semantic text subtitle presentation, in presentation order.
 ///
-/// Empty ``regions`` clears the presentation. Use ``text`` for a flattened string.
+/// An empty ``regions`` array clears the presentation. Use ``text`` for a flattened string.
 public struct TextSubtitleSnapshot: Sendable, Hashable {
     /// The text regions in presentation order.
     public let regions: [TextSubtitleRegion]

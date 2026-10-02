@@ -6,9 +6,9 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
 
     // MARK: - Types
 
-    /// Who configures the shared iOS/tvOS audio session. Ignored on macOS.
+    /// Ownership of the shared audio session on iOS and tvOS. Has no effect on macOS.
     public enum AudioSession: String, CaseIterable, Sendable {
-        /// Activate the playback category, movie-playback mode, and multichannel
+        /// Activates the playback category, movie-playback mode, and multichannel
         /// support when audio opens. The host handles interruptions and deactivation.
         case automatic
         /// The host configures, activates, and deactivates `AVAudioSession`.
@@ -16,25 +16,25 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
         case hostManaged
     }
 
-    /// How AC-3 and E-AC-3 audio are decoded.
+    /// The decoding method for AC-3 and E-AC-3 audio.
     public enum DolbyDecoding: String, CaseIterable, Sendable {
-        /// Send AC-3/E-AC-3 to Apple, preserving any embedded Atmos data.
+        /// Sends AC-3 and E-AC-3 to Apple, preserving any embedded Atmos data.
         /// Unsupported routes, audio processing, or playback failures fall back to PCM.
-        /// Apple determines whether Atmos is rendered on the active route.
+        /// Apple determines whether the active route renders Atmos.
         case automatic
-        /// Decode to PCM in mpv. Surround channels remain spatializable, but
-        /// Atmos object metadata is not delivered through this path.
+        /// Decodes to PCM in mpv. Surround channels support spatialization, but
+        /// this path does not deliver Atmos object metadata.
         case software
     }
 
     /// Content eligible for Apple's spatializer. System settings still control
     /// Off, Fixed, Head Tracked, and Personalized Spatial Audio.
     public enum Spatialization: String, CaseIterable, Sendable {
-        /// Allow mono, stereo, and surround content, including audio-only media.
+        /// Allows mono, stereo, and surround content, including audio-only media.
         case automatic
-        /// Allow surround content only.
+        /// Allows surround content only.
         case multichannel
-        /// Disable Apple's spatializer for this player (for example, binaural media).
+        /// Disables Apple's spatializer for this player, for example, for binaural media.
         case disabled
 
         var mpvValue: String {
@@ -48,10 +48,10 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
 
     // MARK: - Properties
 
-    /// Audio-session ownership on iOS/tvOS. Defaults to `.automatic`.
+    /// Audio-session ownership on iOS and tvOS. Defaults to `.automatic`.
     public let audioSession: AudioSession
 
-    /// How AC-3 and E-AC-3 are decoded. Defaults to `.automatic`.
+    /// The decoding method for AC-3 and E-AC-3. Defaults to `.automatic`.
     public let dolbyDecoding: DolbyDecoding
 
     /// Source layouts eligible for Apple's spatializer. Defaults to `.automatic`.

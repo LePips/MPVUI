@@ -8,7 +8,7 @@ import Foundation
 /// `mpv_wait_event` invalidates them.
 ///
 /// Responsibilities live in the `MPVEngine+…` extensions. Shared implementation
-/// members are internal for cross-file access; mutable state remains isolated
+/// members are internal for cross-file access. Mutable state remains isolated
 /// to `queue` across all of those files.
 final class MPVEngine: @unchecked Sendable {
     typealias Sink = @MainActor @Sendable (MPVEngineEmission) -> Void
@@ -19,9 +19,13 @@ final class MPVEngine: @unchecked Sendable {
     let queueKey = DispatchSpecificKey<UInt8>()
     let queueValue: UInt8 = 1
     let configuration: MPVPlayerConfiguration
+    let eventDrainSource: DispatchSourceUserDataAdd
     let updateContinuation: AsyncStream<MPVEngineEmission>.Continuation
     private let updateDeliveryTask: Task<Void, Never>
     lazy var wakeupContext = WeakBox(self)
+    var isCoalescingPropertySnapshots = false
+    var pendingBufferSnapshot = false
+    var pendingMediaSnapshot = false
 
     // MARK: - Handle and rendering state
 
@@ -40,6 +44,7 @@ final class MPVEngine: @unchecked Sendable {
     var pendingStartTime: Duration?
     var pendingSeekAfterLoad: Duration?
     var needsSourceLoad = false
+    var sourceLoadWasHeadless = false
     // A stopped player keeps its source and surface for replay without keeping
     // native decoder/renderer allocations alive. Geometry updates cannot restart it.
     var isStoppedForResourceRelease = false
@@ -106,6 +111,7 @@ final class MPVEngine: @unchecked Sendable {
 
     init(configuration: MPVPlayerConfiguration, sink: @escaping Sink) {
         self.configuration = configuration
+        eventDrainSource = DispatchSource.makeUserDataAddSource(queue: queue)
         dolbyVisionResolver = MPVDolbyVisionStatusResolver(policy: configuration.dolbyVisionPolicy)
         videoOutput = configuration.videoOutput
         // This unified stream carries state and errors as well as diagnostics;
@@ -126,9 +132,16 @@ final class MPVEngine: @unchecked Sendable {
             "speed": Self.format(configuration.playbackRate),
         ]
         queue.setSpecific(key: queueKey, value: queueValue)
+        eventDrainSource.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lifecycleDiagnostics.engineActivity.nativeWakeups &+= Int64(truncatingIfNeeded: self.eventDrainSource.data)
+            self.drainEvents()
+        }
+        eventDrainSource.activate()
     }
 
     deinit {
+        eventDrainSource.cancel()
         if DispatchQueue.getSpecific(key: queueKey) == queueValue {
             destroyHandle(preservePlayback: false)
         } else {

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Policy and evidence tests. These do not validate physical Dolby Vision output,
-/// parse real MEL/FEL bitstreams or certify a television's reconstruction.
+/// parse real MEL/FEL bitstreams, or certify a television's reconstruction.
 @Suite(.tags(.unit, .dolbyVision))
 struct MPVDolbyVisionPolicyTests {
     @Test

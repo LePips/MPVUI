@@ -4,7 +4,7 @@ import Observation
 /// Picture-in-picture controls accessed through ``MPVPlayer/pictureInPicture``.
 ///
 /// iOS requires `.sampleBuffer` output and the native-output Libmpv build.
-/// macOS uses private PIP.framework APIs; avoid this presenter in public-API-only apps.
+/// macOS uses private `PIP.framework` APIs. Avoid this presenter in apps that require only public APIs.
 /// tvOS and Mac Catalyst are unsupported.
 ///
 /// With the player's video view attached, enable a SwiftUI button when PiP is ready:
@@ -22,7 +22,7 @@ public final class MPVPictureInPictureController {
     public private(set) var isSupported = false
     /// Whether picture in picture can start for the current video.
     public private(set) var isPossible = false
-    /// Whether video is currently presented in picture in picture.
+    /// Whether picture in picture is presenting video.
     public private(set) var isActive = false
     /// Whether picture in picture is starting or stopping.
     public private(set) var isTransitioning = false
@@ -37,11 +37,11 @@ public final class MPVPictureInPictureController {
     public private(set) var lastError: MPVPlayerError?
 
     /// Restore the player's interface before returning `true`.
-    /// By default restoration succeeds only if the inline view is in a window.
+    /// By default, restoration succeeds only if the inline view is in a window.
     @ObservationIgnored
     public var restoreUserInterface: (@MainActor () async -> Bool)?
 
-    /// Let iOS start PiP when leaving the app, when system settings permit it.
+    /// Whether iOS can start PiP when leaving the app, if system settings permit it.
     public var allowsAutomaticStartFromInline = false {
         didSet {
             #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -93,7 +93,7 @@ public final class MPVPictureInPictureController {
     }
 
     /// Retire AVKit/AppKit before the player tears down its native output,
-    /// including when an application separately retains this facade.
+    /// including when an app separately retains this facade.
     func invalidate() {
         #if os(iOS) && !targetEnvironment(macCatalyst)
         sampleBufferController?.invalidate()
@@ -112,7 +112,8 @@ public final class MPVPictureInPictureController {
         isVideoOverlayActive = false
     }
 
-    /// Request PiP after `isPossible` becomes true. Errors are observable.
+    /// Requests picture in picture. Call after ``isPossible`` becomes `true`.
+    /// Failures update ``lastError``.
     public func start() {
         guard isSupported else {
             lastError = .pictureInPictureUnsupported

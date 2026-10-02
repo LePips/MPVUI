@@ -1,0 +1,4 @@
+target-version = "py310"
+line-length = 140
+extend-include = ["Build/benchmark"]
+extend-exclude = [".build*", "build", "DerivedData", "Build/Patches"]

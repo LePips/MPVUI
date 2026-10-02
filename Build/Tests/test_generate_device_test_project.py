@@ -17,9 +17,7 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.output = self.repository / ".build/device-tests"
 
     def test_project_references_live_checkout_and_owns_generated_bundle_resources(self):
-        with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(
-            project.subprocess, "run"
-        ) as run:
+        with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(project.subprocess, "run") as run:
             result = project.generate(self.repository, self.output, "ABC123DE45")
         self.assertEqual((self.repository / "Package.swift").read_text(), "manifest remains untouched")
         self.assertEqual(result.parent, self.output)
@@ -35,9 +33,7 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
 
     def test_device_test_bundle_has_an_application_host_and_matching_signing(self):
-        with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(
-            project.subprocess, "run"
-        ):
+        with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(project.subprocess, "run"):
             project.generate(self.repository, self.output, "ABC123DE45")
         spec = json.loads((self.output / "project.json").read_text())
         host = spec["targets"][project.HOST_TARGET]
@@ -86,9 +82,7 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(list((self.repository / "Tests").iterdir()), [])
 
     def test_missing_generator_and_unsigned_mode_are_explicit(self):
-        with patch.object(project.shutil, "which", return_value=None), self.assertRaisesRegex(
-            RuntimeError, "brew install xcodegen"
-        ):
+        with patch.object(project.shutil, "which", return_value=None), self.assertRaisesRegex(RuntimeError, "brew install xcodegen"):
             project.generate(self.repository, self.output)
         self.assertFalse(self.output.exists())
         settings = project.project_spec(self.repository, self.output, None)["targets"]["MPVUITests"]["settings"]["base"]

@@ -1,0 +1,73 @@
+minimum_pre_commit_version: '4.0.0'
+default_stages: [pre-commit]
+# Generated files and checksum-locked upstream patches retain their own format.
+exclude: >-
+  (?x)^(
+    \.build[^/]*/|build/|DerivedData/|\.swiftpm/|
+    Build/Patches/|Build/[^/]+\.lock\.json$|Package\.swift$|
+    .*\.xcassets/|.*\.icon/|.*\.xcodeproj/|.*\.xcworkspace/
+  )
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-format
+        types_or: [python, pyi]
+      - id: ruff-format
+        alias: ruff-format-check
+        name: Ruff format check
+        types_or: [python, pyi]
+        args: [--check]
+        stages: [manual]
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v23.1.2
+    hooks:
+      - id: clang-format
+        types_or: [c, c++, objective-c, metal]
+      - id: clang-format
+        alias: clang-format-check
+        name: clang-format check
+        entry: clang-format
+        types_or: [c, c++, objective-c, metal]
+        args: [--style=file, --dry-run, --Werror]
+        stages: [manual]
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.14.1-1
+    hooks:
+      - id: shfmt
+        args: [--write, --indent, '4']
+        stages: [pre-commit]
+      - id: shfmt
+        alias: shfmt-check
+        name: shfmt check
+        args: [--diff, --indent, '4']
+        stages: [manual]
+
+  - repo: local
+    hooks:
+      - id: prettier
+        name: Prettier
+        language: node
+        entry: prettier --write
+        additional_dependencies: [prettier@3.9.9]
+        types_or: [javascript, jsx, ts, tsx, json, yaml]
+      - id: prettier-check
+        name: Prettier check
+        language: node
+        entry: prettier --check
+        additional_dependencies: [prettier@3.9.9]
+        types_or: [javascript, jsx, ts, tsx, json, yaml]
+        stages: [manual]
+
+  - repo: https://github.com/nicklockwood/SwiftFormat
+    rev: 0.63.0
+    hooks:
+      - id: swiftformat
+      - id: swiftformat
+        alias: swiftformat-check
+        name: SwiftFormat check
+        args: [--lint]
+        stages: [manual]

@@ -8,6 +8,11 @@ extension MPVEngine {
             guard let self else { return }
             guard !self.didRejectNativeOutput else { return }
 
+            if self.renderTarget == nil, self.handle != nil {
+                self.attachVideoOutput(to: target)
+                return
+            }
+
             if let currentTarget = self.renderTarget, currentTarget.layerAddress == target.layerAddress {
                 if self.handle != nil {
                     self.updateRenderTargetImmediately(target, previous: currentTarget)
@@ -264,16 +269,78 @@ extension MPVEngine {
         dispatchPrecondition(condition: .onQueue(queue))
         guard renderTarget?.layerAddress == layerAddress else { return }
 
-        destroyHandle(preservePlayback: true)
-        renderTarget = nil
+        detachCurrentRenderTargetImmediately()
     }
 
     private func detachCurrentRenderTargetImmediately() {
         dispatchPrecondition(condition: .onQueue(queue))
         guard renderTarget != nil else { return }
 
-        destroyHandle(preservePlayback: true)
+        if isFileLoaded, getInt64("current-tracks/audio/id") == nil {
+            // Preserve the position until a view attaches.
+            destroyHandle(preservePlayback: true)
+            renderTarget = nil
+            isLoading = needsSourceLoad
+            return
+        }
+
+        if handle != nil, playbackRequestIsActive {
+            // Release video while keeping audio playback running.
+            if let selection = getString("vid") {
+                desiredProperties["vid"] = selection
+            }
+            if isLoading {
+                sourceLoadWasHeadless = true
+            }
+            var status: Int32 = 0
+            withNativeSurfaceRetirement {
+                status = setPropertyImmediately("vid", to: "no")
+                if status >= 0 {
+                    status = setPropertyImmediately("vo", to: "null")
+                }
+            }
+            if status < 0 {
+                // Destroy the client before its surface is released.
+                destroyHandle(preservePlayback: true)
+            }
+        } else {
+            destroyHandle(preservePlayback: true)
+        }
         renderTarget = nil
+        if needsSourceLoad {
+            createHandle()
+        }
+        refreshMediaInformation()
+    }
+
+    private func attachVideoOutput(to target: MPVRenderTarget) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        renderTarget = target
+        outputHeadroom = target.outputHeadroom
+        do {
+            // Configure the surface before enabling video.
+            try check(setPropertyImmediately("wid", to: String(target.layerAddress)), context: "Attach render surface")
+            if videoOutput == .metal {
+                try check(
+                    setPropertyImmediately("external-surface-size", to: "\(target.drawableWidth)x\(target.drawableHeight)"),
+                    context: "Set render surface size"
+                )
+                for (name, value) in Self.colorTargetOptions(for: target) {
+                    try check(setPropertyImmediately(name, to: value), context: "Set render color target \(name)")
+                }
+            }
+            try check(
+                setPropertyImmediately("vo", to: videoOutput == .metal ? "gpu-next" : "avfoundation"),
+                context: "Enable video output"
+            )
+            let selection = desiredProperties["vid"]
+                ?? configuration.additionalOptions["vid"] ?? configuration.additionalOptions["video"] ?? "auto"
+            try check(setPropertyImmediately("vid", to: selection), context: "Restore video selection")
+            loadPendingSourceIfPossible()
+            refreshMediaInformation()
+        } catch {
+            publishFatalError(error)
+        }
     }
 
     static func colorTargetOptions(for target: MPVRenderTarget) -> [(String, String)] {

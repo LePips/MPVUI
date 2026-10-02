@@ -139,10 +139,7 @@ class ProfileTests(unittest.TestCase):
                     analyze.validate_symbol_map(broken, binaries)
 
     def test_recursive_frames_count_once_inclusive_and_only_first_leaf(self):
-        frames = [
-            {"name": name, "addr": None, "uuid": None, "binary": "unknown"}
-            for name in ("leaf", "recursive", "recursive")
-        ]
+        frames = [{"name": name, "addr": None, "uuid": None, "binary": "unknown"} for name in ("leaf", "recursive", "recursive")]
         records = [{"nanoseconds": 1000, "timeSeconds": 1, "thread": "core", "state": "Running", "frames": frames}]
         summary, _, _ = analyze.aggregate(records, 1, {})
         self.assertEqual(summary["inclusiveNanoseconds"], {"leaf": 1000, "recursive": 1000})

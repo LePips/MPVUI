@@ -240,8 +240,8 @@ final class MPVRenderSurfaceResizeCoordinator {
         resetActiveSurface(event: .rendererConfigurationChanged)
     }
 
-    /// Marks the start of an interactive burst. Calling this is optional;
-    /// receiving a `.continuousInteractive` request starts the burst as well.
+    /// Marks the start of an interactive burst. Calling this is optional.
+    /// Receiving a `.continuousInteractive` request starts the burst as well.
     func beginContinuousInteraction() {
         guard activeLayer != nil, activeLayerAddress != nil else { return }
         hasExplicitContinuousInteraction = true
@@ -321,7 +321,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     /// Requests a resize. Invalid transient geometry cancels only pending
-    /// scheduling; the active surface, committed drawable, and in-flight
+    /// scheduling. The active surface, committed drawable, and in-flight
     /// acknowledgement remain intact.
     @discardableResult
     func requestResize(

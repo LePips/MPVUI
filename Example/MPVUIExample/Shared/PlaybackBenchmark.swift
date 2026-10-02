@@ -301,6 +301,17 @@ private final class PlaybackBenchmark {
             guard !FileManager.default.fileExists(atPath: parsed.output.path) else {
                 throw BenchmarkFailure(message: "Report already exists; choose a new --benchmark-output")
             }
+            // SwiftUI can start this task before a device launch enters the
+            // foreground. Audio activation and display sampling require it.
+            let foregroundDeadline = ProcessInfo.processInfo.systemUptime + 30
+            while !UIApplication.shared.connectedScenes.contains(where: { $0.activationState == .foregroundActive }) {
+                try Task.checkCancellation()
+                guard ProcessInfo.processInfo.systemUptime < foregroundDeadline else {
+                    throw BenchmarkFailure(message: "App did not enter the foreground; unlock the device and rerun")
+                }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            lostForeground = false
             if let audioError = ExampleAudioSession.activate() {
                 throw BenchmarkFailure(message: audioError)
             }
@@ -309,6 +320,9 @@ private final class PlaybackBenchmark {
             metalDevice = MTLCreateSystemDefaultDevice()
             try await measure("baseline", seconds: 1)
             environment = environmentSnapshot()
+            guard ProcessInfo.processInfo.thermalState == .nominal else {
+                throw BenchmarkFailure(message: "Device must cool to nominal thermal state before benchmarking")
+            }
             // The first startup memory sample precedes engine, decoder and renderer allocation.
             try await measure("startup", timeout: 30, action: { self.createPlayer(parsed) }, until: {
                 self.isPlaying && self.position > 0.2

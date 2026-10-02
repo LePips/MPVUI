@@ -11,7 +11,7 @@ public struct MPVHDRStatus: Equatable, Sendable {
     public let videoOutputInput: MPVVideoSignal
 
     /// Renderer target metadata, when reported. Never inferred from the source
-    /// or the layer; native AVFoundation conversion can leave this unknown.
+    /// or the layer. Native AVFoundation conversion can leave this unknown.
     public let output: MPVVideoSignal
 
     /// The selected output route's display capabilities.
@@ -43,8 +43,8 @@ public struct MPVHDRStatus: Equatable, Sendable {
     /// Whether the selected output display supports HDR presentation.
     public let isDisplayHDRCapable: Bool
 
-    /// Whether HDR presentation has been established by the operating system.
-    /// False also includes unknown; consult ``presentation`` to distinguish it.
+    /// Whether the operating system confirms HDR presentation.
+    /// The value is `false` when presentation is unknown. Check ``presentation`` for details.
     public let isHDRActive: Bool
 
     /// Creates a snapshot, discarding non-finite or negative luminance and signal peaks.
@@ -101,6 +101,6 @@ public struct MPVHDRStatus: Equatable, Sendable {
         transferFunction.isHDR
     }
 
-    /// Empty metadata and unknown presentation; retained for source compatibility.
+    /// Empty metadata and unknown presentation, retained for source compatibility.
     public static let sdr = Self()
 }

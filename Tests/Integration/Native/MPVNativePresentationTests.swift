@@ -7,7 +7,7 @@ import Foundation
 import Testing
 
 /// Foreground physical-device checks. AVFoundation metrics and displayed-buffer
-/// readback strengthen clock-only evidence; neither measures panel scanout or
+/// readback strengthen clock-only evidence. Neither measures panel scanout or
 /// audible synchronization. Keep these calls out of performance measurements.
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVNativePresentationTests {

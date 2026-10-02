@@ -1,15 +1,21 @@
-- [README.md](README.md): Project overview and basic SwiftUI usage.
-- [Build/BUILD.md](Build/BUILD.md): Build requirements, local development, release candidates, and cleanup.
-- [TESTING.md](TESTING.md): Test organization, commands, media fixtures, and native and system checks.
+- [README.md](README.md): project overview and basic SwiftUI usage.
+- [Build/BUILD.md](Build/BUILD.md): build requirements, local development, release candidates, and cleanup.
+- [TESTING.md](TESTING.md): test organization, commands, media fixtures, and native and system checks.
+- [TEST_MEDIA.md](TEST_MEDIA.md): generated test media, adding fixtures, and coverage gaps.
 - [Build/PATCHES.md](Build/PATCHES.md): mpv and FFmpeg patches and their purposes.
-- [Build/RENDERING.md](Build/RENDERING.md): Video outputs, HDR, picture in picture, subtitles, and fonts.
-- [Build/PLATFORMS.md](Build/PLATFORMS.md): Generated native build targets, architectures, minimum OS versions, and SDKs.
-- [Build/Patches/AVFOUNDATION_CREDITS.md](Build/Patches/AVFOUNDATION_CREDITS.md): Sources and licenses for imported AVFoundation changes.
+- [Build/RENDERING.md](Build/RENDERING.md): video outputs, HDR, picture in picture, subtitles, and fonts.
+- [Build/PLATFORMS.md](Build/PLATFORMS.md): generated native build targets, architectures, minimum OS versions, and SDKs.
+- [Build/Patches/AVFOUNDATION_CREDITS.md](Build/Patches/AVFOUNDATION_CREDITS.md): sources and licenses for imported AVFoundation changes.
 
-- Do not create PRs against the GitHub repo unless explicitly requested.
-- Do not add or update markdown documentation for every single feature, only most important high level notes for building, architecture, and other.
-- Do not add or update markdown documentation for reports, audits, results, or otherwise.
-- No transitory, migration, or temporary changes or implementations. Everything is to remain current.
+- Do not create pull requests against the GitHub repository unless explicitly requested.
+- Keep Markdown documentation focused on important build, architecture, and project guidance. Do not document every feature.
+- Do not add or update Markdown documentation for reports, audits, results, or otherwise.
+- Do not add transitional, migration, or temporary implementations. Keep all changes current.
 
-- New public APIs should have clear and brief documentation as correct Swift comments.
-- Run swiftformat after complete with work.
+- Document new public APIs with clear, brief Swift documentation comments.
+- Run SwiftFormat after completing the work.
+
+- Use `make TARGET` from the repository root for builds, tests, and requested benchmarks. See `make help` for targets and options.
+- Read completed JSON summaries first. Open logs only for unresolved failures, warnings, or missing evidence.
+- Wait for completion instead of repeatedly polling status or tailing logs.
+- Do not edit documentation or READMEs directly. Stage proposed revisions in `sandbox` and obtain explicit confirmation before applying them.

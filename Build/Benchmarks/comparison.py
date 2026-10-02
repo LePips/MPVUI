@@ -98,11 +98,9 @@ def _summary(samples: list[int | float]) -> dict:
 
 
 def _metadata(report: dict) -> dict:
-    return copy.deepcopy({
-        key: report[key]
-        for key in ("label", "source", "environment", "configuration", "createdAt", "runtime", "native")
-        if key in report
-    })
+    return copy.deepcopy(
+        {key: report[key] for key in ("label", "source", "environment", "configuration", "createdAt", "runtime", "native") if key in report}
+    )
 
 
 def compare_reports(
@@ -122,9 +120,7 @@ def compare_reports(
     A threshold marks relative degradation strictly greater than the supplied
     percentage. It is a practical guard, not a statistical significance test.
     """
-    if regression_percent is not None and (
-        not _finite_number(regression_percent) or regression_percent < 0
-    ):
+    if regression_percent is not None and (not _finite_number(regression_percent) or regression_percent < 0):
         raise ValueError("regression_percent must be a finite, nonnegative number")
     before = _validate_report(baseline, "baseline")
     after = _validate_report(candidate, "candidate")
@@ -231,8 +227,7 @@ def _format(value: int | float | None, *, signed: bool = False) -> str:
 
 def render_markdown(comparison: dict) -> str:
     """Render comparison settings and measurements as compact tables."""
-    threshold = ("disabled" if comparison["regressionPercent"] is None
-                 else f"> {_format(comparison['regressionPercent'])}% degradation")
+    threshold = "disabled" if comparison["regressionPercent"] is None else f"> {_format(comparison['regressionPercent'])}% degradation"
     lines = [
         "| Baseline | Candidate | Status | Regression threshold |",
         "| --- | --- | --- | --- |",

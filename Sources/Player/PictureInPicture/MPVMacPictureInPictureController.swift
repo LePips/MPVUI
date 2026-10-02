@@ -3,7 +3,7 @@ import _MPVUIPictureInPicture
 import AppKit
 
 /// Boundary to the optional system presenter. Playback and view ownership stay
-/// in the controller; the adapter supplies only presentation and its callbacks.
+/// in the controller. The adapter supplies only presentation and its callbacks.
 @MainActor
 protocol MPVMacPiPPresenting: AnyObject {
     var delegate: (any MPVMacPiPDelegate)? { get set }

@@ -4,12 +4,13 @@ import Foundation
 /// Raw commands may customize mpv without replacing the configured video output.
 enum MPVOptionOwnership {
     /// Renderer and surface wiring must remain consistent with the configuration.
-    static let rendererProperties: Set<String> = ["vo", "gpu-api", "gpu-context", "wid"]
+    static let rendererProperties: Set<String> = ["vo", "gpu-api", "gpu-context", "wid", "force-window"]
 
     /// Properties already managed
     static let reservedProperties: Set<String> = [
         "external-surface-size",
         "external-surface-size-live",
+        "force-window",
         "avfoundation-presentation",
         "avfoundation-pip-composite-osd",
         "avfoundation-subtitle-luminance",

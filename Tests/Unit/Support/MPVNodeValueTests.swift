@@ -81,10 +81,10 @@ struct MPVNodeValueTests {
         var node = mpv_node()
         node.format = MPV_FORMAT_OSD_STRING
         #expect(MPVNodeValue(copying: node) == .none)
-        var flag: Int32 = 1
-        withUnsafeMutablePointer(to: &flag) { pointer in
+        var integer: Int64 = 1
+        withUnsafeMutablePointer(to: &integer) { pointer in
             var property = mpv_event_property()
-            property.format = MPV_FORMAT_FLAG
+            property.format = MPV_FORMAT_INT64
             property.data = UnsafeMutableRawPointer(pointer)
             #expect(MPVNodeValue(copying: property) == nil)
         }
@@ -92,6 +92,19 @@ struct MPVNodeValueTests {
         #expect(MPVNodeValue.integer(0).boolValue == false)
         #expect(MPVNodeValue.string("1").boolValue == nil)
         #expect(MPVNodeValue.bool(true).integerValue == nil)
+    }
+
+    @Test(arguments: [Int32(0), 1, -1])
+    func `flag property values own their value after native storage changes`(value: Int32) {
+        var flag = value
+        let copied = withUnsafeMutablePointer(to: &flag) { pointer in
+            var property = mpv_event_property()
+            property.format = MPV_FORMAT_FLAG
+            property.data = UnsafeMutableRawPointer(pointer)
+            return MPVNodeValue(copying: property)
+        }
+        flag = value == 0 ? 1 : 0
+        #expect(copied == .bool(value != 0))
     }
 
     @Test

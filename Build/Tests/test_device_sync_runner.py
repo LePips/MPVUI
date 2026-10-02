@@ -91,9 +91,7 @@ class SyncRunnerTests(unittest.TestCase):
 
     def test_server_path_mapping_and_fixed_port_without_binding(self):
         hls = Path("/fixtures/hls/index.m3u8")
-        self.assertEqual(
-            runner.serve_settings(hls, {"hlsURL": "http://127.0.0.1:8765/index.m3u8"}, "127.0.0.1"), hls.parent
-        )
+        self.assertEqual(runner.serve_settings(hls, {"hlsURL": "http://127.0.0.1:8765/index.m3u8"}, "127.0.0.1"), hls.parent)
         self.assertEqual(
             runner.serve_settings(hls, {"hlsURL": "http://127.0.0.1:8765/hls/index.m3u8"}, "127.0.0.1"),
             hls.parent.parent,
@@ -112,13 +110,11 @@ class SyncRunnerTests(unittest.TestCase):
         self.assertEqual(runner.report_names(result), [name])
 
     def test_release_testability_and_only_sync_suite_are_explicit(self):
-        args = SimpleNamespace(project=Path("/tmp/project"), derived_data=Path("/tmp/dd"), device="explicit")
+        args = SimpleNamespace(project=Path("/tmp/project"), derived_data=Path("/tmp/dd"), output=Path("/tmp/output"), device="explicit")
         result = runner.test_arguments(args)
-        self.assertEqual(result["configuration"], "Release")
-        self.assertIn("ENABLE_TESTABILITY=YES", result["extraArgs"])
-        self.assertEqual(
-            [v for v in result["extraArgs"] if v.startswith("-only-testing:")], ["-only-testing:" + runner.SUITE]
-        )
+        self.assertEqual(result[result.index("-configuration") + 1], "Release")
+        self.assertIn("ENABLE_TESTABILITY=YES", result)
+        self.assertEqual([v for v in result if v.startswith("-only-testing:")], ["-only-testing:" + runner.SUITE])
 
     def test_unknown_schema_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,11 +152,14 @@ class SyncRunnerTests(unittest.TestCase):
                 str(output),
             ]
             fixture = SimpleNamespace(recheck=lambda *_: {"synthetic": "verified"})
-            with patch.object(sys, "argv", argv), patch.object(runner, "helper", return_value=fixture), patch.object(
-                runner, "command", side_effect=AssertionError("Device command attempted")
-            ), patch.object(runner, "managed_server", side_effect=AssertionError("Server started")), patch.object(
-                runner, "measurement_lock", side_effect=AssertionError("Measurement lock acquired")
-            ), contextlib.redirect_stdout(io.StringIO()) as text:
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(runner, "helper", return_value=fixture),
+                patch.object(runner, "command", side_effect=AssertionError("Device command attempted")),
+                patch.object(runner, "managed_server", side_effect=AssertionError("Server started")),
+                patch.object(runner, "measurement_lock", side_effect=AssertionError("Measurement lock acquired")),
+                contextlib.redirect_stdout(io.StringIO()) as text,
+            ):
                 runner.main()
             self.assertIn("local validation passed", text.getvalue())
             self.assertFalse(output.exists())
@@ -197,23 +196,23 @@ class SyncRunnerTests(unittest.TestCase):
                 return {"synthetic": "verified"}
 
             fixture = SimpleNamespace(recheck=recheck)
-            with patch.object(sys, "argv", argv), patch.object(runner, "helper", return_value=fixture), patch.object(
-                Path, "read_text", return_value=json.dumps({"hlsURL": "http://127.0.0.1:8765/index.m3u8"})
-            ), patch.object(Path, "is_dir", return_value=True), patch.object(
-                runner, "command", side_effect=AssertionError("Device command attempted")
-            ), contextlib.redirect_stdout(io.StringIO()) as text:
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(runner, "helper", return_value=fixture),
+                patch.object(Path, "read_text", return_value=json.dumps({"hlsURL": "http://127.0.0.1:8765/index.m3u8"})),
+                patch.object(Path, "is_dir", return_value=True),
+                patch.object(runner, "command", side_effect=AssertionError("Device command attempted")),
+                contextlib.redirect_stdout(io.StringIO()) as text,
+            ):
                 runner.main()
             report = json.loads(text.getvalue())
+            self.assertEqual(observed, [device_root / ".build/device-tests/GeneratedMedia/native-sync-configuration.json"])
+            arguments = report["testArguments"]
             self.assertEqual(
-                observed, [device_root / ".build/device-tests/GeneratedMedia/native-sync-configuration.json"]
-            )
-            self.assertEqual(
-                report["testArguments"]["projectPath"],
+                arguments[arguments.index("-project") + 1],
                 str(device_root / ".build/device-tests/MPVUIRegressionTests.xcodeproj"),
             )
-            self.assertEqual(
-                report["testArguments"]["derivedDataPath"], str(device_root / ".build/device-tests/DerivedData")
-            )
+            self.assertEqual(arguments[arguments.index("-derivedDataPath") + 1], str(device_root / ".build/device-tests/DerivedData"))
             self.assertFalse(output.exists())
 
 

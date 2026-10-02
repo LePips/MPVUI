@@ -5,7 +5,7 @@ import Libmpv
 import Testing
 
 /// Owns a software-decoded libmpv session without a platform presenter.
-/// Call close() from defer; assertions belong in the behavior's test suite.
+/// Call `close()` from `defer`. Keep assertions in the behavior's test suite.
 @MainActor
 final class NativePlaybackSession {
     private let handle: OpaquePointer

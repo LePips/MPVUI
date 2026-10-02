@@ -4,24 +4,24 @@ import Libmpv
 @testable import MPVUI
 import Testing
 
-/// Opens the real system audio route (muted). Run explicitly on a Mac with an
-/// audio output; the default lane uses null audio output.
+/// Opens the real system audio route with playback muted. Run explicitly on a Mac
+/// with an audio output. The default test run uses null audio output.
 @Suite(.tags(.system), .serialized, .enabled(if:
     ProcessInfo.processInfo.environment["MPVUI_RUN_NATIVE_AUDIO_TESTS"] == "1"
 ))
 @MainActor
 struct MPVNativeAudioIntegrationTests {
     @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
-    func `public audio configuration reaches Apple and rate changes preserve video eligibility`(
+    func `public audio configuration reaches Apple without a video view`(
         decoding: MPVAudioConfiguration.DolbyDecoding,
         spatialization: MPVAudioConfiguration.Spatialization
     ) async throws {
-        let fixture = PlaybackFixture(configuration: .init(
+        let player = MPVPlayer(configuration: .init(
             audio: .init(dolbyDecoding: decoding, spatialization: spatialization),
             autoPlay: false, logLevel: .verbose, volume: 0
         ))
-        defer { fixture.close() }
-        let player = fixture.player
+        defer { player.stop() }
+        #expect(!player.hasActiveRenderSurface)
         var sinkMuted = false
         var logs: [String] = []
         var completed = false
@@ -40,7 +40,7 @@ struct MPVNativeAudioIntegrationTests {
             }
         }
         player.setMuted(true)
-        try player.load(TestPaths.testMedia("eac3-surround51.mka"))
+        try player.load(TestPaths.testMedia("audio-eac3-5.1.mka"))
         try await eventually("public player native audio initialized") {
             player.playbackDiagnostics.audio.output == "avfoundation"
                 && player.playbackDiagnostics.audio.nativePath != nil
@@ -96,7 +96,7 @@ struct MPVNativeAudioIntegrationTests {
     ) async throws {
         let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
         defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("\(codec)-surround51.mka"))
+        try await audio.load(TestPaths.testMedia("audio-\(codec)-5.1.mka"))
         try await audio.wait("surround audio starts") { audio.number("audio-pts") > 0.2 }
         #expect(audio.number("current-tracks/audio/demux-channel-count") == 6)
         let native = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
@@ -111,22 +111,22 @@ struct MPVNativeAudioIntegrationTests {
         }
     }
 
-    @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "surround51", "surround71"])
+    @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "5.1", "7.1"])
     func `PCM keeps speaker layouts and reads back Apple spatialization policy`(policy: String, layout: String) async throws {
         let audio = try Session(options: ["ao-avfoundation-spatial-audio": policy])
         defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("pcm-\(layout).mka"))
+        try await audio.load(TestPaths.testMedia("audio-pcm-\(layout).mka"))
         try await audio.wait("PCM native renderer") { audio.number("audio-pts") > 0.2 }
         let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
         #expect(fields["path"] == .string("sample-buffer"))
         #expect(fields["allows-stereo"] == .bool(policy == "all"))
         #expect(fields["allows-multichannel"] == .bool(policy != "no"))
         #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
-        let count = ["mono": 1.0, "stereo": 2.0, "surround51": 6.0, "surround71": 8.0][layout]!
+        let count = ["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout]!
         #expect(audio.number("audio-out-params/channel-count") == count)
     }
 
-    @Test(arguments: ["all", "multichannel", "no"], ["ac3-short.mka", "eac3-short.mka"])
+    @Test(arguments: ["all", "multichannel", "no"], ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
     func `Dolby item spatialization survives seek recreation`(policy: String, fixture: String) async throws {
         let audio = try Session(options: ["audio-spdif": "ac3,eac3", "ao-avfoundation-spatial-audio": policy])
         defer { audio.close() }
@@ -159,7 +159,7 @@ struct MPVNativeAudioIntegrationTests {
         options["mute"] = "yes"
         let audio = try Session(options: options)
         defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("eac3-short.mka"))
+        try await audio.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
         var previousPosition: Double?
         if duringPlayback {
             try await audio.wait("compressed start") { audio.nativeClockStarts > 0 }
@@ -196,7 +196,7 @@ struct MPVNativeAudioIntegrationTests {
         try await audio.wait("PCM EOF") { audio.eof }
     }
 
-    @Test(arguments: ["ac3-short.mka", "eac3-short.mka"])
+    @Test(arguments: ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
     func `compressed transport and EOF`(_ fixture: String) async throws {
         let audio = try Session(options: [
             "audio-spdif": "ac3,eac3",
@@ -231,7 +231,7 @@ struct MPVNativeAudioIntegrationTests {
         #expect(!audio.logs.lowercased().contains("falling back to pcm"), "\(audio.logs)")
     }
 
-    @Test(arguments: ["ac3-stream.mka", "eac3-stream.mka"])
+    @Test(arguments: ["audio-ac3-5.1.mka", "audio-eac3-5.1.mka"])
     func `compressed bounded stream drains at natural EOF`(_ fixture: String) async throws {
         let audio = try Session(options: ["audio-spdif": "ac3,eac3"])
         defer { audio.close() }
@@ -255,7 +255,7 @@ struct MPVNativeAudioIntegrationTests {
     func `compressed close during startup is bounded`(paused: Bool) async throws {
         let audio = try Session(options: ["audio-spdif": "ac3,eac3", "gapless-audio": "yes"])
         defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("ac3-short.mka"), resume: !paused)
+        try await audio.load(TestPaths.testMedia("audio-ac3-stereo.mka"), resume: !paused)
         #expect(audio.string("audio-out-params/format") == "spdif-ac3")
         // Close synchronously just after initialization/resume, before yielding
         // the main run loop to Apple preroll. Even a parked clock must finish.
@@ -285,13 +285,13 @@ struct MPVNativeAudioIntegrationTests {
         let device = try #require(names.first, "This test needs an explicit AVFoundation output device.")
         let routed = try Session(options: ["audio-spdif": "ac3,eac3", "audio-device": device])
         defer { routed.close() }
-        try await compressed.load(TestPaths.testMedia("ac3-short.mka"))
+        try await compressed.load(TestPaths.testMedia("audio-ac3-stereo.mka"))
         try await compressed.wait("first compressed player clock") {
             compressed.string("audio-out-params/format") == "spdif-ac3"
                 && compressed.number("audio-pts") > 0.2
                 && compressed.nativeClockStarts > 0
         }
-        try await routed.load(TestPaths.testMedia("eac3-short.mka"))
+        try await routed.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
         try await routed.wait("explicit device PCM routing") {
             routed.string("current-ao") == "avfoundation" && routed.number("audio-pts") > 0.2
         }

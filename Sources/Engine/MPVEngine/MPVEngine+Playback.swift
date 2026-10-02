@@ -62,8 +62,7 @@ extension MPVEngine {
             self.publishState(.loading)
             self.startSecurityScopedAccessIfNeeded(for: url)
             if self.handle == nil {
-                // Explicit loads restart stopped/rejected renderers using the
-                // retained target, or wait for a later surface attachment.
+                // Start audio playback even without a view.
                 self.createHandle()
             } else {
                 self.loadPendingSourceIfPossible()
@@ -267,6 +266,7 @@ extension MPVEngine {
         }
 
         requestedPlaylistEntryID = result?.mapValue?["playlist_entry_id"]?.integerValue
+        sourceLoadWasHeadless = renderTarget == nil
         // START_FILE is delivered asynchronously. Mark the submitted load now
         // so another immediate surface rebuild preserves and resubmits it.
         isLoading = true

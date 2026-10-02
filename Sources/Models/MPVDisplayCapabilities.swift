@@ -2,7 +2,7 @@
 public struct MPVDisplayCapabilities: Equatable, Sendable {
     /// Whether the output route reports HDR support.
     public enum HDRSupport: String, Equatable, Sendable {
-        /// HDR capability has not been established.
+        /// The output route's HDR capability is unknown.
         case unknown
         /// The output route does not report HDR support.
         case unsupported
@@ -19,7 +19,7 @@ public struct MPVDisplayCapabilities: Equatable, Sendable {
     /// Available EDR brightness relative to SDR white, which can change with
     /// display brightness, reference mode, power state, and other content.
     public let currentEDRHeadroom: Double?
-    /// Maximum possible headroom; describes capability, not usable brightness.
+    /// The maximum possible headroom, describing capability rather than available brightness.
     public let potentialEDRHeadroom: Double?
 
     init(

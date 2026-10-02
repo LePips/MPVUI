@@ -1,0 +1,11 @@
+.build*/
+build/
+!Build/
+DerivedData/
+.swiftpm/
+Build/Patches/
+Build/*.lock.json
+**/*.xcassets/
+**/*.icon/
+**/*.xcodeproj/
+**/*.xcworkspace/

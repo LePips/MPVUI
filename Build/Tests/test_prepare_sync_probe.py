@@ -45,9 +45,7 @@ class SyncPreparationTests(unittest.TestCase):
         self.output = self.root / "GeneratedMedia"
 
     def prepare(self):
-        return probe.prepare(
-            self.direct, self.hls, *self.references, "http://127.0.0.1:8000/hls/index.m3u8", self.output
-        )
+        return probe.prepare(self.direct, self.hls, *self.references, "http://127.0.0.1:8000/hls/index.m3u8", self.output)
 
     def mutate_reference(self, index, action):
         path = self.references[index]

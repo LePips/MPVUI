@@ -22,8 +22,10 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "Build/Benchmarks"))
+sys.path.insert(0, str(ROOT / "Build/Tests"))
 from benchmark import measurement_lock
 from device_playback import command, digest, source_identity
+from run_xcode_tests import result_summary, test_command
 
 HOST_BUNDLE = "com.lepips.MPVUIRegressionTests.Host"
 SUITE = "MPVUITests/MPVNativeSynchronizationProbeTests"
@@ -164,10 +166,7 @@ def validate_reports(paths, config, config_hash):
                     1 if field in ("totalNumberOfFrames", "displayedWidth", "displayedHeight") else 0
                 ):
                     raise ValueError("Missing or invalid framework metric: " + field)
-            times = [
-                row.get(k)
-                for k in ("queryBeginElapsedSeconds", "metricsEndElapsedSeconds", "readbackEndElapsedSeconds")
-            ]
+            times = [row.get(k) for k in ("queryBeginElapsedSeconds", "metricsEndElapsedSeconds", "readbackEndElapsedSeconds")]
             if any(type(v) not in (int, float) or not math.isfinite(v) for v in times) or times != sorted(times):
                 raise ValueError("Invalid framework timing bounds")
         delays = [row.get("totalAccumulatedFrameDelaySeconds") for row in framework]
@@ -191,20 +190,14 @@ def validate_reports(paths, config, config_hash):
 
 
 def test_arguments(args):
-    return {
-        "projectPath": str(args.project.resolve()),
-        "scheme": "MPVUIRegressionTests",
-        "deviceId": args.device,
-        "configuration": "Release",
-        "derivedDataPath": str(args.derived_data.resolve()),
-        "extraArgs": [
-            "-allowProvisioningUpdates",
-            "ENABLE_TESTABILITY=YES",
-            "-parallel-testing-enabled",
-            "NO",
-            "-only-testing:" + SUITE,
-        ],
-    }
+    return test_command(
+        project=args.project.resolve(),
+        derived_data=args.derived_data.resolve(),
+        platform="device",
+        device_id=args.device,
+        result_bundle=args.output / "test.xcresult",
+        only_testing=SUITE,
+    )
 
 
 def main():
@@ -213,9 +206,7 @@ def main():
     p.add_argument("--host", required=True)
     p.add_argument("--direct", type=Path, required=True)
     p.add_argument("--hls", type=Path, required=True)
-    p.add_argument(
-        "--configuration", type=Path, default=ROOT / ".build/device-tests/GeneratedMedia/native-sync-configuration.json"
-    )
+    p.add_argument("--configuration", type=Path, default=ROOT / ".build/device-tests/GeneratedMedia/native-sync-configuration.json")
     p.add_argument("--project", type=Path, default=ROOT / ".build/device-tests/MPVUIRegressionTests.xcodeproj")
     p.add_argument("--derived-data", type=Path, default=ROOT / ".build/device-tests/DerivedData")
     p.add_argument("--output", type=Path, required=True)
@@ -268,36 +259,26 @@ def main():
         errors = []
         retrieved = []
         try:
-            with (args.output / "http.log").open("x") as server_log, managed_server(
-                args.hls, config, args.host, server_log
-            ):
-                with (args.output / "test.json").open("x") as log:
+            with (args.output / "http.log").open("x") as server_log, managed_server(args.hls, config, args.host, server_log):
+                with (args.output / "test.log").open("x") as log:
                     completed = subprocess.run(
-                        [
-                            "caffeinate",
-                            "-disu",
-                            "xcodebuildmcp",
-                            "device",
-                            "test",
-                            "--json",
-                            json.dumps(test_arguments(args)),
-                            "--output",
-                            "json",
-                        ],
+                        ["caffeinate", "-disu", *test_arguments(args)],
                         stdout=log,
                         stderr=subprocess.STDOUT,
                         timeout=1200,
                     )
-                result = json.loads((args.output / "test.json").read_text())
-                summary = result.get("data", {}).get("summary", {})
+                bundle = args.output / "test.xcresult"
+                summary = result_summary(bundle) if bundle.exists() else {}
+                if summary:
+                    write_new(args.output / "test-summary.json", summary)
                 if (
                     completed.returncode
-                    or result.get("didError") is not False
-                    or summary.get("status") != "SUCCEEDED"
-                    or summary.get("counts", {}).get("failed") != 0
-                    or summary.get("counts", {}).get("skipped") != 0
+                    or summary.get("result") != "Passed"
+                    or summary.get("totalTestCount", 0) == 0
+                    or summary.get("failedTests") != 0
+                    or summary.get("skippedTests") != 0
                 ):
-                    errors.append("Physical test tool did not report an unskipped successful run")
+                    errors.append("Physical Xcode test did not report an unskipped successful run")
                 listing = args.output / "device-files.json"
                 command(
                     [
@@ -354,9 +335,7 @@ def main():
             errors.append(str(error))
         finally:
             try:
-                write_new(
-                    args.output / "fixtures-after.json", fixture.recheck(args.direct, args.hls, args.configuration)
-                )
+                write_new(args.output / "fixtures-after.json", fixture.recheck(args.direct, args.hls, args.configuration))
                 if digest(args.configuration) != config_hash:
                     raise ValueError("Probe configuration changed during tests")
                 if source_identity()["sourceSHA256"] != source["sourceSHA256"] or digest(sync_source) != sync_hash:

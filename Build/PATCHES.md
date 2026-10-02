@@ -1,8 +1,6 @@
 # Patches
 
-[Inputs.lock.json](Inputs.lock.json) pins the source revisions, patch order, and SHA-256 checksums. The build applies these patches before compiling mpv and FFmpeg.
-
-See [credits and licenses](Patches/AVFOUNDATION_CREDITS.md), [rendering](RENDERING.md), and [native test instructions](../TESTING.md#native-and-system-checks).
+The build applies these patches before compiling mpv and FFmpeg. [Inputs.lock.json](Inputs.lock.json) pins the source revisions, patch order, and SHA-256 checksums.
 
 ## mpv
 
@@ -13,7 +11,7 @@ See [credits and licenses](Patches/AVFOUNDATION_CREDITS.md), [rendering](RENDERI
 | [0003-text-subtitle-interception](Patches/mpv/0003-text-subtitle-interception.patch)               | Expose plain-text subtitle snapshots while leaving styled ASS and bitmap subtitles in mpv.                                         |
 | [0004-swift-object-build](Patches/mpv/0004-swift-object-build.patch)                               | Build Swift sources into one Mach-O object and preserve explicit include paths.                                                    |
 | [0005-avfoundation-native-video](Patches/mpv/0005-avfoundation-native-video.patch)                 | Add AVFoundation video output with sample-buffer timing, seeking, and subtitle composition.                                        |
-| [0006-avfoundation-compressed-audio](Patches/mpv/0006-avfoundation-compressed-audio.patch)         | Add optional AC3/EAC3 playback through AVPlayer, with bounded buffering and route recovery.                                        |
+| [0006-avfoundation-compressed-audio](Patches/mpv/0006-avfoundation-compressed-audio.patch)         | Add optional AC-3/E-AC-3 playback through AVPlayer, with bounded buffering and route recovery.                                     |
 | [0007-native-dolby-vision-compatibility](Patches/mpv/0007-native-dolby-vision-compatibility.patch) | Add opt-in lossy Dolby Vision Profile 7 conversion with decoder and output checks.                                                 |
 | [0008-bounded-hardware-decoder-recovery](Patches/mpv/0008-bounded-hardware-decoder-recovery.patch) | Limit recovery attempts after a working native VideoToolbox HEVC decoder fails.                                                    |
 | [0009-native-hdr-color-metadata](Patches/mpv/0009-native-hdr-color-metadata.patch)                 | Preserve native HDR color metadata and apply HDR subtitle luminance.                                                               |
@@ -24,15 +22,15 @@ See [credits and licenses](Patches/AVFOUNDATION_CREDITS.md), [rendering](RENDERI
 | [0014-webp-animation-duration](Patches/mpv/0014-webp-animation-duration.patch)                     | Include the final animated WebP frame in duration estimates.                                                                       |
 | [0015-apple-spatial-audio](Patches/mpv/0015-apple-spatial-audio.patch)                             | Add Spatial Audio settings and diagnostics, preserve session ownership and pause state, and fall back to PCM for audio processing. |
 | [0016-native-audio-clock-wakeup](Patches/mpv/0016-native-audio-clock-wakeup.patch)                 | Keep playback position and relative seeks accurate during native compressed audio playback.                                        |
-| [0017-track-switch-buffering](Patches/mpv/0017-track-switch-buffering.patch)                     | Preserve buffered audio and video during track refresh seeks.                                                                      |
-| [0018-simulator-frame-upload](Patches/mpv/0018-simulator-frame-upload.patch)                     | Copy CPU frame uploads into Metal-owned buffers on Apple simulators.                                                               |
+| [0017-track-switch-buffering](Patches/mpv/0017-track-switch-buffering.patch)                       | Preserve buffered audio and video during track refresh seeks.                                                                      |
+| [0018-simulator-frame-upload](Patches/mpv/0018-simulator-frame-upload.patch)                       | Copy CPU frame uploads into Metal-owned buffers on Apple simulators.                                                               |
 
 ## FFmpeg
 
-| Patch                                                                                                 | Purpose                                                                                    |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [0001-apple-pixelbuffer-compatibility](Patches/ffmpeg/0001-apple-pixelbuffer-compatibility.patch)     | Create VideoToolbox buffers compatible with Metal and Core Animation.                      |
-| [0002-native-dolby-vision](Patches/ffmpeg/0002-native-dolby-vision.patch)                             | Preserve supported native Dolby Vision metadata and associate it with its decoder session. |
-| [0003-native-dolby-vision-compatibility](Patches/ffmpeg/0003-native-dolby-vision-compatibility.patch) | Add optional libdovi Profile 7 conversion and forward the converted RPU metadata.          |
-| [0004-hevc-diagnostic-levels](Patches/ffmpeg/0004-hevc-diagnostic-levels.patch)                       | Reduce duplicate HEVC diagnostic messages.                                                 |
-| [0005-apple-dynamic-hdr-diagnostics](Patches/ffmpeg/0005-apple-dynamic-hdr-diagnostics.patch)         | Preserve HDR10+ metadata and route native HDR diagnostics to the owning player.            |
+| Patch                                                                                                 | Purpose                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [0001-apple-pixelbuffer-compatibility](Patches/ffmpeg/0001-apple-pixelbuffer-compatibility.patch)     | Create VideoToolbox buffers compatible with Metal and Core Animation.                                                                                  |
+| [0002-native-dolby-vision](Patches/ffmpeg/0002-native-dolby-vision.patch)                             | Preserve supported native Dolby Vision metadata and associate it with its decoder session.                                                             |
+| [0003-native-dolby-vision-compatibility](Patches/ffmpeg/0003-native-dolby-vision-compatibility.patch) | Add optional libdovi Profile 7 conversion and forward the converted RPU metadata.                                                                      |
+| [0004-hevc-diagnostic-levels](Patches/ffmpeg/0004-hevc-diagnostic-levels.patch)                       | Reduce duplicate HEVC diagnostic messages.                                                                                                             |
+| [0005-apple-dynamic-hdr-diagnostics](Patches/ffmpeg/0005-apple-dynamic-hdr-diagnostics.patch)         | Preserve HDR10+ metadata, submit compressed Dolby Vision Profile 8 metadata as standalone RPUs, and route native HDR diagnostics to the owning player. |

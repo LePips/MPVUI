@@ -138,9 +138,24 @@ public enum CLI {
             logs: store.path("logs/\(UUID().uuidString)"),
             path: toolPath
         )
+        var validationArtifacts = ["nativeLogs": runner.logs.path]
+        var validationSummary = ["profile": profile, "operation": args.positional.joined(separator: " ")]
         defer {
             if args.positional[0] != "clean" {
                 try? diagnostics.save(to: runner.logs.appendingPathComponent("metrics.json"))
+            }
+            if let destination = ProcessInfo.processInfo.environment["MPVUI_VALIDATION_EVIDENCE"] {
+                struct Evidence: Encodable {
+                    let summary: [String: String]
+                    let artifacts: [String: String]
+                }
+                try? write(
+                    Evidence(
+                        summary: validationSummary,
+                        artifacts: validationArtifacts
+                    ),
+                    URL(fileURLWithPath: destination)
+                )
             }
         }
         let inputs = InputStore(store: store, runner: runner, root: root, offline: args.flags.contains("offline"))
@@ -189,6 +204,7 @@ public enum CLI {
                 fresh: args.flags.contains("fresh"),
                 tag: args.values["tag"]
             )
+            validationArtifacts["nativeCandidate"] = candidate.path
             print("Candidate: \(candidate.path)")
         case "generate":
             try Generator.generate(
@@ -214,9 +230,12 @@ public enum CLI {
             try print("Review update candidate: \(Updater(graph: graph).run(component: args.positional[1], ref: args.values["ref"]).path)")
         case "test":
             guard let candidate = args.values["candidate"] else { throw BuildError("test requires --candidate PATH") }
-            try print(
-                "Test receipt: \(ConsumerTests(graph: graph).run(URL(fileURLWithPath: candidate), nativeOnly: args.flags.contains("artifacts-only")).path)"
+            let receipt = try ConsumerTests(graph: graph).run(
+                URL(fileURLWithPath: candidate),
+                nativeOnly: args.flags.contains("artifacts-only")
             )
+            validationArtifacts["nativeTestReceipt"] = receipt.path
+            print("Test receipt: \(receipt.path)")
         case "check":
             try runner.run("/usr/bin/swift", ["test", "--package-path", root.appendingPathComponent("Build").path])
             if args.flags.contains("artifacts") {
@@ -258,8 +277,12 @@ public enum CLI {
                     fresh: args.flags.contains("fresh"),
                     tag: args.values["tag"]
                 )
+                validationArtifacts["nativeCandidate"] = candidate.path
                 let receipt = try ConsumerTests(graph: graph).run(candidate)
-                try print("Publication bundle: \(manager.bundle(candidate: candidate, receipt: receipt).path)")
+                validationArtifacts["nativeTestReceipt"] = receipt.path
+                let bundle = try manager.bundle(candidate: candidate, receipt: receipt)
+                validationArtifacts["publicationBundle"] = bundle.path
+                print("Publication bundle: \(bundle.path)")
             case "publish", "publish-native":
                 guard let path = args.values["candidate"] else { throw BuildError("--candidate PATH is required") }
                 try manager.publishArtifacts(URL(fileURLWithPath: path))
@@ -272,7 +295,10 @@ public enum CLI {
             default: throw BuildError("Unknown release operation")
             }
         case "status":
-            try print("build input lock: \(fingerprint(native))")
+            validationSummary["inputFingerprint"] = try fingerprint(native)
+            validationSummary["selection"] = slices.map(\.id).joined(separator: ",")
+            validationArtifacts["managedOutputs"] = store.root.path
+            print("build input lock: \(validationSummary["inputFingerprint"]!)")
             print("selection: \(slices.map(\.id).joined(separator: ",")); \(slices.reduce(0) { $0 + $1.architectures.count }) thin builds")
             print("managed outputs: \(store.root.path)")
         case "clean": try store.clean(cache: args.flags.contains("cache"))

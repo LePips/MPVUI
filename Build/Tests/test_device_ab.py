@@ -34,9 +34,7 @@ class DeviceABTests(unittest.TestCase):
         self.media = {}
         for workload in ("direct", "hls"):
             path = self.directory / ("direct.mp4" if workload == "direct" else "index.m3u8")
-            path.write_text(
-                "synthetic fixture" if workload == "direct" else "#EXTM3U\n#EXTINF:2,\nsegment.ts\n#EXT-X-ENDLIST\n"
-            )
+            path.write_text("synthetic fixture" if workload == "direct" else "#EXTM3U\n#EXTINF:2,\nsegment.ts\n#EXT-X-ENDLIST\n")
             if workload == "hls":
                 (self.directory / "segment.ts").write_text("synthetic encoded segment")
             self.media[workload] = {
@@ -134,9 +132,7 @@ class DeviceABTests(unittest.TestCase):
         )
         for mutate in (
             lambda r: r["workloads"][0]["observations"][0]["validation"].update(steadyProgressSeconds=0),
-            lambda r: r["workloads"][0]["observations"][0]["phases"]["steady"]["diagnosticSamples"][0].update(
-                fallbackReasons=["fallback"]
-            ),
+            lambda r: r["workloads"][0]["observations"][0]["phases"]["steady"]["diagnosticSamples"][0].update(fallbackReasons=["fallback"]),
             lambda r: r["workloads"][0]["metrics"]["steadyCpuSecondsPerWallSecond"].update(samples=[0]),
         ):
             report = self.single()
@@ -178,9 +174,7 @@ class DeviceABTests(unittest.TestCase):
         return path
 
     def assemble(self, path):
-        with patch.object(ab, "checkout_identity", return_value=self.cohort), patch.object(
-            ab, "load_harness", return_value=self.harness
-        ):
+        with patch.object(ab, "checkout_identity", return_value=self.cohort), patch.object(ab, "load_harness", return_value=self.harness):
             return ab.assemble(path)
 
     def test_assembly_preserves_inputs_and_matching_procedure(self):
@@ -201,9 +195,7 @@ class DeviceABTests(unittest.TestCase):
     def test_assembly_rejects_duplicate_processes(self):
         path = self.plan()
         plan = ab.read(path)
-        (self.directory / plan["steps"][1]["report"]).write_bytes(
-            (self.directory / plan["steps"][0]["report"]).read_bytes()
-        )
+        (self.directory / plan["steps"][1]["report"]).write_bytes((self.directory / plan["steps"][0]["report"]).read_bytes())
         with self.assertRaisesRegex(ValueError, "Duplicate"):
             self.assemble(path)
 
@@ -223,9 +215,7 @@ class DeviceABTests(unittest.TestCase):
         root = self.directory / "checkout"
         bench = root / "Build/Benchmarks"
         bench.mkdir(parents=True)
-        (bench / "device_playback.py").write_text(
-            'def source_identity(): return {"sourceSHA256":"synthetic-source","files":{}}\n'
-        )
+        (bench / "device_playback.py").write_text('def source_identity(): return {"sourceSHA256":"synthetic-source","files":{}}\n')
         derived = self.directory / "build"
         app = derived / "Build/Products/Release-iphoneos/MPVUIExample.app/MPVUIExample"
         app.parent.mkdir(parents=True)
@@ -256,11 +246,12 @@ class DeviceABTests(unittest.TestCase):
             device="unused",
             host="unused",
         )
-        with patch.object(ab, "checkout_identity", return_value=self.cohort), patch.object(
-            ab, "load_harness", return_value=self.harness
-        ), patch.object(
-            ab.subprocess, "run", side_effect=AssertionError("Device operation attempted")
-        ), contextlib.redirect_stdout(io.StringIO()) as output:
+        with (
+            patch.object(ab, "checkout_identity", return_value=self.cohort),
+            patch.object(ab, "load_harness", return_value=self.harness),
+            patch.object(ab.subprocess, "run", side_effect=AssertionError("Device operation attempted")),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
             ab.run(args)
         self.assertIn("validated dry run", output.getvalue())
         self.assertFalse(args.output.exists())

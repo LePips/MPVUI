@@ -669,7 +669,7 @@
       ],
       "id": "ios",
       "machOPlatform": 2,
-      "minimumOS": "15.0",
+      "minimumOS": "16.0",
       "platform": "ios",
       "sdk": "iphoneos",
       "variant": ""
@@ -681,7 +681,7 @@
       ],
       "id": "isimulator",
       "machOPlatform": 7,
-      "minimumOS": "15.0",
+      "minimumOS": "16.0",
       "platform": "ios",
       "sdk": "iphonesimulator",
       "variant": "simulator"
@@ -693,7 +693,7 @@
       ],
       "id": "maccatalyst",
       "machOPlatform": 6,
-      "minimumOS": "15.0",
+      "minimumOS": "16.0",
       "platform": "ios",
       "sdk": "macosx",
       "variant": "maccatalyst"
@@ -705,7 +705,7 @@
       ],
       "id": "macos",
       "machOPlatform": 1,
-      "minimumOS": "12.0",
+      "minimumOS": "13.0",
       "platform": "macos",
       "sdk": "macosx",
       "variant": ""
@@ -717,7 +717,7 @@
       ],
       "id": "tvos",
       "machOPlatform": 3,
-      "minimumOS": "15.0",
+      "minimumOS": "16.0",
       "platform": "tvos",
       "sdk": "appletvos",
       "variant": ""
@@ -729,7 +729,7 @@
       ],
       "id": "tvsimulator",
       "machOPlatform": 8,
-      "minimumOS": "15.0",
+      "minimumOS": "16.0",
       "platform": "tvos",
       "sdk": "appletvsimulator",
       "variant": "simulator"
@@ -852,6 +852,11 @@
           "id": "0018-simulator-frame-upload",
           "path": "Build/Patches/mpv/0018-simulator-frame-upload.patch",
           "sha256": "565a6df4532e53177f35ca9d1e42bed94962fca35887e7de76257966c8c6bf69"
+        },
+        {
+          "id": "0019-avfoundation-buffer-reuse-and-subtitle-compositing",
+          "path": "Build/Patches/mpv/0019-avfoundation-buffer-reuse-and-subtitle-compositing.patch",
+          "sha256": "73b03e4d97cd54666a6df388f76d0a15edf100cee7e6fb2c298e37f9a1db935f"
         }
       ],
       "ref": "v0.41.0",
@@ -885,7 +890,7 @@
         {
           "id": "0005-apple-dynamic-hdr-diagnostics",
           "path": "Build/Patches/ffmpeg/0005-apple-dynamic-hdr-diagnostics.patch",
-          "sha256": "62d2e6d274347e80a9fc7c711c3ee335955229aac35d810f3a1335f13d38915a"
+          "sha256": "15088a10676c4d3c4862e58e54be7902714f9040ed633b5ad8801851fdd5c026"
         }
       ],
       "ref": "n9.0.2",
@@ -916,32 +921,32 @@
     ],
     "sdks": {
       "appletvos": {
-        "build": "23L470",
-        "version": "26.5"
+        "build": "24J360",
+        "version": "27.0"
       },
       "appletvsimulator": {
-        "build": "23L470",
-        "version": "26.5"
+        "build": "24J360",
+        "version": "27.0"
       },
       "iphoneos": {
-        "build": "23F81a",
-        "version": "26.5"
+        "build": "24A430",
+        "version": "27.0"
       },
       "iphonesimulator": {
-        "build": "23F81a",
-        "version": "26.5"
+        "build": "24A430",
+        "version": "27.0"
       },
       "macosx": {
-        "build": "25F70",
-        "version": "26.5"
+        "build": "26A425",
+        "version": "27.0"
       },
       "xros": {
-        "build": "23O469",
-        "version": "26.5"
+        "build": "24M361",
+        "version": "27.0"
       },
       "xrsimulator": {
-        "build": "23O469",
-        "version": "26.5"
+        "build": "24M361",
+        "version": "27.0"
       }
     },
     "tools": {
@@ -955,10 +960,10 @@
       "zip": "This is Zip 3.0 (July 5th 2008), by Info-ZIP, with modifications by Apple Inc."
     },
     "xcode": {
-      "build": "17F113",
-      "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
-      "swift": "swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
-      "version": "26.6"
+      "build": "27A266a",
+      "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+      "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)",
+      "version": "27.0"
     }
   }
 }

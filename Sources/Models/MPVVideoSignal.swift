@@ -1,5 +1,5 @@
 /// Reported color metadata at one point in the video pipeline. Missing fields
-/// remain unknown; metadata from another stage is never substituted.
+/// remain unknown. Metadata from another stage is never substituted.
 public struct MPVVideoSignal: Equatable, Sendable {
     /// The reported color primaries.
     public let primaries: String?
@@ -27,11 +27,11 @@ public struct MPVVideoSignal: Equatable, Sendable {
     public let maxFrameAverageLightLevel: Double?
     /// The reported signal peak relative to reference white.
     public let signalPeak: Double?
-    /// CIE xy coordinates keyed by mpv's `prim-red-x`, `prim-white-y`, etc.
+    /// CIE xy coordinates keyed by mpv properties such as `prim-red-x` and `prim-white-y`.
     public let masteringDisplayPrimaries: [String: Double]
-    /// HDR10+ scene values, when exposed by the decoder. Absence is unknown.
+    /// HDR10+ scene values reported by the decoder. Missing values mean unknown.
     public let hdr10PlusMetadata: [String: Double]
-    /// Whether the decoder reports HDR10+ metadata; nil means unknown.
+    /// Whether the decoder reports HDR10+ metadata. `nil` means unknown.
     public let hasHDR10PlusMetadata: Bool?
     /// The reported Dolby Vision profile.
     public let dolbyVisionProfile: Int?

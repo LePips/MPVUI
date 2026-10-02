@@ -204,7 +204,7 @@ extension MPVEngine {
         return reason.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    func publishRenderSurfaceDiagnostic(_ message: String) {
+    func publishRenderSurfaceDiagnostic(_ message: @autoclosure () -> String) {
         switch configuration.logLevel {
         case .verbose, .debug, .trace:
             publish(
@@ -212,7 +212,7 @@ extension MPVEngine {
                     MPVLogMessage(
                         prefix: "mpvui/render-surface",
                         level: .debug,
-                        message: message
+                        message: message()
                     )
                 )
             )

@@ -13,15 +13,16 @@ struct MPVInterlacedPlaybackTests {
     )
     func `deinterlacing retains field cadence on either renderer`(output: MPVPlayerConfiguration.VideoOutput) async throws {
         let cases: [(String, Double, MPVDeinterlacePolicy)] = [
-            ("480i-bottom-59.94", 60000.0 / 1001, .init(mode: .automatic)),
-            ("576i-top-50", 50, .init(mode: .automatic)),
-            ("1080i-top-59.94", 60000.0 / 1001, .init(mode: .automatic)),
-            ("576i-top-50", 50, .init(algorithm: .yadif, fieldOrder: .topFirst, mode: .forced)),
+            ("interlaced-480i-bottom", 60000.0 / 1001, .init(mode: .automatic)),
+            ("interlaced-576i-top", 50, .init(mode: .automatic)),
+            ("interlaced-1080i-top", 60000.0 / 1001, .init(mode: .automatic)),
+            ("interlaced-576i-top", 50, .init(algorithm: .yadif, fieldOrder: .topFirst, mode: .forced)),
         ]
         for (name, expectedCadence, policy) in cases {
             let source = try TestPaths.testMedia(name + ".mkv")
             let player = MPVPlayer(configuration: .init(
-                additionalOptions: ["ao": "null"],
+                // Short fixtures loop until the cadence estimate settles.
+                additionalOptions: ["ao": "null", "loop-file": "inf"],
                 deinterlace: policy,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .disabled,

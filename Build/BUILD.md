@@ -1,46 +1,63 @@
 # Building MPVUI
 
-- `Build/mpvbuild` applies [patches](PATCHES.md) and packages mpv, FFmpeg, and their dependencies as `Libmpv.xcframework.zip`.
-- SwiftPM imports the framework as `Libmpv-GPL`.
-- [Inputs.lock.json](Inputs.lock.json) pins sources, patches, dependencies, and toolchain versions
-- [PLATFORMS.md](PLATFORMS.md) lists native build targets
-- `Package.swift` defines the Swift wrapper's supported platforms
+- `make build` applies [patches](PATCHES.md) and packages mpv, FFmpeg, and their dependencies as `Libmpv.xcframework.zip`. SwiftPM imports it as `Libmpv-GPL`.
+- [Inputs.lock.json](Inputs.lock.json) pins build inputs and tool versions.
+- [PLATFORMS.md](PLATFORMS.md) lists native targets.
+
+Use `make help` to discover targets and `make help TARGET=build` for native options. `make -C Build` uses the same definitions.
+
+Build, test, and benchmark targets emit one JSON result per step, following [result.schema.json](result.schema.json). The `artifacts` field lists full logs and report paths. Multiple steps produce JSON Lines. `make verify` builds and then tests, stopping on failure. Benchmarks run only when requested. Use `BUILD_ARGS`, `TEST_ARGS`, or `BENCHMARK_ARGS` to pass options to a specific phase. The native build defaults to `PROFILE=dev`. Use `PROFILE=release` for release builds.
 
 ## Local build
 
-Run from the repository root. Requires Python 3.10+, the pinned Xcode, shaderc (`glslc`), and NASM. Release validation also requires XcodeGen for the iOS test host. The doctor checks pinned tool versions and bootstraps build tools.
-
 ```sh
-Build/mpvbuild doctor --bootstrap
-Build/mpvbuild build --profile dev
-Build/mpvbuild use local --artifact /path/to/candidate
+make doctor # Install tools, check versions
+make build
+make use-local ARGS='--artifact /path/to/candidate'
 ```
 
-Use the candidate path printed by the build. The development profile builds macOS for the host architecture. Add `--slices ios,isimulator,macos --arch arm64` for iOS development, or `--slices tvos,tvsimulator,macos --arch arm64` for tvOS. Refresh package resolution in Xcode after changing the selected artifact.
+Use `artifacts.nativeCandidate` from the JSON build result. The `dev` profile builds macOS for the host architecture. Pass native options through `ARGS` for other targets:
+
+- iOS: `make build ARGS='--slices ios,isimulator,macos --arch arm64'`
+- tvOS: `make build ARGS='--slices tvos,tvsimulator,macos --arch arm64'`
+
+Artifact selection updates `Package.swift`. Refresh package resolution in Xcode afterward. Run `make use-remote` before committing the manifest.
+
+Package tests, including `make verify`, use the native artifact selected in `Package.swift`. Building a new candidate does not change that selection. Use `make use-local` to test the wrapper against the candidate, or `make test-artifact ARGS='--candidate /path/to/candidate'` to run its consumer checks.
 
 ## Release candidate
 
 ```sh
-Build/mpvbuild release candidate --tag X.Y.Z
+make release-candidate ARGS='--tag X.Y.Z'
 ```
 
-Replace `X.Y.Z` with the intended version. This builds every native target, runs consumer tests, and creates a local publication bundle. Publishing is a separate operation. `--offline` uses cached inputs; `--fresh` rebuilds outputs.
+Replace `X.Y.Z` with the intended version. This builds every native target, runs consumer tests, and creates a local publication bundle. Publishing is a separate operation. `artifacts.publicationBundle` identifies the local bundle. Pass `--offline` or `--fresh` through `ARGS` to use cached inputs or rebuild outputs.
 
 To use the artifact recorded in `Artifacts.lock.json`:
 
 ```sh
-Build/mpvbuild use remote
-Build/mpvbuild generate --check
+make use-remote
+make generate ARGS='--check'
 ```
 
-The generation check requires a remote artifact selection.
+## Formatting
+
+Install `pre-commit`, then format or check project source files from the repository root:
+
+```sh
+brew install pre-commit
+make format
+make format-check
+```
+
+Hooks format project sources and configuration files, excluding generated assets and checksum-locked patches.
 
 ## Cleanup
 
 Build outputs live in `.build/mpvbuild`.
 
 ```sh
-Build/mpvbuild clean         # Keep downloaded inputs and build tools.
-Build/mpvbuild clean --cache # Remove inputs and build tools too.
-Build/mpvbuild --help
+make clean                # Keep downloaded inputs and build tools.
+make clean ARGS='--cache' # Remove inputs and build tools too.
+make help
 ```

@@ -2,7 +2,7 @@ import Combine
 import SwiftUI
 
 /// Rasterizes only the overlay. mpv continues to decode and schedule video.
-/// One submission may be in flight; intermediate invalidations are coalesced.
+/// Keeps at most one submission in flight and combines intermediate invalidations.
 @MainActor
 final class MPVVideoOverlayRenderer {
     private let renderer: ImageRenderer<AnyView>

@@ -267,14 +267,10 @@ def aggregate(states, events, pid, start_ns=None, end_ns=None):
     # State and raw-event tables should contain the same Running starts even
     # though many starts are interrupt returns or priority changes, not dispatches.
     running_intervals = Counter(
-        (row["thread"]["tid"], row["start"])
-        for row in states
-        if row["state"] == "Running" and start <= row["start"] < end
+        (row["thread"]["tid"], row["start"]) for row in states if row["state"] == "Running" and start <= row["start"] < end
     )
     running_events = Counter(
-        (row["thread"]["tid"], row["time"])
-        for row in events
-        if row["event"] == "Running" and start <= row["time"] < end
+        (row["thread"]["tid"], row["time"]) for row in events if row["event"] == "Running" and start <= row["time"] < end
     )
     validation = {
         "runningStartsMatchAcrossTables": running_intervals == running_events,
@@ -333,7 +329,7 @@ def markdown(summary):
         c = thread["counts"]
         name = thread["name"].replace("|", r"\|")
         lines.append(
-            f"| {name} | {thread['stateDurationNanoseconds'].get('Running', 0)/1e6:.3f} | "
+            f"| {name} | {thread['stateDurationNanoseconds'].get('Running', 0) / 1e6:.3f} | "
             f"{c.get('blockedActivations', 0)} | {c.get('dispatchParkActivations', 0)} | "
             f"{c.get('CPUDispatchesFromOffCPU', 0)} | {c.get('interruptReturns', 0)} | {c.get('preemptions', 0)} |"
         )
@@ -348,9 +344,7 @@ def markdown(summary):
         lines.append(f"| {key} | {value} |")
     lines += [
         "",
-        "Raw Runnable events classified by contemporaneous modeled state: "
-        + json.dumps(summary["rawRunnableEventsByModeledState"])
-        + ".",
+        "Raw Runnable events classified by contemporaneous modeled state: " + json.dumps(summary["rawRunnableEventsByModeledState"]) + ".",
         "",
         "Cross-table Running-start validation: " + json.dumps(summary["validation"]) + ".",
         "",
@@ -363,9 +357,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, help="Contains xctrace XML exports and recorder provenance.json")
     parser.add_argument("--pid", type=int, required=True)
-    parser.add_argument(
-        "--output", type=Path, required=True, help="New directory; existing results are never overwritten"
-    )
+    parser.add_argument("--output", type=Path, required=True, help="New directory; existing results are never overwritten")
     parser.add_argument("--start-seconds", type=float)
     parser.add_argument("--end-seconds", type=float)
     args = parser.parse_args()
@@ -403,9 +395,7 @@ def main():
         }
     args.output.mkdir(parents=True, exist_ok=False)
     for schema, rows in table_data.items():
-        (args.output / f"{schema}-pid.json").write_text(
-            json.dumps({"info": export_info[schema], "rows": rows}, indent=2) + "\n"
-        )
+        (args.output / f"{schema}-pid.json").write_text(json.dumps({"info": export_info[schema], "rows": rows}, indent=2) + "\n")
     (args.output / "kernel-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     (args.output / "analysis.md").write_text(markdown(summary))
     print(

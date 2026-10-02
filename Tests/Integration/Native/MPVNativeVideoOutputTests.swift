@@ -24,7 +24,7 @@ struct MPVNativeVideoOutputTests {
             videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
-        try fixture.player.load(TestPaths.testMedia("webp-animation.webp"), autoPlay: true)
+        try fixture.player.load(TestPaths.testMedia("image-webp-animated.webp"), autoPlay: true)
         try await eventually("WebP animation rendered by AVFoundation") {
             fixture.player.position.seconds >= 0.75
                 && fixture.player.sampleBufferDisplayLayer.isReadyForDisplay
@@ -96,14 +96,21 @@ struct MPVNativeVideoOutputTests {
             #expect(CMTimebaseGetRate(timebase) == 0)
         }
 
-        // Retiring the inline view must not tear down or reload the native VO.
+        // Detach and reattach video without reloading the audio session.
         surface.detach()
         #expect(layer.superlayer == nil)
+        let detachedPosition = player.position
         player.play()
-        try await waitUntil("detached playback") { player.state == .playing && CMTimebaseGetRate(timebase) > 0 }
+        try await waitUntil("detached audio playback") {
+            player.state == .playing && player.position > detachedPosition + .milliseconds(100)
+                && player.mediaInformation.dimensions == nil
+        }
         player.pause()
-        try await waitUntil("detached pause") { player.isPaused && CMTimebaseGetRate(timebase) == 0 }
+        try await waitUntil("detached pause") { player.state == .paused && player.isPaused }
         surface.activateRenderingSurface()
+        try await waitUntil("video resumes on the existing client") {
+            player.mediaInformation.dimensions != nil && layer.isReadyForDisplay
+        }
         #expect(player.sampleBufferDisplayLayer === layer)
         let after = await player.lifecycleDiagnostics()
         #expect(after.handlesCreated == lifecycle.handlesCreated)

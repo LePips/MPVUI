@@ -5,7 +5,7 @@ import Testing
 @Suite(.tags(.integration, .hdr), .serialized)
 @MainActor
 struct MPVEDRBlackLevelTests {
-    @Test(arguments: ["01-h264-aac-baseline.mp4", "feature-hdr10.mkv", "feature-hlg.mkv"])
+    @Test(arguments: ["baseline.mp4", "color-hdr10.mkv", "color-hlg.mkv"])
     func `EDR black survives live headroom changes and replay`(media: String) async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null"], autoPlay: false,

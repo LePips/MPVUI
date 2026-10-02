@@ -89,38 +89,43 @@ struct MPVMetadataObservationActivityTests {
 
     @Test
     func `new load and accepted playlist start reset observations without stale events resetting them`() async {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVEngine(configuration: .init(additionalOptions: ["ao": "null"])) { _ in }
         let target: [String: MPVNodeValue] = ["gamma": .string("srgb"), "par": .double(.nan)]
-        engine.queue.sync {
-            engine.playbackRequestIsActive = true
-            sendTarget(target, to: engine)
-            engine.lastContainerFramesPerSecond = 24
-        }
-        engine.load(TestPaths.baselineMedia, autoPlay: false, startTime: nil, generation: 1)
-        _ = await engine.lifecycleSnapshot()
-        engine.queue.sync {
-            #expect(engine.lastVideoTargetObservation == nil)
-            #expect(engine.lastContainerFramesPerSecond == nil)
-            sendTarget(target, to: engine)
-            engine.lastContainerFramesPerSecond = 24
-            engine.requestedPlaylistEntryID = 2
-            var start = mpv_event_start_file()
-            start.playlist_entry_id = 1
-            withUnsafeMutablePointer(to: &start) { pointer in
-                var event = mpv_event()
-                event.event_id = MPV_EVENT_START_FILE
-                event.data = UnsafeMutableRawPointer(pointer)
-                engine.handleEvent(event)
-                #expect(engine.lastVideoTargetObservation != nil)
-                #expect(engine.lastContainerFramesPerSecond == 24)
-                pointer.pointee.playlist_entry_id = 2
-                engine.handleEvent(event)
+        await withCheckedContinuation { continuation in
+            engine.queue.async {
+                engine.playbackRequestIsActive = true
+                sendTarget(target, to: engine)
+                engine.lastContainerFramesPerSecond = 24
+                engine.load(TestPaths.baselineMedia, autoPlay: false, startTime: nil, generation: 1)
+                // Queue the assertions before the headless audio load can
+                // schedule native events that repopulate these observations.
+                engine.queue.async {
+                    #expect(engine.lastVideoTargetObservation == nil)
+                    #expect(engine.lastContainerFramesPerSecond == nil)
+                    engine.activePlaylistEntryID = engine.requestedPlaylistEntryID
+                    sendTarget(target, to: engine)
+                    engine.lastContainerFramesPerSecond = 24
+                    engine.requestedPlaylistEntryID = 2
+                    var start = mpv_event_start_file()
+                    start.playlist_entry_id = 1
+                    withUnsafeMutablePointer(to: &start) { pointer in
+                        var event = mpv_event()
+                        event.event_id = MPV_EVENT_START_FILE
+                        event.data = UnsafeMutableRawPointer(pointer)
+                        engine.handleEvent(event)
+                        #expect(engine.lastVideoTargetObservation != nil)
+                        #expect(engine.lastContainerFramesPerSecond == 24)
+                        pointer.pointee.playlist_entry_id = 2
+                        engine.handleEvent(event)
+                    }
+                    #expect(engine.lastVideoTargetObservation == nil)
+                    #expect(engine.lastContainerFramesPerSecond == nil)
+                    let snapshots = engine.lifecycleDiagnostics.engineActivity.mediaSnapshots
+                    sendTarget(target, to: engine)
+                    #expect(engine.lifecycleDiagnostics.engineActivity.mediaSnapshots == snapshots + 1)
+                    continuation.resume()
+                }
             }
-            #expect(engine.lastVideoTargetObservation == nil)
-            #expect(engine.lastContainerFramesPerSecond == nil)
-            let snapshots = engine.lifecycleDiagnostics.engineActivity.mediaSnapshots
-            sendTarget(target, to: engine)
-            #expect(engine.lifecycleDiagnostics.engineActivity.mediaSnapshots == snapshots + 1)
         }
     }
 
