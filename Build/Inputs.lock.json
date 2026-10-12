@@ -857,6 +857,11 @@
           "id": "0019-avfoundation-buffer-reuse-and-subtitle-compositing",
           "path": "Build/Patches/mpv/0019-avfoundation-buffer-reuse-and-subtitle-compositing.patch",
           "sha256": "73b03e4d97cd54666a6df388f76d0a15edf100cee7e6fb2c298e37f9a1db935f"
+        },
+        {
+          "id": "0020-spatial-audio-output",
+          "path": "Build/Patches/mpv/0020-spatial-audio-output.patch",
+          "sha256": "e28f01bca338967f95f17f8225bc38d9ea4f423fbddcfc761c419c7685741606"
         }
       ],
       "ref": "v0.41.0",

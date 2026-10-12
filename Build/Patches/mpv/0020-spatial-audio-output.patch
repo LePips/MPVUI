@@ -1,0 +1,519 @@
+Subject: [PATCH] Hand TrueHD and DTS-HD passthrough to the host
+
+diff --git a/audio/out/ao.c b/audio/out/ao.c
+index 4e5e9e3..ef2d124 100644
+--- a/audio/out/ao.c
++++ b/audio/out/ao.c
+@@ -41,6 +41,7 @@ extern const struct ao_driver audio_out_audiounit;
+ extern const struct ao_driver audio_out_coreaudio;
+ extern const struct ao_driver audio_out_coreaudio_exclusive;
+ extern const struct ao_driver audio_out_avfoundation;
++extern const struct ao_driver audio_out_spatial;
+ extern const struct ao_driver audio_out_rsound;
+ extern const struct ao_driver audio_out_pipewire;
+ extern const struct ao_driver audio_out_sndio;
+@@ -107,6 +108,9 @@ static const struct ao_driver * const audio_out_drivers[] = {
+     &audio_out_null,
+ #if HAVE_COREAUDIO
+     &audio_out_coreaudio_exclusive,
++#endif
++#if HAVE_AVFOUNDATION
++    &audio_out_spatial,
+ #endif
+     &audio_out_pcm,
+     &audio_out_lavc,
+@@ -613,6 +617,8 @@ void ao_print_devices(struct mpv_global *global, struct mp_log *log,
+ void ao_set_gain(struct ao *ao, float gain)
+ {
+     atomic_store(&ao->gain, gain);
++    if (ao->driver->set_gain)
++        ao->driver->set_gain(ao, gain);
+ }
+ 
+ #define MUL_GAIN_i(d, num_samples, gain, low, center, high)                     \
+diff --git a/audio/out/ao_spatial.m b/audio/out/ao_spatial.m
+new file mode 100644
+index 0000000..a862222
+--- /dev/null
++++ b/audio/out/ao_spatial.m
+@@ -0,0 +1,312 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++// Hands TrueHD and DTS-HD passthrough to the host application, which renders
++// it itself (see include/mpv/spatial_audio.h), and keeps mpv's audio clock on
++// the AVSampleBufferRenderSynchronizer the host renders into.
++//
++// A stream the host fails on falls back to PCM the way avfoundation's
++// compressed sink does: the format is latched and the output reloaded, the
++// reopen refuses it, and mpv decodes the track instead. A later PCM
++// initialization clears the latch, so the next track or file tries again.
++
++#include <stdatomic.h>
++
++#include "ao.h"
++#include "audio/format.h"
++#include "common/common.h"
++#include "common/msg.h"
++#include "internal.h"
++#include "mpv/spatial_audio.h"
++#include "options/m_option.h"
++
++#import <AVFoundation/AVFoundation.h>
++#import <CoreMedia/CoreMedia.h>
++
++struct priv {
++    int64_t sink_address;
++    const mpv_spatial_audio_sink *sink;
++    AVSampleBufferRenderSynchronizer *synchronizer;
++    // Nudges the ao thread while the clock waits for the host, which the
++    // thread would otherwise only notice at its next refill.
++    dispatch_queue_t queue;
++    dispatch_source_t wakeup_timer;
++    atomic_bool waiting;
++    // The current timeline's start on the synchronizer clock, and the samples
++    // written since.
++    CMTime timeline;
++    int64_t written;
++    bool playing;
++    bool paused;
++    bool clock_running;
++    // The host has finished this timeline; the next write begins another.
++    bool ended;
++    bool reload_requested;
++};
++
++static _Atomic bool spatial_format_latch[2];
++
++static int spatial_latch_index(int format)
++{
++    return format == AF_FORMAT_S_DTSHD;
++}
++
++static int64_t ns_from_time(CMTime time)
++{
++    return CMTimeConvertScale(time, 1000000000, kCMTimeRoundingMethod_Default).value;
++}
++
++// Arms the timer that nudges the ao thread only while the clock waits.
++static void set_waiting(struct ao *ao, bool waiting)
++{
++    struct priv *p = ao->priv;
++
++    atomic_store(&p->waiting, waiting);
++    dispatch_source_set_timer(p->wakeup_timer,
++        waiting ? dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_MSEC) : DISPATCH_TIME_FOREVER,
++        10 * NSEC_PER_MSEC, NSEC_PER_MSEC);
++}
++
++// Audio written but not yet played. While the clock waits, that is all of it,
++// so mpv's audio position, and with it the video, waits too.
++static int64_t queued_ns(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    // Split so that days of 192 kHz audio stay within int64.
++    int64_t written = p->written / ao->samplerate * INT64_C(1000000000) +
++                      p->written % ao->samplerate * INT64_C(1000000000) / ao->samplerate;
++    int64_t now = ns_from_time(CMTimebaseGetTime(p->synchronizer.timebase));
++    return MPMAX(ns_from_time(p->timeline) + written - now, 0);
++}
++
++static void begin_timeline(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    [p->synchronizer setRate:0];
++    p->timeline = CMTimebaseGetTime(p->synchronizer.timebase);
++    p->written = 0;
++    p->playing = false;
++    p->paused = false;
++    p->clock_running = false;
++    p->ended = false;
++    set_waiting(ao, false);
++    p->sink->begin(p->sink->ctx, ns_from_time(p->timeline));
++}
++
++static int init(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    p->sink = (const mpv_spatial_audio_sink *)(intptr_t)p->sink_address;
++    if (!p->sink || p->sink->version != MPV_SPATIAL_AUDIO_SINK_VERSION) {
++        MP_VERBOSE(ao, "no host sink (--ao-spatial-sink)\n");
++        return -1;
++    }
++
++    mpv_spatial_audio_codec codec;
++    if (ao->format == AF_FORMAT_S_TRUEHD) {
++        codec = MPV_SPATIAL_AUDIO_CODEC_TRUEHD;
++    } else if (ao->format == AF_FORMAT_S_DTSHD) {
++        codec = MPV_SPATIAL_AUDIO_CODEC_DTSHD;
++    } else {
++        if (!af_fmt_is_spdif(ao->format)) {
++            atomic_store(&spatial_format_latch[0], false);
++            atomic_store(&spatial_format_latch[1], false);
++        }
++        MP_VERBOSE(ao, "only TrueHD and DTS-HD passthrough are handed to the host\n");
++        return -1;
++    }
++    if (atomic_load(&spatial_format_latch[spatial_latch_index(ao->format)])) {
++        MP_INFO(ao, "%s failed in the host; decoding it instead\n",
++                af_fmt_to_str(ao->format));
++        return -1;
++    }
++
++    p->synchronizer = [[AVSampleBufferRenderSynchronizer alloc] init];
++    if (!p->sink->open(p->sink->ctx, codec, (void *)p->synchronizer)) {
++        MP_VERBOSE(ao, "the host refused the stream\n");
++        [p->synchronizer release];
++        p->synchronizer = nil;
++        return -1;
++    }
++
++    p->sink->set_volume(p->sink->ctx, atomic_load(&ao->gain));
++
++    // The host's encoder holds 1.5 s before its first output, so let mpv
++    // queue well beyond that.
++    ao->device_buffer = ao->samplerate * 3;
++
++    p->queue = dispatch_queue_create("mpv spatial audio", DISPATCH_QUEUE_SERIAL);
++    p->wakeup_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, p->queue);
++    dispatch_source_set_timer(p->wakeup_timer, DISPATCH_TIME_FOREVER, 0, 0);
++    dispatch_source_set_event_handler(p->wakeup_timer, ^{
++        if (atomic_load(&p->waiting))
++            ao_wakeup(ao);
++    });
++    dispatch_resume(p->wakeup_timer);
++
++    begin_timeline(ao);
++    return 0;
++}
++
++static void uninit(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    // Not set when init() failed.
++    if (!p->queue)
++        return;
++    dispatch_source_cancel(p->wakeup_timer);
++    // A handler already running finishes before this returns.
++    dispatch_sync(p->queue, ^{});
++    dispatch_release(p->wakeup_timer);
++    dispatch_release(p->queue);
++
++    [p->synchronizer setRate:0];
++    p->sink->close(p->sink->ctx);
++    [p->synchronizer release];
++}
++
++static void reset(struct ao *ao)
++{
++    begin_timeline(ao);
++}
++
++static void start(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    p->playing = true;
++    set_waiting(ao, !p->paused && !p->clock_running);
++}
++
++static bool set_pause(struct ao *ao, bool paused)
++{
++    struct priv *p = ao->priv;
++
++    p->paused = paused;
++    if (p->clock_running)
++        [p->synchronizer setRate:paused ? 0 : 1];
++    set_waiting(ao, p->playing && !paused && !p->clock_running);
++    return true;
++}
++
++static bool audio_write(struct ao *ao, void **data, int samples)
++{
++    struct priv *p = ao->priv;
++
++    // After an underrun the clock has run past everything written, so
++    // continuing that timeline would place new audio in the past. After the
++    // end (gapless playback goes on to the next file without a reset), the
++    // host takes no more audio on it. Either way a new timeline begins, and
++    // playback stays active: mpv calls start() only if it saw the underrun.
++    if (p->ended || (p->clock_running && queued_ns(ao) == 0)) {
++        MP_VERBOSE(ao, "beginning a new timeline\n");
++        bool playing = p->playing;
++        begin_timeline(ao);
++        p->playing = playing;
++        set_waiting(ao, playing);
++    }
++    p->sink->write(p->sink->ctx, data[0], (size_t)samples * ao->sstride);
++    p->written += samples;
++    return true;
++}
++
++// The host holds back the start of a stream, and its encoder the latest
++// audio, until it has more; at the end it has to let both go.
++static void end_of_stream(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    p->ended = true;
++    p->sink->end(p->sink->ctx);
++}
++
++// mpv's software volume never reaches a bitstream, so the host applies it.
++// mpv calls this whenever it changes, paused or not.
++static void set_gain(struct ao *ao, float gain)
++{
++    struct priv *p = ao->priv;
++
++    // ao_alloc() sets the gain before init() has opened the host.
++    if (!p->queue)
++        return;
++    p->sink->set_volume(p->sink->ctx, gain);
++}
++
++static void get_state(struct ao *ao, struct mp_pcm_state *state)
++{
++    struct priv *p = ao->priv;
++
++    if (p->sink->has_failed(p->sink->ctx) && !p->reload_requested) {
++        MP_WARN(ao, "the host failed to render the stream, falling back to PCM\n");
++        p->reload_requested = true;
++        atomic_store(&spatial_format_latch[spatial_latch_index(ao->format)], true);
++        ao_request_reload(ao);
++    }
++
++    if (p->playing && !p->paused && !p->clock_running &&
++        p->sink->is_ready(p->sink->ctx))
++    {
++        [p->synchronizer setRate:1 time:p->timeline];
++        p->clock_running = true;
++        set_waiting(ao, false);
++    }
++
++    int64_t queued = queued_ns(ao);
++
++    // After the end mpv writes nothing until this timeline has played out, and
++    // its thread would sleep a quarter of the buffer before noticing, holding
++    // up EOF and a gapless next file. Paused, nothing plays out.
++    bool draining = p->ended && !p->paused && queued > 0;
++    if (p->ended && atomic_load(&p->waiting) != draining)
++        set_waiting(ao, draining);
++
++    state->queued_samples = queued * ao->samplerate / INT64_C(1000000000);
++    int period = ao->samplerate / 100;
++    state->free_samples = MPMAX(ao->device_buffer - state->queued_samples, 0)
++                          / period * period;
++    // The next file's audio waits until this one has played out.
++    if (p->ended && queued > 0)
++        state->free_samples = 0;
++    state->delay = queued / 1e9;
++    state->playing = p->playing && queued > 0;
++}
++
++#define OPT_BASE_STRUCT struct priv
++
++const struct ao_driver audio_out_spatial = {
++    .description = "TrueHD and DTS-HD passthrough to the host application",
++    .name        = "spatial",
++    .init        = init,
++    .uninit      = uninit,
++    .reset       = reset,
++    .start       = start,
++    .set_pause   = set_pause,
++    .write       = audio_write,
++    .get_state   = get_state,
++    .end_of_stream = end_of_stream,
++    .set_gain    = set_gain,
++    .priv_size   = sizeof(struct priv),
++    .options     = (const struct m_option[]) {
++        {"sink", OPT_INT64(sink_address)},
++        {0}
++    },
++    .options_prefix = "ao-spatial",
++};
+diff --git a/audio/out/buffer.c b/audio/out/buffer.c
+index 277b524..a7e38f9 100644
+--- a/audio/out/buffer.c
++++ b/audio/out/buffer.c
+@@ -685,8 +685,11 @@ static bool ao_play_data(struct ao *ao)
+     MP_TRACE(ao, "in=%d space=%d(%d) pl=%d, eof=%d\n",
+              samples, space, state.free_samples, p->playing, got_eof);
+ 
+-    if (got_eof)
++    if (got_eof) {
++        if (ao->driver->end_of_stream)
++            ao->driver->end_of_stream(ao);
+         goto eof;
++    }
+ 
+     return samples > 0 && (samples < space || ao->untimed);
+ 
+diff --git a/audio/out/internal.h b/audio/out/internal.h
+index 85fa777..7b64ea3 100644
+--- a/audio/out/internal.h
++++ b/audio/out/internal.h
+@@ -173,6 +173,13 @@ struct ao_driver {
+     bool (*write)(struct ao *ao, void **data, int samples);
+     // push based: return mandatory stream information
+     void (*get_state)(struct ao *ao, struct mp_pcm_state *state);
++    // push based, optional: the audio has ended, and nothing more is written
++    // until reset(). For drivers that hold audio back until they get more.
++    void (*end_of_stream)(struct ao *ao);
++
++    // optional: mpv's software volume changed (ao_set_gain()). For drivers
++    // whose output it never reaches, such as a bitstream the host renders.
++    void (*set_gain)(struct ao *ao, float gain);
+ 
+     // Return the list of devices currently available in the system. Use
+     // ao_device_list_add() to add entries. The selected device will be set as
+diff --git a/include/mpv/spatial_audio.h b/include/mpv/spatial_audio.h
+new file mode 100644
+index 0000000..6733096
+--- /dev/null
++++ b/include/mpv/spatial_audio.h
+@@ -0,0 +1,105 @@
++/* Copyright (C) 2026 the mpv developers
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef MPV_CLIENT_API_SPATIAL_AUDIO_H_
++#define MPV_CLIENT_API_SPATIAL_AUDIO_H_
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * The "spatial" audio output hands TrueHD and DTS-HD passthrough to the host
++ * application, which renders it itself, for example as Apple spatial audio
++ * through an AVSampleBufferAudioRenderer. Apple platforms only.
++ *
++ * Use it with --audio-spdif=truehd,dts-hd and --ao=spatial,<pcm output> (or
++ * --ao=spatial, to autoprobe the rest), and
++ * pass the address of a filled-in mpv_spatial_audio_sink, which must outlive
++ * the player, as the int64 option --ao-spatial-sink. The output refuses every
++ * other format, so PCM goes to the next output in the list.
++ *
++ * Load each file with loadfile replace: gapless handoff across files with a
++ * queued next file is not supported.
++ *
++ * mpv keeps its clock on an AVSampleBufferRenderSynchronizer that the output
++ * owns and the host renders into. It holds the clock until is_ready() returns
++ * true, then runs it from the timeline's start, so video waits for the host.
++ */
++
++#define MPV_SPATIAL_AUDIO_SINK_VERSION 2
++
++typedef enum mpv_spatial_audio_codec {
++    MPV_SPATIAL_AUDIO_CODEC_TRUEHD = 1,
++    MPV_SPATIAL_AUDIO_CODEC_DTSHD = 2,
++} mpv_spatial_audio_codec;
++
++/**
++ * Callbacks from the output. They are never called concurrently, except
++ * set_volume, which mpv calls from its core thread. Times are on the
++ * synchronizer's clock, in nanoseconds.
++ */
++typedef struct mpv_spatial_audio_sink {
++    /** MPV_SPATIAL_AUDIO_SINK_VERSION. */
++    int version;
++    void *ctx;
++    /**
++     * Prepares to render `codec` into `synchronizer`, an
++     * AVSampleBufferRenderSynchronizer that stays valid until close(). Return
++     * false to refuse; mpv then decodes the track to PCM.
++     */
++    bool (*open)(void *ctx, mpv_spatial_audio_codec codec, void *synchronizer);
++    /** Starts a new timeline at `time`, dropping everything queued. */
++    void (*begin)(void *ctx, int64_t time);
++    /**
++     * IEC 61937 bursts exactly as mpv's passthrough produces them, split
++     * anywhere, continuing the timeline from begin().
++     */
++    void (*write)(void *ctx, const void *data, size_t size);
++    /** Whether enough audio is queued to start the clock. */
++    bool (*is_ready)(void *ctx);
++    /**
++     * Whether the host failed, for example on a stream it cannot render. The
++     * output then reopens without the host for that codec, so mpv decodes the
++     * track to PCM. Once that PCM output has opened, the next track or audio
++     * reinitialization offers the codec to the host again.
++     */
++    bool (*has_failed)(void *ctx);
++    /** Releases what open() prepared. */
++    void (*close)(void *ctx);
++    /**
++     * Nothing more is written until the next begin(): render everything
++     * written, including what a startup buffer holds back, and become ready.
++     */
++    void (*end)(void *ctx);
++    /**
++     * mpv's software volume as a linear gain: --volume, --volume-gain,
++     * replaygain and --mute together, 0 when muted. mpv cannot scale a
++     * bitstream, so the host applies it to what it renders. Called after
++     * open() and whenever it changes; above 1 is amplification the host may
++     * clamp.
++     */
++    void (*set_volume)(void *ctx, float volume);
++} mpv_spatial_audio_sink;
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/meson.build b/meson.build
+index 04ed6b0..73a5464 100644
+--- a/meson.build
++++ b/meson.build
+@@ -822,6 +822,7 @@ features += {'avfoundation': avfoundation.found()}
+ if features['avfoundation']
+     dependencies += avfoundation
+     sources += files('audio/out/ao_avfoundation.m')
++    sources += files('audio/out/ao_spatial.m')
+ endif
+ 
+ vo_avfoundation_frameworks = ['AVFoundation', 'CoreMedia', 'CoreVideo',
+@@ -1823,7 +1824,8 @@ if get_option('libmpv')
+                  description: 'mpv media player client library')
+ 
+     headers = ['include/mpv/client.h', 'include/mpv/render.h',
+-               'include/mpv/render_gl.h', 'include/mpv/stream_cb.h']
++               'include/mpv/render_gl.h', 'include/mpv/stream_cb.h',
++               'include/mpv/spatial_audio.h']
+     install_headers(headers, subdir: 'mpv')
+ 
+     # Allow projects to build with libmpv by cloning into ./subprojects/mpv

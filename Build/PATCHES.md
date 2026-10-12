@@ -24,6 +24,7 @@ The build applies these patches before compiling mpv and FFmpeg. [Inputs.lock.js
 | [0016-native-audio-clock-wakeup](Patches/mpv/0016-native-audio-clock-wakeup.patch)                 | Keep playback position and relative seeks accurate during native compressed audio playback.                                        |
 | [0017-track-switch-buffering](Patches/mpv/0017-track-switch-buffering.patch)                       | Preserve buffered audio and video during track refresh seeks.                                                                      |
 | [0018-simulator-frame-upload](Patches/mpv/0018-simulator-frame-upload.patch)                       | Copy CPU frame uploads into Metal-owned buffers on Apple simulators.                                                               |
+| [0020-spatial-audio-output](Patches/mpv/0020-spatial-audio-output.patch)                           | Add a `spatial` audio output that hands TrueHD and DTS-HD passthrough to a host sink set with `ao-spatial-sink`.                   |
 
 ## FFmpeg
 
