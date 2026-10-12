@@ -123,9 +123,15 @@ extension MPVEngine {
             // allowing Apple's system spatializer to render compatible surround
             // content. The trailing comma retains mpv's normal audio-output
             // autoprobing as a fallback if AVFoundation cannot open the route.
-            try setInitialOption("ao", value: "avfoundation,")
+            // With a passthrough sink, the spatial output takes TrueHD and DTS-HD for it and
+            // refuses everything else, which goes on to AVFoundation.
+            try setInitialOption("ao", value: passthroughSinkBridge == nil ? "avfoundation," : "spatial,avfoundation,")
             for (name, value) in configuration.audio.mpvOptions {
                 try setInitialOption(name, value: value)
+            }
+            if let passthroughSinkBridge {
+                try setInitialOption("ao-spatial-sink", value: passthroughSinkBridge.address)
+                try setInitialOption("audio-spdif", value: spdifCodecs)
             }
 
             for (name, value) in MPVRenderingOptions.hardwareDecodingOptions(configuration.hardwareDecoding, backend: videoOutput) {

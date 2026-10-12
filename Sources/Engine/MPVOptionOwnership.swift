@@ -6,6 +6,9 @@ enum MPVOptionOwnership {
     /// Renderer and surface wiring must remain consistent with the configuration.
     static let rendererProperties: Set<String> = ["vo", "gpu-api", "gpu-context", "wid", "force-window"]
 
+    /// Raw commands must not change renderer wiring or the passthrough sink's address.
+    static let commandReservedProperties = rendererProperties.union(["ao-spatial-sink"])
+
     /// Properties already managed
     static let reservedProperties: Set<String> = [
         "external-surface-size",
@@ -14,6 +17,7 @@ enum MPVOptionOwnership {
         "avfoundation-presentation",
         "avfoundation-pip-composite-osd",
         "avfoundation-subtitle-luminance",
+        "ao-spatial-sink",
         "gpu-api",
         "gpu-context",
         "mute",
@@ -59,14 +63,14 @@ enum MPVOptionOwnership {
         return name
     }
 
-    static func rendererPropertyModified(by rawName: String, arguments: [String]) -> String? {
+    static func reservedPropertyModified(by rawName: String, arguments: [String]) -> String? {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if name == "expand-properties", let command = arguments.first {
-            return rendererPropertyModified(by: command, arguments: Array(arguments.dropFirst()))
+            return reservedPropertyModified(by: command, arguments: Array(arguments.dropFirst()))
         }
         guard ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(name),
               let property = arguments.first,
-              rendererProperties.contains(normalizedProperty(property)) else { return nil }
+              commandReservedProperties.contains(normalizedProperty(property)) else { return nil }
         return property
     }
 

@@ -57,15 +57,27 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
     /// Source layouts eligible for Apple's spatializer. Defaults to `.automatic`.
     public let spatialization: Spatialization
 
+    /// Renders TrueHD and DTS-HD instead of mpv decoding them to PCM. Defaults to `nil`.
+    public let passthroughSink: (any MPVPassthroughAudioSink)?
+
     /// Creates audio settings with automatic decoding, spatialization, and session setup.
     public init(
         audioSession: AudioSession = .automatic,
         dolbyDecoding: DolbyDecoding = .automatic,
-        spatialization: Spatialization = .automatic
+        spatialization: Spatialization = .automatic,
+        passthroughSink: (any MPVPassthroughAudioSink)? = nil
     ) {
         self.audioSession = audioSession
         self.dolbyDecoding = dolbyDecoding
         self.spatialization = spatialization
+        self.passthroughSink = passthroughSink
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.audioSession == rhs.audioSession
+            && lhs.dolbyDecoding == rhs.dolbyDecoding
+            && lhs.spatialization == rhs.spatialization
+            && lhs.passthroughSink.map(ObjectIdentifier.init) == rhs.passthroughSink.map(ObjectIdentifier.init)
     }
 
     var mpvOptions: [String: String] {

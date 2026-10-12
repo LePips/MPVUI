@@ -245,6 +245,8 @@ extension MPVEngine {
         dispatchPrecondition(condition: .onQueue(queue))
         guard needsSourceLoad, handle != nil, let sourceURL else { return }
 
+        resetPassthroughFallback()
+
         var arguments = ["loadfile", Self.mpvPath(for: sourceURL), "replace"]
         if let start = pendingStartTime, start > .zero {
             // mpv expects the playlist index before per-file options.

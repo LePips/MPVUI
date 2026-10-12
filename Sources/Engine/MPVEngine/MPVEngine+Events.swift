@@ -202,6 +202,8 @@ extension MPVEngine {
             }
             cancelSubtitleQueries()
             resetMediaObservations()
+            // Drops a fallback the previous file raised after this one was loaded
+            resetPassthroughFallback()
             requestedPlaylistEntryID = entryID
             activePlaylistEntryID = entryID
             isLoading = true
@@ -377,6 +379,9 @@ extension MPVEngine {
 
         case "volume", "mute", "speed":
             refreshAudioState()
+            if name == "speed" {
+                applySpdifCodecs(reloadingAudio: true)
+            }
 
         case "estimated-vf-fps":
             // The media snapshot prefers container FPS. An estimator update
@@ -411,6 +416,9 @@ extension MPVEngine {
              "audio-codec-name", "file-format", "file-size",
              "container-fps":
             refreshPropertySnapshot(.media)
+            if name == "current-tracks/audio/id" {
+                passthroughAudioTrackDidChange()
+            }
             if name == "track-list" || name == "current-tracks/sub/id" {
                 flushPropertySnapshots()
                 refreshTextSubtitleSnapshot()

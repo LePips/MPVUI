@@ -31,7 +31,7 @@ extension MPVEngine {
 
     func performCommand(_ name: String, arguments: [String]) {
         guard !name.isEmpty else { return }
-        if let property = MPVOptionOwnership.rendererPropertyModified(by: name, arguments: arguments) {
+        if let property = MPVOptionOwnership.reservedPropertyModified(by: name, arguments: arguments) {
             queue.async { [weak self] in
                 self?.publish(.error(.reservedProperty(name: property), fatal: false))
             }
