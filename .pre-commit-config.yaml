@@ -4,7 +4,7 @@ default_stages: [pre-commit]
 exclude: >-
   (?x)^(
     \.build[^/]*/|build/|DerivedData/|\.swiftpm/|
-    Build/Patches/|Build/[^/]+\.lock\.json$|Package\.swift$|
+    Build/Patches/|Build/[^/]+\.lock\.json$|
     .*\.xcassets/|.*\.icon/|.*\.xcodeproj/|.*\.xcworkspace/
   )
 

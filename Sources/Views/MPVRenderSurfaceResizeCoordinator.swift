@@ -1,9 +1,11 @@
 import CoreGraphics
 import Dispatch
+import MPVCore
 import QuartzCore
 
 /// The geometry lifecycle that produced a render-surface size request.
 enum MPVGeometryChangeKind: String, Sendable {
+
     case continuousInteractive
     case animatedTransition
     case discrete
@@ -18,7 +20,9 @@ enum MPVGeometryChangeKind: String, Sendable {
 /// generation and layer identity.
 @MainActor
 final class MPVRenderSurfaceResizeCoordinator {
+
     struct Timing: Sendable {
+
         var continuousCadenceNanoseconds: UInt64
         var continuousTrailingDelayNanoseconds: UInt64
         var animatedTransitionFallbackDelayNanoseconds: UInt64
@@ -41,6 +45,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     struct CommitRequest: Equatable, Sendable {
+
         let identifier: UInt64
         let drawableSize: CGSize
         let contentsScale: CGFloat
@@ -51,6 +56,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     enum DiagnosticEvent: String, Sendable {
+
         case activated
         case deactivated
         case rendererConfigurationChanged
@@ -75,6 +81,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     struct InFlightDiagnostic: Sendable {
+
         let identifier: UInt64
         let drawableSize: CGSize
         let contentsScale: CGFloat
@@ -82,6 +89,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     struct DiagnosticSnapshot: Sendable {
+
         let event: DiagnosticEvent
         let latestRequestedDrawableSize: CGSize?
         let pendingDrawableSize: CGSize?
@@ -108,11 +116,13 @@ final class MPVRenderSurfaceResizeCoordinator {
     typealias EmitDiagnostic = @MainActor (() -> DiagnosticSnapshot) -> Void
 
     fileprivate struct Geometry: Equatable {
+
         let drawableSize: CGSize
         let contentsScale: CGFloat
     }
 
     fileprivate struct PendingRequest {
+
         let sequence: UInt64
         let geometry: Geometry
         let kind: MPVGeometryChangeKind
@@ -121,6 +131,7 @@ final class MPVRenderSurfaceResizeCoordinator {
     }
 
     fileprivate struct InFlightRequest: Equatable {
+
         let sequence: UInt64
         let commit: CommitRequest
         let geometry: Geometry
@@ -156,6 +167,22 @@ final class MPVRenderSurfaceResizeCoordinator {
     private var continuousFinalTask: Task<Void, Never>?
     private var commitTask: Task<Void, Never>?
 
+    /// The current state, intended for logging and integration-test probes.
+    var diagnosticSnapshot: DiagnosticSnapshot {
+        makeDiagnosticSnapshot(event: .snapshot)
+    }
+
+    /// Display and SwiftUI updates must preserve an ongoing geometry lifecycle.
+    var geometryKindForRefresh: MPVGeometryChangeKind {
+        if isContinuousInteraction {
+            return .continuousInteractive
+        }
+        if animatedFallbackTask != nil {
+            return .animatedTransition
+        }
+        return .discrete
+    }
+
     init(
         timing: Timing = .init(),
         commit: @escaping Commit,
@@ -171,22 +198,6 @@ final class MPVRenderSurfaceResizeCoordinator {
         animatedFallbackTask?.cancel()
         continuousFinalTask?.cancel()
         commitTask?.cancel()
-    }
-
-    /// The current state, intended for logging and integration-test probes.
-    var diagnosticSnapshot: DiagnosticSnapshot {
-        makeDiagnosticSnapshot(event: .snapshot)
-    }
-
-    /// Display and SwiftUI updates must preserve an ongoing geometry lifecycle.
-    var geometryKindForRefresh: MPVGeometryChangeKind {
-        if isContinuousInteraction {
-            return .continuousInteractive
-        }
-        if animatedFallbackTask != nil {
-            return .animatedTransition
-        }
-        return .discrete
     }
 
     /// Converts a layer identity to the address format consumed by MPVPlayer.
@@ -474,6 +485,7 @@ final class MPVRenderSurfaceResizeCoordinator {
 }
 
 private extension MPVRenderSurfaceResizeCoordinator {
+
     static func isValid(drawableSize: CGSize) -> Bool {
         MPVMetalLayer.isValidDrawableSize(drawableSize)
     }
@@ -481,6 +493,10 @@ private extension MPVRenderSurfaceResizeCoordinator {
     static func normalizedContentsScale(_ contentsScale: CGFloat) -> CGFloat {
         guard contentsScale.isFinite, contentsScale > 0 else { return 1 }
         return max(contentsScale, 1)
+    }
+
+    static func elapsedNanoseconds(since start: UInt64, until end: UInt64) -> UInt64 {
+        end >= start ? end - start : 0
     }
 
     func beginContinuousInteractionIfNeeded() {
@@ -934,9 +950,5 @@ private extension MPVRenderSurfaceResizeCoordinator {
             observedDrawableSize: activeLayer?.drawableSize,
             resizeLatencyNanoseconds: lastResizeLatencyNanoseconds
         )
-    }
-
-    static func elapsedNanoseconds(since start: UInt64, until end: UInt64) -> UInt64 {
-        end >= start ? end - start : 0
     }
 }

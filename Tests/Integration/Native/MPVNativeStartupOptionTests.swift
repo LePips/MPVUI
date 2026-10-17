@@ -1,17 +1,10 @@
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .nativePatch))
 struct MPVNativeStartupOptionTests {
-    @MainActor @Test(.serialized, arguments: ["aac", "webp", "webp_anim", "prores_raw"])
-    func `bundled mpv exposes required media decoder`(codec: String) throws {
-        let session = try NativePlaybackSession()
-        defer { session.close() }
-        let decoders = try #require(session.property("decoder-list")?.arrayValue)
-        let names = Set(decoders.compactMap { $0.mapValue?["codec"]?.stringValue })
-        #expect(names.contains(codec), "Missing decoder: \(codec)")
-    }
 
     static let options = [
         ("vo", "gpu-next"),
@@ -55,10 +48,23 @@ struct MPVNativeStartupOptionTests {
         ("target-peak", "auto"),
     ]
 
+    @MainActor
+    @Test(.serialized, arguments: ["aac", "webp", "webp_anim", "prores_raw"])
+    func `bundled mpv exposes required media decoder`(codec: String) throws {
+        let session = try NativePlaybackSession()
+        defer { session.close() }
+
+        let decoders = try #require(session.property("decoder-list")?.arrayValue)
+        let names = Set(decoders.compactMap { $0.mapValue?["codec"]?.stringValue })
+
+        #expect(names.contains(codec), "Missing decoder: \(codec)")
+    }
+
     @Test(arguments: options)
     func `bundled mpv accepts required startup option`(name: String, value: String) throws {
         let handle = try #require(mpv_create())
         defer { mpv_destroy(handle) }
+
         #expect(mpv_set_option_string(handle, name, value) >= 0, "Bundled mpv rejected \(name)=\(value)")
     }
 }

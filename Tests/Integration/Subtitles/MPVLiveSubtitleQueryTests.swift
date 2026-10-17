@@ -1,10 +1,12 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .subtitles), .serialized)
 @MainActor
 struct MPVLiveSubtitleQueryTests {
+
     @Test
     func `unselected external subtitle queries include future cues and respect interval boundaries`() async throws {
         let fixture = PlaybackFixture()
@@ -33,8 +35,10 @@ struct MPVLiveSubtitleQueryTests {
         try await eventually("unselected external subtitle is discovered") {
             fixture.player.subtitleTracks.contains { !previous.contains($0.id) }
         }
+
         let track = try #require(fixture.player.subtitleTracks.first { !previous.contains($0.id) })
         let cues = try await fixture.player.textSubtitleSnapshots(for: track.id)
+
         #expect(cues.map(\.snapshot.text) == ["First cue", "Second cue", "Last cue"])
         #expect(try await fixture.player.textSubtitleSnapshot(for: track.id, at: .seconds(4)).text == "Second cue")
         #expect(try await fixture.player.textSubtitleSnapshot(for: track.id, at: .seconds(12)).isEmpty)
@@ -51,6 +55,7 @@ struct MPVLiveSubtitleQueryTests {
             files.remove()
         }
         var latest = TextSubtitleSnapshot()
+        fixture.player.setTextSubtitleInterceptionEnabled(true)
         let stream = fixture.player.textSubtitleStream()
         let observation = Task { @MainActor in
             for await snapshot in stream {
@@ -66,6 +71,7 @@ struct MPVLiveSubtitleQueryTests {
         try await eventually("both subtitle roles display independently") {
             Set(latest.regions.map(\.text)) == ["Primary", "Secondary"]
         }
+
         #expect(Set(latest.regions.compactMap(\.role)) == [.primary, .secondary])
         fixture.player.setSubtitlesVisible(false, for: .secondary)
         try await eventually("secondary visibility leaves primary alone") { latest.text == "Primary" }
@@ -74,12 +80,14 @@ struct MPVLiveSubtitleQueryTests {
         fixture.player.setSubtitleDelay(.zero, for: .primary)
         fixture.player.setSubtitlesVisible(true, for: .secondary)
         try await eventually("restoring independent subtitle settings restores both cues") { latest.regions.count == 2 }
+
         let secondaryID = try #require(fixture.player.selectedSubtitle(for: .secondary)?.id)
         fixture.player.selectSubtitle(secondaryID, for: .primary)
         try await eventually("moving a subtitle clears its former role") {
             fixture.player.selectedSubtitle(for: .primary)?.id == secondaryID
                 && fixture.player.selectedSubtitle(for: .secondary) == nil && latest.text == "Secondary"
         }
+
         #expect(fixture.player.lastError == nil)
     }
 
@@ -88,11 +96,14 @@ struct MPVLiveSubtitleQueryTests {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
+        fixture.player.setTextSubtitleInterceptionEnabled(true)
         var subtitles = fixture.player.textSubtitleStream().makeAsyncIterator()
+
         #expect(await subtitles.next() == TextSubtitleSnapshot())
         try await eventually("live native interception becomes enabled") {
             await fixture.player.textSubtitleInterceptionForTesting() == true
         }
+
         #expect(fixture.player.state == .paused)
         #expect(fixture.player.lastError == nil)
     }

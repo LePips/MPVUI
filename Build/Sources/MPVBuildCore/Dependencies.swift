@@ -1,6 +1,7 @@
 import Foundation
 
 struct DependencyEvidence: Codable {
+
     let component: String
     let slice: String
     let architecture: String
@@ -13,9 +14,11 @@ struct DependencyEvidence: Codable {
 }
 
 struct DependencyBuilder: Sendable {
+
     let inputs: InputStore
     let runner: Runner
     let store: ManagedStore
+
     func materialize(_ dependency: Dependency, slice: Slice, arch: String) throws -> URL {
         let sdk = try inputs.extracted(url: dependency.url, sha: dependency.sha256)
         let implementation = try Dictionary(uniqueKeysWithValues: ["Dependencies.swift", "Model.swift", "MachO.swift", "Archive.swift"]
@@ -131,7 +134,11 @@ struct DependencyBuilder: Sendable {
                     objectCount: objectCount,
                     headerCount: headerCount,
                     headerOverrides: headerOverrides,
-                    binarySource: "Published checksum-locked binaries and paired public headers; remaining support headers from checksum-locked SDK"
+                    binarySource: """
+                    Published checksum-locked binaries and paired public \
+                    headers; remaining support headers from checksum-locked \
+                    SDK
+                    """
                 ),
                 output.appendingPathComponent("coverage.json")
             )
@@ -140,7 +147,9 @@ struct DependencyBuilder: Sendable {
     }
 }
 
-private struct DependencyKey: Encodable { let dependency: Dependency
+private struct DependencyKey: Encodable {
+
+    let dependency: Dependency
     let slice: Slice
     let implementation: [String: String]
 }

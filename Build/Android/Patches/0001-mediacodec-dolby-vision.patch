@@ -1,0 +1,79 @@
+diff --git a/libavcodec/mediacodecdec.c b/libavcodec/mediacodecdec.c
+index bc176d8..c145cce 100644
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -27,6 +27,7 @@
+ 
+ #include "libavutil/avassert.h"
+ #include "libavutil/common.h"
++#include "libavutil/dovi_meta.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+ #include "libavutil/intreadwrite.h"
+@@ -59,6 +60,7 @@ typedef struct MediaCodecH264DecContext {
+     int use_ndk_codec;
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
++    int native_dovi;
+ } MediaCodecH264DecContext;
+ 
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+@@ -429,6 +431,33 @@ static av_cold int mediacodec_decode_init(AVCodecContext *avctx)
+         av_assert0(0);
+     }
+ 
++    // Opt in only for a native display Surface. Never decode Dolby Vision
++    // through an ordinary HEVC decoder: Profile 5 has no HDR10 base layer.
++    if (avctx->codec_id == AV_CODEC_ID_HEVC) {
++        const AVPacketSideData *sd = av_packet_side_data_get(avctx->coded_side_data,
++            avctx->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
++        if (sd && sd->size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
++            const AVDOVIDecoderConfigurationRecord *dv = (const void *)sd->data;
++            if (!s->native_dovi) {
++                av_log(avctx, AV_LOG_INFO, "MPVUI: software decoding preserves Dolby Vision RPU for GPU mapping\n");
++                ret = AVERROR(ENOSYS);
++                goto done;
++            }
++            if (!dv->rpu_present_flag || !dv->bl_present_flag || dv->el_present_flag ||
++                dv->dv_level < 1 || dv->dv_level > 13 ||
++                (dv->dv_profile != 5 && dv->dv_profile != 8)) {
++                av_log(avctx, AV_LOG_WARNING, "MPVUI: Dolby Vision requires GPU fallback (profile %d, EL %d)\n",
++                    dv->dv_profile, dv->el_present_flag);
++                ret = AVERROR(ENOSYS);
++                goto done;
++            }
++            codec_mime = "video/dolby-vision";
++            ff_AMediaFormat_setInt32(format, "mpvui-dovi-profile", 1 << dv->dv_profile);
++            ff_AMediaFormat_setInt32(format, "profile", 1 << dv->dv_profile);
++            ff_AMediaFormat_setInt32(format, "level", 1 << (dv->dv_level - 1));
++            av_log(avctx, AV_LOG_INFO, "MPVUI: requesting native Dolby Vision profile %d\n", dv->dv_profile);
++        }
++    }
+     ff_AMediaFormat_setString(format, "mime", codec_mime);
+ 
+     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+@@ -594,6 +623,8 @@ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
+ #define OFFSET(x) offsetof(MediaCodecH264DecContext, x)
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ static const AVOption ff_mediacodec_vdec_options[] = {
++    { "native_dovi", "Require a Dolby Vision decoder for supported single-layer streams on a native Surface",
++                     OFFSET(native_dovi), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "delay_flush", "Delay flush until hw output buffers are returned to the decoder",
+                      OFFSET(delay_flush), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "ndk_codec", "Use MediaCodec from NDK",
+diff --git a/libavcodec/mediacodecdec_common.c b/libavcodec/mediacodecdec_common.c
+index 9a627c0..cc95285 100644
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -773,6 +773,11 @@ static int mediacodec_dec_get_video_codec(AVCodecContext *avctx, MediaCodecDecCo
+     }
+ 
+     profile = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
++    if (!strcmp(mime, "video/dolby-vision")) {
++        int32_t dv_profile = -1;
++        ff_AMediaFormat_getInt32(format, "mpvui-dovi-profile", &dv_profile);
++        profile = dv_profile;
++    }
+     if (profile < 0) {
+         av_log(avctx, AV_LOG_WARNING, "Unsupported or unknown profile\n");
+     }

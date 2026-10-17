@@ -1,15 +1,18 @@
 import CoreGraphics
+@testable import MPVCore
 @testable import MPVUI
 import QuartzCore
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 struct MPVMetalLayerTests {
+
     @Test
     @MainActor
     func `shared layer preserves its rendering policy and last valid drawable`() throws {
         let layer = MPVMetalLayer()
         let validSize = CGSize(width: 640, height: 360)
+
         let originalColorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let duplicateColorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
 
@@ -18,6 +21,7 @@ struct MPVMetalLayerTests {
         layer.pixelFormat = .bgra8Unorm
         layer.pixelFormat = .bgra8Unorm
         layer.colorspace = originalColorSpace
+
         let retainedColorSpace = try #require(layer.colorspace)
         layer.colorspace = duplicateColorSpace
         layer.drawableSize = validSize
@@ -42,6 +46,7 @@ struct MPVMetalLayerTests {
             ),
         ] {
             layer.drawableSize = invalidSize
+
             #expect(layer.drawableSize == validSize)
         }
     }
@@ -56,7 +61,8 @@ struct MPVMetalLayerTests {
 
         await Task.detached {
             box.value.drawableSize = CGSize(width: 1, height: 1)
-        }.value
+        }
+        .value
 
         #expect(layer.drawableSize == validSize)
 
@@ -64,7 +70,8 @@ struct MPVMetalLayerTests {
         layer.beginNativeResizeTransaction()
         await Task.detached {
             box.value.drawableSize = CGSize(width: 1, height: 1)
-        }.value
+        }
+        .value
 
         #expect(layer.drawableSize == CGSize(width: 1, height: 1))
 
@@ -78,7 +85,8 @@ struct MPVMetalLayerTests {
 
         await Task.detached {
             box.value.drawableSize = CGSize(width: 1, height: 1)
-        }.value
+        }
+        .value
 
         #expect(layer.drawableSize == validSize)
     }
@@ -95,7 +103,8 @@ struct MPVMetalLayerTests {
         await Task.detached {
             box.value.minificationFilter = .linear
             box.value.magnificationFilter = .linear
-        }.value
+        }
+        .value
         for _ in 0 ..< 10 {
             await Task.yield()
         }
@@ -118,7 +127,8 @@ struct MPVMetalLayerTests {
             // A stale native request must not override the MainActor-owned
             // display policy. The setter marshals this request asynchronously.
             box.value.wantsExtendedDynamicRangeContent = false
-        }.value
+        }
+        .value
         for _ in 0 ..< 10 {
             await Task.yield()
         }
@@ -139,12 +149,14 @@ struct MPVMetalLayerTests {
         )
 
         let layer = surface.metalLayer
+
         #expect(layer.contentsScale == 3)
         #expect(layer.pixelFormat == .rgba16Float)
         #expect(
             try #require(layer.colorspace).name
                 == CGColorSpace.extendedLinearDisplayP3
         )
+
         #expect(layer.edrMetadata == nil)
         #expect(layer.preferredDynamicRange == .high)
         #expect(layer.contentsHeadroom == 4)
@@ -163,6 +175,7 @@ struct MPVMetalLayerTests {
         )
 
         let layer = surface.metalLayer
+
         #expect(layer.contentsScale == 2)
         if #available(tvOS 26.0, *) {
             #expect(layer.pixelFormat == .rgba16Float)
@@ -177,6 +190,7 @@ struct MPVMetalLayerTests {
 }
 
 private struct MPVMetalLayerSendableBox<Value>: @unchecked Sendable {
+
     let value: Value
 
     init(_ value: Value) {

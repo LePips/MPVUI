@@ -1,7 +1,10 @@
 import Foundation
 
 final class BuildDiagnostics: @unchecked Sendable {
-    struct Event: Codable { let stage: String
+
+    struct Event: Codable {
+
+        let stage: String
         let name: String
         let key: String
         let action: String
@@ -9,10 +12,11 @@ final class BuildDiagnostics: @unchecked Sendable {
         let seconds: Double
     }
 
+    let explain: Bool
     private let lock = NSLock()
     private var events: [Event] = []
     private let started = Date()
-    let explain: Bool
+
     init(explain: Bool) {
         self.explain = explain
     }
@@ -29,6 +33,7 @@ final class BuildDiagnostics: @unchecked Sendable {
 
     func save(to path: URL) throws {
         struct Report: Encodable {
+
             let elapsedSeconds: Double
             let events: [Event]
         }

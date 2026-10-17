@@ -1,5 +1,8 @@
+import MPVCore
+
 /// Resolves the configured pipeline separately from the screen's actual output.
 struct MPVHDRSurfacePolicy {
+
     let usesExtendedDynamicRange: Bool
     let dynamicRange: MPVPresentationStatus.DynamicRange
     let fallbackReason: MPVPresentationStatus.FallbackReason?

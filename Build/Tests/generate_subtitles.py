@@ -12,12 +12,17 @@ def segment(kind, payload, seconds):
     return b"PG" + struct.pack(">IIBH", seconds * 90000, 0, kind, len(payload)) + payload
 
 
-def bitmap_subtitle():
+def bitmap_subtitle(colors=False):
     # A 160x32 white rectangle at (100, 560) on a 360x640 canvas.
     # PGS display sets: composition, window, palette, RLE object, end;
     # a second empty composition clears it at four seconds.
     window = struct.pack(">BBHHHH", 1, 0, 100, 560, 160, 32)
     rle = (b"\x00\xc0\xa0\x01\x00\x00") * 32
+    palette = bytes([0, 0, 0, 16, 128, 128, 0, 1, 235, 128, 128, 255])
+    if colors:
+        # White, red, blue strips expose both missing BGRA textures and swapped channels.
+        rle = (b"\x00\xc0\x40\x01\x00\xb0\x02\x00\xb0\x03\x00\x00") * 32
+        palette += bytes([2, 63, 240, 102, 255, 3, 32, 118, 240, 255])
     composition = struct.pack(">HHBHBBBB", 360, 640, 0x20, 0, 0x80, 0, 0, 1)
     composition += struct.pack(">HBBHH", 0, 0, 0, 100, 560)
     obj = struct.pack(">HBB", 0, 0, 0xC0) + (len(rle) + 4).to_bytes(3, "big")
@@ -27,7 +32,7 @@ def bitmap_subtitle():
         for kind, payload in [
             (0x16, composition),
             (0x17, window),
-            (0x14, bytes([0, 0, 0, 16, 128, 128, 0, 1, 235, 128, 128, 255])),
+            (0x14, palette),
             (0x15, obj),
             (0x80, b""),
         ]
@@ -41,6 +46,7 @@ def generate(output):
     with tempfile.TemporaryDirectory(prefix="subtitle-fixture-") as directory:
         work = Path(directory)
         (work / "bitmap.sup").write_bytes(bitmap_subtitle())
+        (work / "colors.sup").write_bytes(bitmap_subtitle(colors=True))
         (work / "styled.ass").write_text(
             """[Script Info]
 ScriptType: v4.00+
@@ -71,6 +77,8 @@ Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,Styled subtitle sample
                 "-fix_sub_duration",
                 "-i",
                 str(work / "bitmap.sup"),
+                "-i",
+                str(work / "colors.sup"),
                 "-map",
                 "0:v",
                 "-map",
@@ -81,6 +89,8 @@ Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,Styled subtitle sample
                 "2:s",
                 "-map",
                 "2:s",
+                "-map",
+                "3:s",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -97,10 +107,14 @@ Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,Styled subtitle sample
                 "dvdsub",
                 "-c:s:3",
                 "dvbsub",
+                "-c:s:4",
+                "copy",
                 "-disposition:s:0",
                 "default",
                 "-map_metadata",
                 "-1",
+                "-metadata:s:s:4",
+                "title=Color channel order",
                 str(output / "subtitles.mkv"),
             ],
             check=True,

@@ -71,7 +71,7 @@ def source_identity(root):
 
 def pinned_developer(root):
     lock = json.loads((root / "Build/Inputs.lock.json").read_text())
-    expected = lock["toolchain"]["xcode"]["build"]
+    expected = lock["apple"]["toolchain"]["xcode"]["build"]
     override = os.environ.get("DEVELOPER_DIR")
     candidates = [Path(override)] if override else sorted(Path("/Applications").glob("Xcode*.app/Contents/Developer"))
     for developer in candidates:

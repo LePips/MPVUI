@@ -1,5 +1,6 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Observation
 import Testing
@@ -36,6 +37,7 @@ struct MPVMobilePlaybackLifecycleTests {
         player.logHandler = { message in
             nativeSurfaceFormats.capture(message)
         }
+        player.setTextSubtitleInterceptionEnabled(true)
         let subtitleStream = player.textSubtitleStream()
         let subtitleObservation = Task { @MainActor in
             for await snapshot in subtitleStream {
@@ -65,10 +67,12 @@ struct MPVMobilePlaybackLifecycleTests {
         #expect((player.lastError) == nil)
         #expect((player.state) == .idle)
 
-        let mediaURL = FileManager.default.temporaryDirectory
+        let mediaURL = FileManager.default
+            .temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
-        let subtitleURL = FileManager.default.temporaryDirectory
+        let subtitleURL = FileManager.default
+            .temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("srt")
         let expectedSubtitleText = "cross-platform resize cue"
@@ -77,10 +81,36 @@ struct MPVMobilePlaybackLifecycleTests {
         // real playback PTS for semantic subtitles and keeps the loop boundary
         // out of the resize-observation interval. Software decoding avoids the
         // simulator-only VideoToolbox -12906 failure seen with synthetic media.
+
         let video = try #require(
             Data(
                 base64Encoded:
-                "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAQDbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAALuAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAy50cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAALuAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAC7gAABAAAABAAAAAAKmbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAADAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAACUW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAhFzdGJsAAAAwXN0c2QAAAAAAAAAAQAAALFhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAAN2F2Y0MBZAAK/+EAGWdkAAqscgRewEQAAAMABAAAAwAQPEiWEYABAAdo6EOGSyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAAKtAAAAAAAAABhzdHRzAAAAAAAAAAEAAAAYAAAgAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAeGN0dHMAAAAAAAAADQAAAAEAAEAAAAAAAQABQAAAAAABAACAAAAAAAMAAAAAAAAABAAAIAAAAAABAAFAAAAAAAEAAIAAAAAAAwAAAAAAAAAEAAAgAAAAAAEAAMAAAAAAAQAAQAAAAAABAAAAAAAAAAIAACAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAYAAAAAQAAAHRzdHN6AAAAAAAAAAAAAAAYAAACzAAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAABMAAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAABQAAAANAAAADQAAAA0AAAANAAAAFHN0Y28AAAAAAAAAAQAABDMAAABhdWR0YQAAAFltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYzLjEuMTAxAAAACGZyZWUAAAQMbWRhdAAAAq8GBf//q9xF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0xNiBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTMzIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz04IGJfcHlyYW1pZD0yIGJfYWRhcHQ9MiBiX2JpYXM9MCBkaXJlY3Q9MyB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTIgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD02MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTMyLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAVZYiBAAMf/uZ1+BTTCBpJMvxDzj+BAAAACUGaCS2IL//+4AAAAAlBnhCHEFv/uoEAAAAJAZ4YJogl/8eAAAAACQGeGEaIJf/HgQAAAAkBnhhmiCX/x4EAAAAJAZ4YrUgl/8eBAAAACQGeGM1IJf/HgQAAAAkBnhjtSCX/x4AAAAAJAZ4ZDUgl/8eAAAAAD0GaGkk1AgLRMpgQV//+4QAAAAlBniGlxBb/uoAAAAAJAZ4pRaIJf8eAAAAACQGeKWWiCX/HgQAAAAkBnimFogl/x4EAAAAJAZ4pzJIJf8eBAAAACQGeKeySCX/HgAAAAAkBnioMkgl/x4AAAAAJAZ4qLJIJf8eBAAAAEEGaKum1AgLa0TKYAQS//sAAAAAJQZ4yhLEFP8GAAAAACQGeOmSogl/HgQAAAAkBnjqs0gl/x4AAAAAJAZ46zNIJf8eB"
+                """
+                AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAQDbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAALuAAAQAAAQAAAAAAAAAAAAAAAAEAAA\
+                AAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAy50cmFrAAAAXHRraGQAAAADAAAAAAAAAAAA\
+                AAABAAAAAAAALuAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AA\
+                AAAAAAAAEAAC7gAABAAAABAAAAAAKmbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAADAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAA\
+                AABWaWRlb0hhbmRsZXIAAAACUW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAhFzdGJsAA\
+                AAwXN0c2QAAAAAAAAAAQAAALFhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAA\
+                AAAAAAAAAAAAGP//AAAAN2F2Y0MBZAAK/+EAGWdkAAqscgRewEQAAAMABAAAAwAQPEiWEYABAAdo6EOGSyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYn\
+                RydAAAAAAAAAKtAAAAAAAAABhzdHRzAAAAAAAAAAEAAAAYAAAgAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAeGN0dHMAAAAAAAAADQAAAAEAAEAAAAAAAQAB\
+                QAAAAAABAACAAAAAAAMAAAAAAAAABAAAIAAAAAABAAFAAAAAAAEAAIAAAAAAAwAAAAAAAAAEAAAgAAAAAAEAAMAAAAAAAQAAQAAAAAABAAAAAAAAAAIAAC\
+                AAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAYAAAAAQAAAHRzdHN6AAAAAAAAAAAAAAAYAAACzAAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAA\
+                DQAAABMAAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAABQAAAANAAAADQAAAA0AAAANAAAAFHN0Y28AAAAAAAAAAQAABDMAAABhdWR0YQAAAF\
+                ltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYzLjEuMTAxAAAA\
+                CGZyZWUAAAQMbWRhdAAAAq8GBf//q9xF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY2\
+                9kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0xNiBk\
+                ZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTMzIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3Jhbm\
+                dlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0t\
+                MiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbX\
+                BhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz04IGJfcHlyYW1pZD0yIGJfYWRhcHQ9MiBiX2JpYXM9MCBkaXJlY3Q9MyB3ZWlnaHRiPTEgb3Bl\
+                bl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTIgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD02MCByYz\
+                1jcmYgbWJ0cmVlPTEgY3JmPTMyLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAV\
+                ZYiBAAMf/uZ1+BTTCBpJMvxDzj+BAAAACUGaCS2IL//+4AAAAAlBnhCHEFv/uoEAAAAJAZ4YJogl/8eAAAAACQGeGEaIJf/HgQAAAAkBnhhmiCX/x4EAAA\
+                AJAZ4YrUgl/8eBAAAACQGeGM1IJf/HgQAAAAkBnhjtSCX/x4AAAAAJAZ4ZDUgl/8eAAAAAD0GaGkk1AgLRMpgQV//+4QAAAAlBniGlxBb/uoAAAAAJAZ4p\
+                RaIJf8eAAAAACQGeKWWiCX/HgQAAAAkBnimFogl/x4EAAAAJAZ4pzJIJf8eBAAAACQGeKeySCX/HgAAAAAkBnioMkgl/x4AAAAAJAZ4qLJIJf8eBAAAAEE\
+                GaKum1AgLa0TKYAQS//sAAAAAJQZ4yhLEFP8GAAAAACQGeOmSogl/HgQAAAAkBnjqs0gl/x4AAAAAJAZ46zNIJf8eB
+                """
             )
         )
         try video.write(to: mediaURL)
@@ -134,11 +164,13 @@ struct MPVMobilePlaybackLifecycleTests {
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+
         #expect((player.lastError) == nil)
         #expect(player.state == .ready || player.state == .paused)
         #expect((player.mediaInformation.dimensions?.width) == 16)
 
         player.loadExternalTrack(subtitleURL, type: .subtitle, select: true)
+
         #expect(await waitForSelectedExternalSubtitle(in: player))
         let selectedSubtitle = try #require(
             player.subtitleTracks.first {
@@ -151,12 +183,14 @@ struct MPVMobilePlaybackLifecycleTests {
             width: Int(portraitDrawableSize.width),
             height: Int(portraitDrawableSize.height)
         )
+
         #expect((portraitOutputSize.width) > 0)
         #expect((portraitOutputSize.height) > (portraitOutputSize.width))
         let initialRenderOutputSize = await waitForRenderOutputSize(
             portraitOutputSize,
             from: player
         )
+
         #expect(
             initialRenderOutputSize == portraitOutputSize,
             "mpv should initially configure its output from the portrait drawable."
@@ -171,9 +205,11 @@ struct MPVMobilePlaybackLifecycleTests {
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+
         #expect(
             approximatelyEqual(player.position, .seconds(0.5), tolerance: .milliseconds(10))
         )
+
         #expect((player.state) == .paused)
         try #require(
             await waitForSubtitleText(
@@ -190,6 +226,7 @@ struct MPVMobilePlaybackLifecycleTests {
             }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
+
         #expect((player.lastError) == nil)
         #expect((player.state) == .playing)
         let lifecycleBeforePlayingResize = await player.lifecycleDiagnostics()
@@ -204,6 +241,7 @@ struct MPVMobilePlaybackLifecycleTests {
             surface.setNeedsLayout()
             surface.layoutIfNeeded()
             try await Task.sleep(nanoseconds: 20_000_000)
+
             #expect(surface.metalLayer.contentsGravity == .resize)
             #expect(surface.metalLayer.drawableSize.width > 1)
             #expect(surface.metalLayer.drawableSize.height > 1)
@@ -217,6 +255,7 @@ struct MPVMobilePlaybackLifecycleTests {
             width: Int(landscapeDrawableSize.width),
             height: Int(landscapeDrawableSize.height)
         )
+
         #expect((landscapeOutputSize.width) > (landscapeOutputSize.height))
         #expect(landscapeOutputSize != portraitOutputSize)
         let settledRenderOutputSize = await waitForRenderOutputSize(
@@ -249,7 +288,8 @@ struct MPVMobilePlaybackLifecycleTests {
         try #require((player.mediaInformation.sourceURL) == mediaURL)
         try #require(!(player.bufferStatus.isBuffering))
         let subtitleSelectedDuringPlayingResize =
-            player.subtitleTracks.first(where: { $0.id == selectedSubtitle.id })?
+            player.subtitleTracks
+                .first(where: { $0.id == selectedSubtitle.id })?
                 .isSelected == true
         try #require(
             subtitleSelectedDuringPlayingResize,
@@ -401,7 +441,8 @@ struct MPVMobilePlaybackLifecycleTests {
             )
         )
         let subtitleSelectedAfterPausedFinal =
-            player.subtitleTracks.first(where: { $0.id == selectedSubtitle.id })?
+            player.subtitleTracks
+                .first(where: { $0.id == selectedSubtitle.id })?
                 .isSelected == true
         try #require(
             subtitleSelectedAfterPausedFinal,
@@ -437,6 +478,7 @@ struct MPVMobilePlaybackLifecycleTests {
         // Host-side 1x1 layouts are rejected. MoltenVK's render-thread-only
         // retirement sentinel remains available to its swapchain lifecycle.
         surface.metalLayer.drawableSize = CGSize(width: 1, height: 1)
+
         #expect(
             (surface.metalLayer.drawableSize)
                 == CGSize(
@@ -447,6 +489,7 @@ struct MPVMobilePlaybackLifecycleTests {
         surface.frame = .zero
         surface.setNeedsLayout()
         surface.layoutIfNeeded()
+
         #expect(
             (surface.metalLayer.drawableSize)
                 == CGSize(
@@ -463,6 +506,7 @@ struct MPVMobilePlaybackLifecycleTests {
         let renderOutputAfterTransientResize = await player.renderOutputSize()
         // Diagnostics polling may continue while paused; a transient size
         // must leave every renderer and playback lifecycle counter unchanged.
+
         #expect(lifecycleAfterTransientResize.handlesCreated == lifecycleAfterForcedFinal.handlesCreated)
         #expect(lifecycleAfterTransientResize.handlesDestroyed == lifecycleAfterForcedFinal.handlesDestroyed)
         #expect(lifecycleAfterTransientResize.loadCommands == lifecycleAfterForcedFinal.loadCommands)
@@ -493,6 +537,7 @@ struct MPVMobilePlaybackLifecycleTests {
         // Let every queued START/END pair settle; observing an intermediate
         // STOP from a displaced entry is not sufficient.
         try await Task.sleep(nanoseconds: 1_000_000_000)
+
         #expect((player.state) == .stopped)
 
         player.seek(to: .seconds(0.5))
@@ -502,13 +547,16 @@ struct MPVMobilePlaybackLifecycleTests {
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+
         #expect(
             approximatelyEqual(player.position, .seconds(0.5), tolerance: .milliseconds(10))
         )
+
         #expect((player.lastError) == nil)
 
         player.play()
         try await Task.sleep(nanoseconds: 500_000_000)
+
         #expect((player.lastError) == nil)
     }
 
@@ -614,11 +662,13 @@ struct MPVMobilePlaybackLifecycleTests {
 #if os(iOS) || os(tvOS)
 @MainActor
 private final class MobileSubtitleSnapshotRecorder {
+
     var values: [TextSubtitleSnapshot] = []
 }
 
 @MainActor
 private final class MobileNativeSurfaceFormatRecorder {
+
     private(set) var latestConfiguration: String?
 
     func capture(_ message: MPVLogMessage) {

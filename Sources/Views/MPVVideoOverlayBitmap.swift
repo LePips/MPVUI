@@ -1,14 +1,9 @@
 import CoreGraphics
 import Foundation
+import MPVCore
 
 /// Immutable, premultiplied BGRA storage copied by mpv before overlay-add returns.
-struct MPVVideoOverlayBitmap: Sendable {
-    let width: Int
-    let height: Int
-    let bytes: Data
-    var stride: Int {
-        width * 4
-    }
+extension MPVVideoOverlayBitmap {
 
     init?(image: CGImage) {
         self.init(size: CGSize(width: image.width, height: image.height), scale: 1) { context in
@@ -24,14 +19,17 @@ struct MPVVideoOverlayBitmap: Sendable {
               pixelWidth <= 2048, pixelHeight <= 2048,
               let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
         else { return nil }
-        width = Int(pixelWidth)
-        height = Int(pixelHeight)
+        let width = Int(pixelWidth)
+        let height = Int(pixelHeight)
         var data = Data(count: width * height * 4)
-        let width = width, height = height
         let rendered = data.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(
-                data: buffer.baseAddress, width: width, height: height,
-                bitsPerComponent: 8, bytesPerRow: width * 4, space: colorSpace,
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                     | CGBitmapInfo.byteOrder32Little.rawValue
             ) else { return false }
@@ -40,6 +38,6 @@ struct MPVVideoOverlayBitmap: Sendable {
             return true
         }
         guard rendered else { return nil }
-        bytes = data
+        self.init(width: width, height: height, bytes: data)
     }
 }

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 import VideoToolbox
@@ -15,10 +16,12 @@ import AVKit
 @Suite(.tags(.system, .dolbyVision), .serialized)
 @MainActor
 struct MPVDisplayMatchingPlaybackTests {
+
     @Test(.enabled(
         if: VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC),
         "Requires a hardware Dolby Vision HEVC decoder."
     ))
+
     func `native reference playback produces Dolby Vision and fractional cadence criteria`() async throws {
         let url: URL = switch ProcessInfo.processInfo.environment["MPVUI_DISPLAY_MATCHING_FIXTURE"] {
         case let location? where location.hasPrefix("http"):
@@ -30,7 +33,8 @@ struct MPVDisplayMatchingPlaybackTests {
         }
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no"],
-            autoPlay: false, videoOutput: .sampleBuffer
+            autoPlay: false,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         try await fixture.loadPaused(url)
@@ -38,32 +42,47 @@ struct MPVDisplayMatchingPlaybackTests {
             fixture.player.dolbyVisionStatus.nativeValidation == .validated
         }
         let player = fixture.player
+
         let content = try #require(MPVDisplayMatchingContent(
-            media: player.mediaInformation, outputUsesHDR: true,
-            videoOutput: player.videoOutput, dolbyVisionStatus: player.dolbyVisionStatus
+            media: player.mediaInformation,
+            outputUsesHDR: true,
+            videoOutput: player.videoOutput,
+            dolbyVisionStatus: player.dolbyVisionStatus
         ))
+
         let format = try #require(content.makeFormatDescription())
         #expect(player.videoOutput == .sampleBuffer)
         #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_DolbyVisionHEVC)
         #expect(content.refreshRate == Float(24000.0 / 1001))
         #expect(content.dolbyVision?.profile == player.dolbyVisionStatus.effectiveProfile)
         print(
-            "DISPLAY_MATCHING_REFERENCE: fps=\(content.refreshRate) source=\(player.mediaInformation.hdr.source) decoded=\(player.mediaInformation.hdr.decoded) native=\(player.dolbyVisionStatus) hint=\(format)"
+            """
+            DISPLAY_MATCHING_REFERENCE: fps=\(content.refreshRate) source=\(player.mediaInformation.hdr.source) \
+            decoded=\(player.mediaInformation.hdr.decoded) native=\(player.dolbyVisionStatus) hint=\(format)
+            """
         )
         #if os(tvOS)
         let manager = fixture.window.avDisplayManager
         print(
-            "DISPLAY_MATCHING_TV: enabled=\(manager.isDisplayCriteriaMatchingEnabled) switching=\(manager.isDisplayModeSwitchInProgress) criteria=\(String(describing: manager.preferredDisplayCriteria))"
+            """
+            DISPLAY_MATCHING_TV: enabled=\(manager.isDisplayCriteriaMatchingEnabled) \
+            switching=\(manager.isDisplayModeSwitchInProgress) criteria=\(String(describing: manager.preferredDisplayCriteria))
+            """
         )
         if manager.isDisplayCriteriaMatchingEnabled {
             try await eventually("active surface submits native Dolby Vision TV criteria", timeout: .seconds(30)) {
                 fixture.surface.displayMatchingContent == content && !manager.isDisplayModeSwitchInProgress
             }
+
             #expect(manager.preferredDisplayCriteria != nil)
             print(
-                "DISPLAY_MATCHING_TV_SETTLED: fps=\(content.refreshRate) DolbyVision=\(String(describing: fixture.surface.displayMatchingContent?.dolbyVision))"
+                """
+                DISPLAY_MATCHING_TV_SETTLED: fps=\(content.refreshRate) \
+                DolbyVision=\(String(describing: fixture.surface.displayMatchingContent?.dolbyVision))
+                """
             )
             fixture.surface.detach()
+
             #expect(manager.preferredDisplayCriteria == nil)
         }
         #endif

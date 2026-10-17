@@ -1,9 +1,11 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVPlayerConfigurationOutputTests {
+
     @Test
     func `default output is sample buffers without implicit selection state`() {
         #expect(MPVPlayerConfiguration().videoOutput == .sampleBuffer)
@@ -35,15 +37,19 @@ struct MPVPlayerConfigurationOutputTests {
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases, MPVPlayerConfiguration.HDRPolicy.allCases)
     func `only the output option chooses the renderer`(
-        output: MPVPlayerConfiguration.VideoOutput, hdrPolicy: MPVPlayerConfiguration.HDRPolicy
+        output: MPVPlayerConfiguration.VideoOutput,
+        hdrPolicy: MPVPlayerConfiguration.HDRPolicy
     ) {
         let configuration = MPVPlayerConfiguration(
             additionalOptions: ["vf": "hflip", "vo": "invalid", "unknown-rendering-option": "yes"],
             colorManagement: .init(referenceWhite: 250),
-            deinterlace: .init(mode: .forced), hdrPolicy: hdrPolicy,
-            renderingQuality: .init(preset: .highQuality), sdrOutput: .highPrecision,
+            deinterlace: .init(mode: .forced),
+            hdrPolicy: hdrPolicy,
+            renderingQuality: .init(preset: .highQuality),
+            sdrOutput: .highPrecision,
             videoOutput: output
         )
+
         #expect(configuration.videoOutput == output)
         #expect(MPVPlayerConfiguration(hdrPolicy: hdrPolicy).videoOutput == .sampleBuffer)
     }

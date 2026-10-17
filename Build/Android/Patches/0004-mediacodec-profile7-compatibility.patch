@@ -1,0 +1,224 @@
+From: MPVUI contributors
+Subject: [PATCH] Explicit native Profile 7 compatibility on Android
+
+Use the Apple policy and libdovi mode 2, default off. Validate each exact
+RPU with FFmpeg before conversion, preserve source packets on failure,
+and never submit enhancement-layer or unconverted P7 NALs as Profile 8.
+
+--- a/configure
++++ b/configure
+@@ -226,6 +226,7 @@
+   --enable-libcdio         enable audio CD grabbing with libcdio [no]
+   --enable-libcodec2       enable codec2 en/decoding using libcodec2 [no]
+   --enable-libdav1d        enable AV1 decoding via libdav1d [no]
++  --enable-libdovi         enable explicit native DV Profile 7 conversion [no]
+   --enable-libdavs2        enable AVS2 decoding via libdavs2 [no]
+   --enable-libdc1394       enable IIDC-1394 grabbing using libdc1394
+                            and libraw1394 [no]
+@@ -2083,6 +2084,7 @@
+     libcaca
+     libcodec2
+     libdav1d
++    libdovi
+     libdc1394
+     libflite
+     libfontconfig
+@@ -3658,7 +3660,8 @@
+ hevc_cuvid_decoder_select="hevc_mp4toannexb_bsf"
+ hevc_d3d12va_encoder_select="cbs_h265 d3d12va_encode"
+ hevc_mediacodec_decoder_deps="mediacodec"
+-hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser"
++hevc_mediacodec_decoder_select="hevc_mp4toannexb_bsf hevc_parser dovi_rpudec"
++hevc_mediacodec_decoder_suggest="libdovi"
+ hevc_mediacodec_encoder_deps="mediacodec"
+ hevc_mediacodec_encoder_select="extract_extradata_bsf hevc_metadata"
+ hevc_mf_encoder_deps="mediafoundation"
+@@ -7331,6 +7334,7 @@
+ enabled libbs2b           && require_pkg_config libbs2b libbs2b bs2b.h bs2b_open
+ enabled libcaca           && require_pkg_config libcaca caca caca.h caca_create_canvas
+ enabled libcodec2         && require libcodec2 codec2/codec2.h codec2_create -lcodec2
++enabled libdovi           && require_pkg_config libdovi "dovi >= 3.3.2" libdovi/rpu_parser.h dovi_convert_rpu_with_mode
+ enabled libdav1d          && require_pkg_config libdav1d "dav1d >= 1.0.0" "dav1d/dav1d.h" dav1d_version
+ enabled libdavs2          && require_pkg_config libdavs2 "davs2 >= 1.6.0" davs2.h davs2_decoder_open
+ enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1394.h dc1394_new
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -62,10 +62,122 @@
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
+     int native_dovi;
++    int convert_dovi_p7;
++    int converting_dovi_p7;
++    int converted_packet;
++    AVDOVIDecoderConfigurationRecord source_dovi;
+     int dovi_decoder;
+     int rejected_dovi;
+     int stalled;
+ } MediaCodecH264DecContext;
++
++
++// MPVUI_P7_BEGIN: shared with the native conversion regression harness.
++#if CONFIG_LIBDOVI && CONFIG_HEVC_MEDIACODEC_DECODER
++#include <libdovi/rpu_parser.h>
++#include "dovi_rpu.h"
++#include "h2645_parse.h"
++
++/* Explicit lossy compatibility, identical to the Apple policy. Never infer
++ * an HDR10 base from profile alone; keep the original configuration intact. */
++static int mediacodec_dovi_p7_allowed(int native, int convert,
++                                    const AVDOVIDecoderConfigurationRecord *dv)
++{
++    return native && convert && dv && dv->dv_profile == 7 &&
++           dv->rpu_present_flag && dv->bl_present_flag &&
++           dv->dv_bl_signal_compatibility_id == 6 &&
++           dv->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
++}
++
++/* Transform a complete access unit once, before MediaCodec may split it over
++ * input buffers. Failure leaves the original packet untouched for fallback.
++ * Mode 2 drops EL and resets mapping; it does not reconstruct FEL pixels. */
++static int mediacodec_dovi_convert_packet(void *logctx, AVPacket *packet,
++                                        const AVDOVIDecoderConfigurationRecord *source)
++{
++    H2645Packet nals = {0};
++    DOVIContext validation = {.logctx = logctx};
++    DoviRpuOpaque *rpu = NULL;
++    const DoviRpuDataHeader *header = NULL;
++    const DoviData *converted = NULL;
++    AVPacket output = {0};
++    int ret, rpu_count = 0, base_slices = 0;
++    size_t size = 0, offset = 0;
++    if (!mediacodec_dovi_p7_allowed(1, 1, source))
++        return AVERROR_INVALIDDATA;
++    validation.cfg = *source;
++    ret = ff_h2645_packet_split(&nals, packet->data, packet->size, logctx, 0,
++                                AV_CODEC_ID_HEVC, H2645_FLAG_SMALL_PADDING);
++    if (ret < 0)
++        goto done;
++    ret = AVERROR_INVALIDDATA;
++    for (int i = 0; i < nals.nb_nals; i++) {
++        H2645NAL *nal = &nals.nals[i];
++        if (nal->type == 62) {
++            if (++rpu_count != 1 || nal->nuh_layer_id || nal->size <= 2)
++                goto done;
++            /* Validate exact unescaped bytes with FFmpeg before libdovi.
++             * Some reserved malformed syntax can abort the Rust parser. */
++            if (ff_dovi_rpu_parse(&validation, nal->data + 2, nal->size - 2,
++                                  AV_EF_EXPLODE) < 0)
++                goto done;
++            rpu = dovi_parse_unspec62_nalu(nal->raw_data, nal->raw_size);
++            if (!rpu || dovi_rpu_get_error(rpu))
++                goto done;
++            header = dovi_rpu_get_header(rpu);
++            if (!header || header->guessed_profile != 7 || header->use_prev_vdr_rpu_flag)
++                goto done;
++            dovi_rpu_free_header(header);
++            header = NULL;
++            if (dovi_convert_rpu_with_mode(rpu, 2) < 0 || dovi_rpu_get_error(rpu))
++                goto done;
++            header = dovi_rpu_get_header(rpu);
++            if (!header || header->guessed_profile != 8 || header->use_prev_vdr_rpu_flag)
++                goto done;
++            converted = dovi_write_unspec62_nalu(rpu);
++            if (!converted || !converted->data || converted->len <= 2 ||
++                converted->len > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 4 || dovi_rpu_get_error(rpu))
++                goto done;
++        } else if (!nal->nuh_layer_id && nal->type != 63) {
++            base_slices += nal->type < 32;
++            size += (size_t)nal->raw_size + 4;
++        }
++    }
++    if (!base_slices || rpu_count != 1)
++        goto done;
++    size += converted->len + 4;
++    if (size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE)
++        goto done;
++    ret = av_new_packet(&output, size);
++    if (ret < 0)
++        goto done;
++    ret = av_packet_copy_props(&output, packet);
++    if (ret < 0)
++        goto done;
++    for (int i = 0; i < nals.nb_nals; i++) {
++        H2645NAL *nal = &nals.nals[i];
++        if (nal->nuh_layer_id || nal->type == 62 || nal->type == 63)
++            continue;
++        AV_WB32(output.data + offset, 1);
++        memcpy(output.data + offset + 4, nal->raw_data, nal->raw_size);
++        offset += nal->raw_size + 4;
++    }
++    AV_WB32(output.data + offset, 1);
++    memcpy(output.data + offset + 4, converted->data, converted->len);
++    av_packet_unref(packet);
++    av_packet_move_ref(packet, &output);
++    ret = 0;
++done:
++    av_packet_unref(&output);
++    if (header) dovi_rpu_free_header(header);
++    if (converted) dovi_data_free(converted);
++    if (rpu) dovi_rpu_free(rpu);
++    ff_dovi_ctx_unref(&validation);
++    ff_h2645_packet_uninit(&nals);
++    return ret;
++}
++#endif
++// MPVUI_P7_END
+ 
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+ {
+@@ -447,6 +559,20 @@
+                 ret = AVERROR(ENOSYS);
+                 goto done;
+             }
++#if CONFIG_LIBDOVI && CONFIG_HEVC_MEDIACODEC_DECODER
++            AVDOVIDecoderConfigurationRecord effective;
++            if (mediacodec_dovi_p7_allowed(s->native_dovi, s->convert_dovi_p7, dv)) {
++                s->source_dovi = *dv;
++                effective = *dv;
++                effective.dv_profile = 8;
++                effective.el_present_flag = 0;
++                effective.dv_bl_signal_compatibility_id = 1;
++                dv = &effective;
++                s->converting_dovi_p7 = 1;
++                av_log(avctx, AV_LOG_WARNING,
++                       "Explicit lossy Dolby Vision P7 to P8.1: dropping enhancement layer and mapping curves\n");
++            }
++#endif
+             if (!dv->rpu_present_flag || !dv->bl_present_flag || dv->el_present_flag ||
+                 dv->dv_level < 1 || dv->dv_level > 13 ||
+                 (dv->dv_profile != 5 && dv->dv_profile != 8)) {
+@@ -596,6 +722,17 @@
+                     }
+                 }
+             }
++#if CONFIG_LIBDOVI && CONFIG_HEVC_MEDIACODEC_DECODER
++            if (s->converting_dovi_p7 && !s->converted_packet) {
++                ret = mediacodec_dovi_convert_packet(avctx, &s->buffered_pkt, &s->source_dovi);
++                if (ret < 0) {
++                    s->rejected_dovi = 1;
++                    av_log(avctx, AV_LOG_ERROR, "Refusing invalid or unconvertible native P7 access unit\n");
++                    return ret;
++                }
++                s->converted_packet = 1;
++            }
++#endif
+             ret = ff_mediacodec_dec_send(avctx, s->ctx, &s->buffered_pkt, false);
+             if (ret >= 0) {
+                 s->buffered_pkt.size -= ret;
+@@ -619,6 +756,7 @@
+             }
+         }
+ 
++        s->converted_packet = 0;
+         /* fetch new packet or eof */
+         ret = ff_decode_get_packet(avctx, &s->buffered_pkt);
+         if (ret == AVERROR_EOF) {
+@@ -662,6 +800,8 @@
+ #define OFFSET(x) offsetof(MediaCodecH264DecContext, x)
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ static const AVOption ff_mediacodec_vdec_options[] = {
++    { "convert_dovi_p7", "Explicit lossy P7 to P8.1 conversion for a native Dolby Vision Surface",
++                     OFFSET(convert_dovi_p7), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "native_dovi", "Require a Dolby Vision decoder for supported single-layer streams on a native Surface",
+                      OFFSET(native_dovi), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "delay_flush", "Delay flush until hw output buffers are returned to the decoder",

@@ -1,17 +1,21 @@
 import Foundation
 
 extension Data {
+
     func uint(_ offset: Int, bytes: Int = 4, big: Bool = false) throws -> UInt64 {
         try require(offset >= 0 && offset <= count - bytes, "Truncated binary metadata")
         return (0 ..< bytes).reduce(UInt64(0)) { $0 | UInt64(self[offset + $1]) << (8 * (big ? bytes - 1 - $1 : $1)) }
     }
 }
 
-struct ZipEntry { let name: String
+struct ZipEntry {
+
+    let name: String
     let symlink: Bool
 }
 
 enum Archive {
+
     static func entries(_ data: Data) throws -> [ZipEntry] {
         try require(data.count >= 22, "Truncated ZIP")
         var end: Int?
@@ -83,7 +87,9 @@ enum Archive {
         for link in links {
             let target = try runner.run("/usr/bin/unzip", ["-p", archive.path, link.name])
             try require(!target.isEmpty && !target.hasPrefix("/") && !target.contains("\\"), "Unsafe ZIP symlink")
-            let resolved = destination.appendingPathComponent(link.name).deletingLastPathComponent().appendingPathComponent(target)
+            let resolved = destination.appendingPathComponent(link.name)
+                .deletingLastPathComponent()
+                .appendingPathComponent(target)
                 .standardizedFileURL
             try require(resolved.path.hasPrefix(destination.standardizedFileURL.path + "/"), "Escaping ZIP symlink \(link.name)")
             try require(
@@ -100,11 +106,13 @@ enum Archive {
 }
 
 struct XCFLibrary {
+
     let identifier: String
     let libraryPath: String
     let architectures: [String]
     let platform: String
     let variant: String
+
     static func all(_ root: URL) throws -> [XCFLibrary] {
         guard let entries = try plist(root.appendingPathComponent("Info.plist"))["AvailableLibraries"] as? [[String: Any]]
         else { throw BuildError("Missing XCFramework inventory") }

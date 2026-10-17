@@ -1,4 +1,5 @@
 import CoreGraphics
+import MPVCore
 
 /// The display and color contract shared by every native player surface.
 struct MPVRenderSurfaceConfiguration: Sendable {
@@ -62,6 +63,14 @@ struct MPVRenderSurfaceConfiguration: Sendable {
         )
     }
 
+    private static func quantizedOutputHeadroom(_ outputHeadroom: Double) -> Double {
+        guard outputHeadroom.isFinite else { return 1 }
+        let clampedHeadroom = max(outputHeadroom, 1)
+        let scaledHeadroom = clampedHeadroom * 100
+        guard scaledHeadroom.isFinite else { return clampedHeadroom }
+        return scaledHeadroom.rounded(.toNearestOrEven) / 100
+    }
+
     func requiresRendererReconfiguration(
         comparedTo other: MPVRenderSurfaceConfiguration
     ) -> Bool {
@@ -80,13 +89,5 @@ struct MPVRenderSurfaceConfiguration: Sendable {
     ) -> Bool {
         drawableSize != other.drawableSize
             || abs(scale - other.scale) >= .ulpOfOne
-    }
-
-    private static func quantizedOutputHeadroom(_ outputHeadroom: Double) -> Double {
-        guard outputHeadroom.isFinite else { return 1 }
-        let clampedHeadroom = max(outputHeadroom, 1)
-        let scaledHeadroom = clampedHeadroom * 100
-        guard scaledHeadroom.isFinite else { return clampedHeadroom }
-        return scaledHeadroom.rounded(.toNearestOrEven) / 100
     }
 }

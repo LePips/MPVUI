@@ -1,6 +1,6 @@
 # Device benchmarks
 
-Run from the repository root with Xcode command-line tools, an Apple development team configured for device signing, and an iPhone or iPad. Keep the device unlocked and the app in the foreground. For comparisons, use the same device, media, audio route, display settings, power state, and Xcode version.
+Device benchmarks require Xcode command-line tools, an Apple development team configured for device signing, and an iPhone or iPad. Keep the device unlocked and the app in the foreground. For comparisons, use the same device, media, audio route, display settings, power state, and Xcode version.
 
 ## Playback measurements
 
@@ -25,7 +25,7 @@ make benchmark-device ARGS='--label hls --device DEVICE_ID --media /path/to/hls/
 
 The runner serves the playlist's local resources and records their hashes. All references must stay within the media directory. Allow local-network access on the device when prompted.
 
-CPU measurements cover the app process and exclude AVPlayer work in system services. Memory samples occur every 100 ms and can miss short peaks. Metal allocations can overlap with physical footprint. Do not add them together. Diagnostics update at their own intervals, and missing values remain unavailable. These results do not measure total energy use, visible smoothness, or audible synchronization.
+CPU measurements cover the app process and exclude AVPlayer work in system services. Memory samples occur every 100 ms and can miss short peaks. Metal allocations can overlap with physical footprint. Don't add them together. Diagnostics update at their own intervals, and missing values remain unavailable. These results don't measure total energy use, visible smoothness, or audible synchronization.
 
 ## Playback regression checks
 
@@ -34,7 +34,7 @@ make device-regression ARGS='--device DEVICE_ID --media /path/to/video.mp4 --bac
 make device-regression ARGS='--device DEVICE_ID --media /path/to/hls/index.m3u8 --host MAC_LAN_ADDRESS --backend sampleBuffer --skip-build'
 ```
 
-This run checks three pause/seek/stop/replay cycles, loading while stopped, playback-rate changes, and deallocation. Use seekable media at least 30 seconds long. Choose `--backend metal` or `--software-decoding` to test those paths. Failed checks return a nonzero exit status and keep their reports. Use the [package tests](../../TESTING.md#device-testing) for internal lifecycle and displayed-pixel checks.
+This run checks three pause/seek/stop/replay cycles, loading while stopped, playback-rate changes, and deallocation. Use seekable media at least 30 seconds long. Choose `--backend metal` or `--software-decoding` to test those paths. Failed checks return a nonzero exit status and keep their reports. Use the [package tests](../../Documentation/TESTING.md#device-testing) for internal lifecycle and displayed-pixel checks.
 
 ## Compare builds
 
@@ -58,7 +58,7 @@ make profile-analyze ARGS='/path/to/capture --products /path/to/Release-iphoneos
 
 Use `make help TARGET=profile-capture` or `make help TARGET=profile-analyze` for options, including a process ID when capture metadata is missing. Add `--host MAC_LAN_ADDRESS` for HLS. Use `--template 'System Trace'` to capture scheduling activity, then analyze its exported `thread-state` and `context-switch` tables with `make profile-system-trace`.
 
-Capture steady playback. Analysis checks symbol UUIDs, keeps unresolved frames, and reports profiling overhead separately. Nested stack weights overlap. Do not add them together or compare them directly with CPU measurements from an unprofiled run.
+Capture steady playback. Analysis checks symbol UUIDs, keeps unresolved frames, and reports profiling overhead separately. Nested stack weights overlap. Don't add them together or compare them directly with CPU measurements from an unprofiled run.
 
 ## Synchronization probe
 
@@ -71,4 +71,4 @@ make sync-probe ARGS='--device DEVICE_ID --host MAC_LAN_ADDRESS --direct /path/t
 
 Regenerate the device test project after adding these resources.
 
-The runner validates inputs by default. Add `--execute` to serve media, rebuild, run tests, and collect four fresh reports. Keep the server port free. The runner verifies media and source before and after testing. Native timing and frame counts do not measure physical display timing or audible lip sync.
+The runner validates inputs by default. Add `--execute` to serve media, rebuild, run tests, and collect four fresh reports. Keep the server port free. The runner verifies media and source before and after testing. Native timing and frame counts don't measure physical display timing or audible lip sync.

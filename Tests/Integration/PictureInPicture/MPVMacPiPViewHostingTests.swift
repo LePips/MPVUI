@@ -1,5 +1,6 @@
 #if os(macOS) && !targetEnvironment(macCatalyst)
 import AppKit
+@testable import MPVCore
 @testable import MPVUI
 import Observation
 import SwiftUI
@@ -7,7 +8,9 @@ import Testing
 
 @Suite(.tags(.integration, .pictureInPicture), .serialized)
 struct MPVMacPiPViewHostingTests {
-    @Test @MainActor
+
+    @Test
+    @MainActor
     func `reparent preserves inline constraints sibling order and metal layer`() {
         let player = MPVPlayer(configuration: .init(autoPlay: false))
         let surface = MPVPlatformVideoPlayer(player: player)
@@ -67,6 +70,7 @@ struct MPVMacPiPViewHostingTests {
 
         hosting.container.setFrameSize(NSSize(width: 200, height: 112))
         hosting.container.layoutSubtreeIfNeeded()
+
         #expect(surface.bounds.size == hosting.container.bounds.size)
         #expect(hosting.restore())
         #expect(surface.superview === root)
@@ -78,7 +82,8 @@ struct MPVMacPiPViewHostingTests {
         #expect(surface.metalLayer === metalLayer)
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `window content view restores to its resized placeholder`() {
         let surface = MPVPlatformVideoPlayer(player: MPVPlayer())
         let sourceWindow = makeWindow()
@@ -96,13 +101,15 @@ struct MPVMacPiPViewHostingTests {
         sourceWindow.setContentSize(NSSize(width: 800, height: 450))
         sourceWindow.contentView?.layoutSubtreeIfNeeded()
         let resizedInlineBounds = hosting.placeholder.bounds
+
         #expect(hosting.restore())
         #expect(sourceWindow.contentView === surface)
         #expect(surface.bounds == resizedInlineBounds)
         #expect(hosting.restore())
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `removing the inline hierarchy leaves the surface safely detached on return`() {
         let surface = MPVPlatformVideoPlayer(player: MPVPlayer())
         let sourceWindow = makeWindow()
@@ -113,6 +120,7 @@ struct MPVMacPiPViewHostingTests {
 
         #expect(!hosting.restore())
         surface.releaseRenderingFromPictureInPicture()
+
         #expect(surface.window == nil)
         #expect(surface.superview == nil)
         #expect(!surface.isActiveRenderingSurface)
@@ -123,7 +131,9 @@ struct MPVMacPiPViewHostingTests {
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
         )
         window.animationBehavior = .none
         return window

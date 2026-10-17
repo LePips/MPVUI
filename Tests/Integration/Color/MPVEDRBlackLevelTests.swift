@@ -1,15 +1,19 @@
 #if os(macOS)
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .hdr), .serialized)
 @MainActor
 struct MPVEDRBlackLevelTests {
+
     @Test(arguments: ["baseline.mp4", "color-hdr10.mkv", "color-hlg.mkv"])
     func `EDR black survives live headroom changes and replay`(media: String) async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false,
-            hdrPolicy: .always, videoOutput: .metal
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hdrPolicy: .always,
+            videoOutput: .metal
         ))
         defer { fixture.close() }
         let player = fixture.player
@@ -20,6 +24,7 @@ struct MPVEDRBlackLevelTests {
             player.mediaInformation.hdr.output.maximumLuminance == 812
         }
         let before = await player.lifecycleDiagnostics()
+
         #expect(player.mediaInformation.hdr.output.transferFunction == .linear)
         // mpv uses 1e-7 nits for infinite contrast; zero means unspecified.
         #expect(try #require(player.mediaInformation.hdr.output.minimumLuminance) < 0.000001)
@@ -29,6 +34,7 @@ struct MPVEDRBlackLevelTests {
         try await eventually("reduced EDR target") {
             player.mediaInformation.hdr.output.maximumLuminance == 406
         }
+
         #expect(try #require(player.mediaInformation.hdr.output.minimumLuminance) < 0.000001)
 
         // This bounded correction restores automatic contrast in SDR. Linear
@@ -44,8 +50,10 @@ struct MPVEDRBlackLevelTests {
         try await eventually("EDR contrast restored") {
             player.mediaInformation.hdr.output.maximumLuminance == 812
         }
+
         #expect(try #require(player.mediaInformation.hdr.output.minimumLuminance) < 0.000001)
         let after = await player.lifecycleDiagnostics()
+
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.loadCommands == before.loadCommands)
         #expect(player.state == .paused)
@@ -56,6 +64,7 @@ struct MPVEDRBlackLevelTests {
         try await eventually("recreated EDR target") {
             player.mediaInformation.hdr.output.maximumLuminance == 812
         }
+
         #expect(try #require(player.mediaInformation.hdr.output.minimumLuminance) < 0.000001)
         #expect(player.lastError == nil)
     }

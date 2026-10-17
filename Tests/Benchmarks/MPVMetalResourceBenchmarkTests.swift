@@ -4,6 +4,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import Metal
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -12,6 +13,7 @@ import Testing
 @Suite(.tags(.benchmark), .serialized)
 @MainActor
 struct MPVMetalResourceBenchmarkTests {
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_METAL_RESOURCE_BENCHMARK"] == "1"))
     func `measure Metal resources`() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -23,7 +25,9 @@ struct MPVMetalResourceBenchmarkTests {
         try #require(seconds.isFinite && (2 ... 60).contains(seconds))
         let media = environment["MPVUI_BENCHMARK_MEDIA"].map { URL(fileURLWithPath: $0) } ?? TestPaths.baselineMedia
         let checksum = try SHA256.hash(data: Data(contentsOf: media, options: .mappedIfSafe))
-            .map { String(format: "%02x", $0) }.joined()
+            .map { String(format: "%02x", $0) }
+            .joined()
+
         let device = try #require(MTLCreateSystemDefaultDevice())
         let baseline = try resources(device)
         let fixture = PlaybackFixture(configuration: .init(
@@ -38,6 +42,7 @@ struct MPVMetalResourceBenchmarkTests {
         fixture.window.setContentSize(NSSize(width: 1280, height: 720))
         fixture.surface.layoutSubtreeIfNeeded()
         let player = fixture.player
+        player.setDiagnosticsEnabled(true)
         var log: [String] = []
         player.logHandler = { log.append("\($0.prefix): \($0.message)") }
         player.load(media)
@@ -93,7 +98,10 @@ struct MPVMetalResourceBenchmarkTests {
             "decoderDroppedFrames": diagnostics.decoderDroppedFrames.map { $0 as Any } ?? NSNull(),
             "renderPasses": diagnostics.freshRenderPasses?.map(\.name) ?? [],
             "log": log,
-            "limitations": "Local test-process CPU and sampled memory, including diagnostics. Metal allocations include other users of the device in this process. This is not a physical iOS device or energy benchmark.",
+            "limitations": """
+            Local test-process CPU and sampled memory, including diagnostics. Metal allocations include other users of the device in \
+            this process. This is not a physical iOS device or energy benchmark.
+            """,
         ]
         let output = environment["MPVUI_BENCHMARK_OUTPUT"].map { URL(fileURLWithPath: $0) }
             ?? TestPaths.repositoryRoot.appendingPathComponent(".build/metal-resources.json")

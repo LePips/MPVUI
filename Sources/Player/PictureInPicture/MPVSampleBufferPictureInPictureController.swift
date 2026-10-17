@@ -1,3 +1,4 @@
+import MPVCore
 #if os(iOS) && !targetEnvironment(macCatalyst)
 import AVKit
 import CoreMedia
@@ -7,7 +8,9 @@ import Foundation
 /// layer fed directly by mpv's AVFoundation VO. No frames are captured here.
 @MainActor
 final class MPVSampleBufferPictureInPictureController: NSObject {
+
     struct Snapshot: Equatable {
+
         var isSupported = false
         var isPossible = false
         var isActive = false
@@ -16,6 +19,15 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         var isSuspended = false
         var renderSize = CGSize.zero
         var lastError: MPVPlayerError?
+    }
+
+    private struct PlaybackSnapshot: Equatable {
+
+        let state: MPVPlaybackState
+        let duration: Duration
+        let isSeekable: Bool
+        let isPaused: Bool
+        let sourceURL: URL?
     }
 
     private(set) var snapshot = Snapshot()
@@ -46,14 +58,6 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     private var pendingRestorations: [UUID: (Bool) -> Void] = [:]
     private var lastPlaybackState: PlaybackSnapshot?
     private var lastPublishedSnapshot: Snapshot?
-
-    private struct PlaybackSnapshot: Equatable {
-        let state: MPVPlaybackState
-        let duration: Duration
-        let isSeekable: Bool
-        let isPaused: Bool
-        let sourceURL: URL?
-    }
 
     init(
         player: MPVPlayer,
@@ -167,7 +171,7 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         publish()
     }
 
-    /// The facade must invalidate before retiring the native output target.
+    /// Invalidate this controller before retiring the native output target.
     /// AVKit callbacks are always completed, including in-flight skip/restore.
     func invalidate() {
         guard !isInvalidated else { return }
@@ -200,26 +204,6 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         publish()
     }
 
-    private func playbackTimeRange() -> CMTimeRange {
-        guard let player, !isInvalidated else { return .invalid }
-        let currentTime = displayLayer.controlTimebase.map(CMTimebaseGetTime) ?? .invalid
-        return MPVPictureInPicturePlaybackPolicy.playbackTimeRange(
-            hasMedia: player.mediaInformation.sourceURL != nil,
-            state: player.state,
-            duration: player.duration,
-            displayTime: currentTime
-        )
-    }
-
-    private func refreshPlatformState() {
-        guard !isInvalidated, let controller = platformController else { return }
-        snapshot.isPossible = controller.isPictureInPicturePossible
-            && displayLayer.isReadyForDisplay
-            && playbackTimeRange().isValid
-        snapshot.isSuspended = controller.isPictureInPictureSuspended
-        publish()
-    }
-
     func prepareToStartPictureInPicture() {
         guard !snapshot.isStarting else { return }
         stopRequested = false
@@ -238,6 +222,56 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
             self.setRenderingMode(false)
             self.fail(.pictureInPictureTimedOut(operation: .start))
         }
+    }
+
+    func didFailToStartPictureInPicture(error: any Error) {
+        guard !isInvalidated else { return }
+        startupTask?.cancel()
+        startupTask = nil
+        snapshot.isStarting = false
+        snapshot.isStopping = false
+        stopRequested = false
+        setRenderingMode(false)
+        let description = (error as? MPVPlayerError)?.localizedDescription ?? error.localizedDescription
+        fail(.pictureInPictureFailed(operation: .start, message: description))
+    }
+
+    func requestInterfaceRestoration(completion: @escaping (Bool) -> Void) {
+        guard !isInvalidated else {
+            completion(false)
+            return
+        }
+        let id = UUID()
+        pendingRestorations[id] = completion
+        let restore = restoreUserInterface
+        requestTasks[id] = Task { @MainActor [weak self] in
+            let restored = await restore()
+            self?.finishRestoration(id, restored: restored)
+        }
+        requestTimeouts[id] = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            self?.finishRestoration(id, restored: false)
+        }
+    }
+
+    private func playbackTimeRange() -> CMTimeRange {
+        guard let player, !isInvalidated else { return .invalid }
+        let currentTime = displayLayer.controlTimebase.map(CMTimebaseGetTime) ?? .invalid
+        return MPVPictureInPicturePlaybackPolicy.playbackTimeRange(
+            hasMedia: player.mediaInformation.sourceURL != nil,
+            state: player.state,
+            duration: player.duration,
+            displayTime: currentTime
+        )
+    }
+
+    private func refreshPlatformState() {
+        guard !isInvalidated, let controller = platformController else { return }
+        snapshot.isPossible = controller.isPictureInPicturePossible
+            && displayLayer.isReadyForDisplay
+            && playbackTimeRange().isValid
+        snapshot.isSuspended = controller.isPictureInPictureSuspended
+        publish()
     }
 
     private func setRenderingMode(_ enabled: Bool) {
@@ -271,35 +305,6 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         requestTasks.removeValue(forKey: id)?.cancel()
         requestTimeouts.removeValue(forKey: id)?.cancel()
         pendingRestorations.removeValue(forKey: id)?(restored)
-    }
-
-    func didFailToStartPictureInPicture(error: any Error) {
-        guard !isInvalidated else { return }
-        startupTask?.cancel()
-        startupTask = nil
-        snapshot.isStarting = false
-        snapshot.isStopping = false
-        stopRequested = false
-        setRenderingMode(false)
-        fail(.pictureInPictureFailed(operation: .start, message: error.localizedDescription))
-    }
-
-    func requestInterfaceRestoration(completion: @escaping (Bool) -> Void) {
-        guard !isInvalidated else {
-            completion(false)
-            return
-        }
-        let id = UUID()
-        pendingRestorations[id] = completion
-        let restore = restoreUserInterface
-        requestTasks[id] = Task { @MainActor [weak self] in
-            let restored = await restore()
-            self?.finishRestoration(id, restored: restored)
-        }
-        requestTimeouts[id] = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(15)) } catch { return }
-            self?.finishRestoration(id, restored: false)
-        }
     }
 
     private func waitForDisplayTimeline(player: MPVPlayer, target: Duration) async -> Bool {
@@ -336,6 +341,7 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
 }
 
 extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictureControllerDelegate {
+
     func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
         guard !isInvalidated else { return }
         if stopRequested {
@@ -394,6 +400,7 @@ extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictu
 }
 
 extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictureSampleBufferPlaybackDelegate {
+
     func pictureInPictureController(_: AVPictureInPictureController, setPlaying playing: Bool) {
         guard !isInvalidated, let player else { return }
         playing ? player.play() : player.pause()
@@ -449,7 +456,8 @@ extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictu
                 }
                 if !succeeded, !Task.isCancelled, self?.latestSkipID == id {
                     self?.fail(.pictureInPictureFailed(
-                        operation: .seek, message: "The Picture in Picture seek could not be completed."
+                        operation: .seek,
+                        message: "The Picture in Picture seek could not be completed."
                     ))
                 }
             }

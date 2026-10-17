@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Run a command to completion and emit one JSON validation result, retaining full logs.
+"""Run a command with readable output, retaining full logs and a JSON result.
 
 Use the public Make targets, such as `make test-unit`; Make invokes this runner.
-Stdout is one RFC 8259 JSON document; result.schema.json defines its contract.
-Commands run without a shell. Progress and full diagnostics stay in the run directory.
+With --json, stdout is one RFC 8259 JSON document instead of live command output.
+result.schema.json defines the saved result and JSON output contract.
+Commands run without a shell. Full diagnostics stay in the run directory.
 """
 
 import argparse
+import codecs
 from collections import deque
 from datetime import datetime, timezone
 import json
@@ -14,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+import selectors
 import signal
 import subprocess
 import sys
@@ -23,7 +26,9 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_ENV = "MPVUI_VALIDATION_EVIDENCE"
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-ERROR = re.compile(r"\berror:|\bfatal error\b|recorded an issue|Expectation failed|\b\w+(?:Error|Exception):|Traceback \(most recent", re.I)
+ERROR = re.compile(
+    r"\berror:|^\s*fatal error\b|recorded an issue|Expectation failed|\b\w+(?:Error|Exception):|Traceback \(most recent", re.I
+)
 WARNING = re.compile(r"\bwarning:|\[[\w-]+-warn\]", re.I)
 LOCATION = re.compile(r"(?P<path>[^\s\"<>]+\.(?:swift|c|h|cc|cpp|m|mm|py)):(?P<line>\d+)(?::(?P<column>\d+))?")
 
@@ -134,11 +139,15 @@ def test_summary(path):
             line = ANSI.sub("", raw.strip())
             match = re.search(r"Test run with (\d+) tests?(?: in (\d+) suites?)? (passed|failed)\b", line)
             if match:
-                result = dict(framework="Swift Testing", count=int(match[1]), outcome=match[3])
+                if result.get("framework") != "Swift Testing":
+                    result = dict(framework="Swift Testing", count=0, outcome="passed", issues=0)
+                result["count"] += int(match[1])
+                if match[3] == "failed":
+                    result["outcome"] = "failed"
                 if match[2]:
-                    result["suites"] = int(match[2])
+                    result["suites"] = result.get("suites", 0) + int(match[2])
                 issues = re.search(r"with (\d+) issues?", line)
-                result["issues"] = int(issues[1]) if issues else 0
+                result["issues"] += int(issues[1]) if issues else 0
             elif not result or result.get("framework") == "XCTest":
                 match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", line)
                 if match:
@@ -190,7 +199,45 @@ def stop_process(process):
         pass
 
 
-def run(command, *, kind, directory, timeout=None):
+def stream_output(process, log, timeout):
+    """Tee output as it arrives, including partial lines, without blocking timeouts."""
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def copy_chunk():
+        chunk = os.read(process.stdout.fileno(), 65536)
+        if chunk:
+            log.write(chunk)
+            log.flush()
+            sys.stdout.write(decoder.decode(chunk))
+            sys.stdout.flush()
+        return bool(chunk)
+
+    with process.stdout, selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        try:
+            while True:
+                remaining = deadline - time.monotonic() if deadline is not None else None
+                if remaining is not None and remaining <= 0:
+                    raise subprocess.TimeoutExpired(process.args, timeout)
+                if selector.select(min(0.1, remaining) if remaining is not None else 0.1):
+                    if not copy_chunk():
+                        break
+                elif process.poll() is not None:
+                    # A descendant may still hold stdout after its parent exits.
+                    break
+            return process.wait(timeout=max(0, deadline - time.monotonic()) if deadline is not None else None)
+        finally:
+            if process.poll() is None:
+                stop_process(process)
+            while selector.select(0):
+                if not copy_chunk():
+                    break
+            sys.stdout.write(decoder.decode(b"", final=True))
+            sys.stdout.flush()
+
+
+def run(command, *, kind, directory, timeout=None, json_output=False):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     log, result_path, evidence_path = (directory / name for name in ("command.log", "result.json", "evidence.json"))
@@ -218,15 +265,15 @@ def run(command, *, kind, directory, timeout=None):
 
     try:
         signal.signal(signal.SIGTERM, interrupted)
-        with log.open("w") as stream:
+        with log.open("wb") as stream:
             process = subprocess.Popen(
                 command,
-                stdout=stream,
+                stdout=stream if json_output else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=dict(os.environ, **{EVIDENCE_ENV: str(evidence_path)}),
                 start_new_session=True,
             )
-            code = process.wait(timeout=timeout)
+            code = process.wait(timeout=timeout) if json_output else stream_output(process, stream, timeout)
         exit_code = code if code >= 0 else 128 - code
         status = "succeeded" if exit_code == 0 else "failed"
     except subprocess.TimeoutExpired:
@@ -285,7 +332,14 @@ def run(command, *, kind, directory, timeout=None):
         result["summary"]["runnerError"] = failure
     result.update(status=status, exitCode=exit_code, durationSeconds=round(time.monotonic() - started, 3))
     write_json(result_path, result)
-    print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")), flush=True)
+    if json_output:
+        print(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")), flush=True)
+    else:
+        outcome = status.replace("_", " ") + (f" (exit {exit_code})" if exit_code else "")
+        print(f"\n{kind.capitalize()} {outcome} in {result['durationSeconds']:.2f}s.")
+        if failure:
+            print(failure)
+        print(f"Log: {log}\nResult: {result_path}", flush=True)
     return exit_code
 
 
@@ -294,13 +348,20 @@ def main(argv=None):
     parser.add_argument("--kind", choices=("build", "test", "benchmark", "command"), required=True)
     parser.add_argument("--output-dir", type=Path, help="New directory for immutable run artifacts")
     parser.add_argument("--timeout", type=positive_seconds, help="Stop the process group after this many seconds")
+    parser.add_argument("--json", action="store_true", help="Print one JSON result instead of live command output")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Executable and arguments after --")
     args = parser.parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a command is required after --")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
-    return run(command, kind=args.kind, directory=args.output_dir or ROOT / ".build/validation" / stamp, timeout=args.timeout)
+    return run(
+        command,
+        kind=args.kind,
+        directory=args.output_dir or ROOT / ".build/validation" / stamp,
+        timeout=args.timeout,
+        json_output=args.json,
+    )
 
 
 if __name__ == "__main__":

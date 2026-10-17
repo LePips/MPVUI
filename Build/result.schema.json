@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MPVUI validation command result",
-  "description": "One UTF-8 JSON document on stdout and in result.json. Running snapshots exist only on disk. Command success does not imply a benchmark regression check occurred; inspect summary. Artifacts use absolute filesystem paths, timestamps use RFC 3339, and durations use seconds.",
+  "description": "One UTF-8 JSON document saved in result.json and printed on stdout when JSON output is requested. Running snapshots exist only on disk. Command success does not imply a benchmark regression check occurred; inspect summary. Artifacts use absolute filesystem paths, timestamps use RFC 3339, and durations use seconds.",
   "type": "object",
   "additionalProperties": false,
   "required": [

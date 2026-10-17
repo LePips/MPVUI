@@ -15,9 +15,9 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
+from native_inputs import LOCK_PATH, PLATFORMS, load
+
 ROOT = Path(__file__).resolve().parents[1]
-APPLE_LOCK = Path("Build/Inputs.lock.json")
-ANDROID_LOCK = Path("Build/Android/Native.lock.json")
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ def release_url(url):
 
 def sdk_groups(lock):
     groups = {}
-    for dependency in lock["dependencies"]:
+    for dependency in lock["apple"]["dependencies"]:
         repository, _, _ = release_url(dependency["url"])
         groups.setdefault("sdk-" + repository.replace("/", "-"), []).append(dependency)
     return groups
@@ -132,24 +132,11 @@ def verify_patches(root, source, patch_sets):
                     raise ValueError(f"{source['id']} {platform} patch failed: {patch['path']}\n{error.stderr}") from error
 
 
-def shared_source(source, android):
-    if android is None:
-        return None
-    other = android["git"][source["id"]]
-    if other["url"].removesuffix(".git") != source["url"].removesuffix(".git") or other["commit"] != source["commit"]:
-        raise ValueError(f"Apple/Android source pins differ for {source['id']}; reconcile them before updating")
-    return other
+def patch_sets(source):
+    return {platform: [patch for patch in source["patches"] if platform in patch["platforms"]] for platform in PLATFORMS}
 
 
-def patch_sets(source, android):
-    result = {"Apple": source["patches"]}
-    if android is not None:
-        result["Android"] = android[source["id"] + "Patches"]
-    return result
-
-
-def update_source(root, source, android, upstream):
-    other = shared_source(source, android)
+def update_source(root, source, upstream):
     tag, commit = upstream.source_release(source)
     current = version(source["ref"])
     if current is None:
@@ -161,9 +148,7 @@ def update_source(root, source, android, upstream):
     previous = source["version"]
     old_commit = source["commit"]
     source.update(ref=tag, commit=commit, version=tag[1:])
-    verify_patches(root, source, patch_sets(source, android))
-    if other is not None:
-        other["commit"] = commit
+    verify_patches(root, source, patch_sets(source))
     return [Update(source["id"], previous, source["version"], f"{source['url']}/compare/{old_commit}...{commit}")]
 
 
@@ -209,20 +194,17 @@ def update_sdk(dependencies, upstream):
 
 
 def prepare_update(root, component, upstream):
-    original = {APPLE_LOCK: json.loads((root / APPLE_LOCK).read_text())}
-    if (root / ANDROID_LOCK).exists():
-        original[ANDROID_LOCK] = json.loads((root / ANDROID_LOCK).read_text())
+    original = load(root)
     updated = copy.deepcopy(original)
-    apple, android = updated[APPLE_LOCK], updated.get(ANDROID_LOCK)
-    groups = sdk_groups(apple)
+    groups = sdk_groups(updated)
     changes = []
-    for selected in components(apple) if component == "all" else [component]:
+    for selected in components(updated) if component == "all" else [component]:
         if selected in groups:
             changes.extend(update_sdk(groups[selected], upstream))
         else:
-            source = next(source for source in apple["sources"] if source["id"] == selected)
-            changes.extend(update_source(root, source, android, upstream))
-    outputs = {path: json.dumps(value, indent=2) + "\n" for path, value in updated.items() if value != original[path]}
+            source = next(source for source in updated["sources"] if source["id"] == selected)
+            changes.extend(update_source(root, source, upstream))
+    outputs = {LOCK_PATH: json.dumps(updated, indent=2, sort_keys=True) + "\n"} if updated != original else {}
     return outputs, changes
 
 
@@ -241,21 +223,19 @@ def main():
     mode.add_argument("--all", action="store_true", help="Update all native dependencies together")
     mode.add_argument("--component", help="Update one source or SDK release bundle")
     mode.add_argument("--validate", action="store_true", help="Check committed source pins and both platforms' patches")
-    parser.add_argument("--dry-run", action="store_true", help="Resolve and verify an update without writing locks")
+    parser.add_argument("--dry-run", action="store_true", help="Resolve and verify an update without writing the input lock")
     parser.add_argument("--report", type=Path, help="Write Markdown suitable for the update PR body")
     args = parser.parse_args()
-    apple = json.loads((ROOT / APPLE_LOCK).read_text())
+    lock = load(ROOT)
     if args.list:
-        print(json.dumps(components(apple)))
+        print(json.dumps(components(lock)))
         return
     if args.validate:
-        android = json.loads((ROOT / ANDROID_LOCK).read_text()) if (ROOT / ANDROID_LOCK).exists() else None
-        for source in apple["sources"]:
-            shared_source(source, android)
-            verify_patches(ROOT, source, patch_sets(source, android))
-        print("Source pins and ordered patches verified for all available platforms.")
+        for source in lock["sources"]:
+            verify_patches(ROOT, source, patch_sets(source))
+        print("Source pins and ordered patches verified for Apple and Android.")
         return
-    if not args.all and args.component not in components(apple):
+    if not args.all and args.component not in components(lock):
         parser.error("Unknown component; use --list to see supported components")
     outputs, changes = prepare_update(ROOT, "all" if args.all else args.component, Upstream())
     if not args.dry_run:

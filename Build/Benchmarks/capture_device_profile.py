@@ -205,8 +205,8 @@ def main():
     developer = Path(os.environ.get("DEVELOPER_DIR") or device.command(["xcode-select", "-p"]).stdout.strip())
     dev = developer / "usr/bin"
     xcode = plistlib.loads((developer.parent / "version.plist").read_bytes())["ProductBuildVersion"]
-    app_dir = a.derived_data.resolve() / "Build/Products/Release-iphoneos/MPVUIExample.app"
-    app = app_dir / "MPVUIExample"
+    app_dir = a.derived_data.resolve() / "Build/Products/Release-iphoneos/MPVUI.app"
+    app = app_dir / "MPVUI"
     before = device.source_identity()
     stamp = json.loads((a.derived_data / "mpvui-benchmark-build.json").read_text())
     app_hash = device.digest(app)
@@ -272,14 +272,14 @@ def main():
                 "--device",
                 a.device,
                 "--search",
-                "MPVUIExample",
+                "MPVUI",
                 "--json-output",
                 out / "processes.json",
             ],
             log=out / "processes.log",
         )
         for process in json.loads((out / "processes.json").read_text())["result"]["runningProcesses"]:
-            if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample"):
+            if process.get("executable", "").endswith("/MPVUI.app/MPVUI"):
                 device.device_command(
                     dev / "devicectl",
                     ["process", "terminate", "--device", a.device, "--pid", str(process["processIdentifier"])],
@@ -320,7 +320,7 @@ def main():
                 "--device",
                 a.device,
                 "--search",
-                "MPVUIExample",
+                "MPVUI",
                 "--json-output",
                 processes,
             ],
@@ -329,7 +329,7 @@ def main():
         matches = [
             process["processIdentifier"]
             for process in json.loads(processes.read_text())["result"]["runningProcesses"]
-            if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample")
+            if process.get("executable", "").endswith("/MPVUI.app/MPVUI")
         ]
         if len(matches) != 1:
             raise ValueError("Could not identify the launched app process for profiling")

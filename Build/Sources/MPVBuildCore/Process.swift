@@ -1,11 +1,16 @@
 import Darwin
 import Foundation
 
-enum NativeEnvironment { static let fileCreationMask: mode_t = 0o022 }
+enum NativeEnvironment {
+
+    static let fileCreationMask: mode_t = 0o022
+}
 
 struct Runner: Sendable {
+
     let environment: [String: String]
     let logs: URL
+
     init(developer: String, epoch: Int, logs: URL, path: String? = nil) throws {
         try mkdir(logs)
         self.logs = logs
@@ -13,9 +18,17 @@ struct Runner: Sendable {
             "DEVELOPER_DIR": developer,
             "PATH": path ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "HOME": ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
-            "LC_ALL": "C", "LANG": "C", "TZ": "UTC", "SOURCE_DATE_EPOCH": String(epoch),
-            "ZERO_AR_DATE": "1", "COPYFILE_DISABLE": "1", "GIT_PAGER": "cat", "PAGER": "cat",
-            "GIT_TERMINAL_PROMPT": "0", "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
+            "LC_ALL": "C",
+            "LANG": "C",
+            "TZ": "UTC",
+            "SOURCE_DATE_EPOCH": String(epoch),
+            "ZERO_AR_DATE": "1",
+            "COPYFILE_DISABLE": "1",
+            "GIT_PAGER": "cat",
+            "PAGER": "cat",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PYTHONHASHSEED": "0",
+            "PYTHONDONTWRITEBYTECODE": "1",
         ]
     }
 
@@ -83,7 +96,9 @@ struct Runner: Sendable {
         process.waitUntilExit()
         try stdout.synchronize()
         try stderr.synchronize()
-        struct Completion: Encodable { let seconds: Double
+        struct Completion: Encodable {
+
+            let seconds: Double
             let exitCode: Int32
         }
         try write(
@@ -94,7 +109,10 @@ struct Runner: Sendable {
             let diagnostic = ((try? String(contentsOf: out, encoding: .utf8)) ?? "") +
                 ((try? String(contentsOf: log, encoding: .utf8)) ?? "")
             throw BuildError(
-                "\(name) failed (\(process.terminationStatus)); log: \(log.path); stdout: \(out.path)\n\(ProcessDiagnostics.excerpt(diagnostic))"
+                """
+                \(name) failed (\(process.terminationStatus)); log: \(log.path); stdout: \(out.path)\n\
+                \(ProcessDiagnostics.excerpt(diagnostic))
+                """
             )
         }
         return try output == nil ? String(decoding: Data(contentsOf: out), as: UTF8.self).trimmingCharacters(in: .newlines) : ""

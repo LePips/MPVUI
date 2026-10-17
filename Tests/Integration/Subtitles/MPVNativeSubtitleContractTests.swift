@@ -1,5 +1,6 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Observation
 import Testing
@@ -10,6 +11,7 @@ import UIKit
 
 @Suite(.tags(.integration, .subtitles), .serialized)
 struct MPVNativeSubtitleContractTests {
+
     @Test
     func `bundled mpv exposes text subtitle snapshot property`() throws {
         let handle = try #require(mpv_create())
@@ -27,11 +29,13 @@ struct MPVNativeSubtitleContractTests {
         #expect(mpv_set_option_string(handle, "idle", "yes") >= 0)
         #expect(mpv_set_option_string(handle, "sub-text-intercept", "yes") >= 0)
         let initializeStatus = mpv_initialize(handle)
+
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
         initialized = true
 
         var node = mpv_node()
+
         #expect(mpv_get_property(handle, "sub-text-snapshot", MPV_FORMAT_NODE, &node) >= 0)
         defer { mpv_free_node_contents(&node) }
 
@@ -60,14 +64,17 @@ struct MPVNativeSubtitleContractTests {
             #expect(mpv_set_option_string(handle, name, value) >= 0)
         }
         let initializeStatus = mpv_initialize(handle)
+
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
         initialized = true
 
         let video = TestPaths.baselineMedia
+
         #expect(FileManager.default.fileExists(atPath: video.path))
 
-        let temporaryDirectory = FileManager.default.temporaryDirectory
+        let temporaryDirectory = FileManager.default
+            .temporaryDirectory
             .appendingPathComponent("MPVUI-subtitle-contract-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
             at: temporaryDirectory,
@@ -95,7 +102,8 @@ struct MPVNativeSubtitleContractTests {
         PlayResY: 288
 
         [V4+ Styles]
-        Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+        Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, \
+        ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
         Style: Default,Arial,24,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
 
         [Events]
@@ -124,6 +132,7 @@ struct MPVNativeSubtitleContractTests {
                 where: { $0.arrayValue?.count == 2 }
             )
         )
+
         let webVTTRegions = try #require(webVTTSnapshot.arrayValue)
         #expect((webVTTRegions[0].mapValue?["text"]?.stringValue) == "positioned")
         #expect((webVTTRegions[0].mapValue?["format"]?.stringValue) == "webvtt")
@@ -131,6 +140,7 @@ struct MPVNativeSubtitleContractTests {
             (webVTTRegions[0].mapValue?["settings"]?.stringValue)
                 == "position:25%,line-left line:80% size:40%"
         )
+
         #expect((webVTTRegions[1].mapValue?["text"]?.stringValue) == "default")
         #expect((webVTTRegions[1].mapValue?["settings"]?.stringValue) == "")
 
@@ -142,6 +152,7 @@ struct MPVNativeSubtitleContractTests {
                 where: { $0.arrayValue?.isEmpty == true }
             ) != nil
         )
+
         #expect(mpv_set_property_string(handle, "sub-visibility", "yes") >= 0)
         #expect(
             waitForSubtitleSnapshot(
@@ -170,6 +181,7 @@ struct MPVNativeSubtitleContractTests {
                 where: { $0.arrayValue?.count == 1 }
             )
         )
+
         let automaticRegion = try #require(automaticSnapshot.arrayValue?.first?.mapValue)
         #expect((automaticRegion["text"]?.stringValue) == "automatic")
         #expect(automaticRegion["format"] == nil)
@@ -188,6 +200,7 @@ struct MPVNativeSubtitleContractTests {
 
 #if os(macOS)
 fileprivate extension MPVNativeSubtitleContractTests {
+
     func waitForMPVEvent(
         _ handle: OpaquePointer,
         id: mpv_event_id,
@@ -210,7 +223,7 @@ fileprivate extension MPVNativeSubtitleContractTests {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            let tracks = MPVEngine.parseTracks(copiedMPVNode(handle, property: "track-list"))
+            let tracks = MPVSession.parseTracks(copiedMPVNode(handle, property: "track-list"))
             if tracks.contains(where: {
                 $0.type == .subtitle && $0.isSelected && $0.codec == expected
             }) {

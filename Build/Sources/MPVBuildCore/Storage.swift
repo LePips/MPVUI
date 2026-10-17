@@ -103,12 +103,15 @@ func contained(_ root: URL, _ relative: String) throws -> URL {
     return path
 }
 
-func files(_ root: URL) throws -> [URL] {
+func files(_ root: URL, pruning: Set<String> = []) throws -> [URL] {
     // Enumerate relative names: URL enumeration may canonicalize /var to /private/var only on returned children.
     // Joining relative names keeps the same root spelling on both sides of a relocatable digest.
     var result: [URL] = []
     func visit(_ directory: URL) throws {
         for name in try fm.contentsOfDirectory(atPath: directory.path).sorted() {
+            if pruning.contains(name) {
+                continue
+            }
             let child = directory.appendingPathComponent(name)
             result.append(child)
             let values = try child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -121,10 +124,10 @@ func files(_ root: URL) throws -> [URL] {
     return result.sorted { $0.path < $1.path }
 }
 
-func tree(_ root: URL, excluding: Set<String> = []) throws -> [String: String] {
+func tree(_ root: URL, excluding: Set<String> = [], pruning: Set<String> = []) throws -> [String: String] {
     let root = root.resolvingSymlinksInPath()
     var result: [String: String] = [:]
-    for path in try files(root) {
+    for path in try files(root, pruning: pruning) {
         try autoreleasepool {
             let relative = String(path.path.dropFirst(root.path.count + 1))
             if excluding.contains(relative) {
@@ -145,7 +148,9 @@ func tree(_ root: URL, excluding: Set<String> = []) throws -> [String: String] {
 }
 
 final class FileLock {
+
     private let fd: Int32
+
     init(_ file: URL, shared: Bool = false) throws {
         try mkdir(file.deletingLastPathComponent())
         fd = open(file.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
@@ -162,12 +167,14 @@ final class FileLock {
 }
 
 struct StageRecord: Codable {
+
     let stage: String
     let input: String
     let dependencies: [String: String]
     let products: [String: String]
     let validations: [String]
     let complete: Bool
+
     func verify(
         _ directory: URL,
         stage expectedStage: String,
@@ -180,9 +187,11 @@ struct StageRecord: Codable {
     }
 }
 
-struct ManagedStore: Sendable {
+struct ManagedStore {
+
     let root: URL
     let diagnostics: BuildDiagnostics?
+
     init(root: URL, diagnostics: BuildDiagnostics? = nil) throws {
         self.diagnostics = diagnostics
         self.root = root.standardizedFileURL

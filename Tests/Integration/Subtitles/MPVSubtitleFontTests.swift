@@ -1,17 +1,21 @@
 import AVFoundation
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .subtitles), .serialized)
 struct MPVSubtitleFontTests {
+
     enum FontUseCase: CaseIterable {
+
         case plainText
         case missingASSFont
         case authoredASSFont
     }
 
-    @MainActor @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases, FontUseCase.allCases)
+    @MainActor
+    @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases, FontUseCase.allCases)
     func `client subtitle fonts select the expected family`(
         videoOutput: MPVPlayerConfiguration.VideoOutput,
         useCase: FontUseCase
@@ -34,7 +38,8 @@ struct MPVSubtitleFontTests {
             PlayResY: 360
 
             [V4+ Styles]
-            Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+            Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, \
+            StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
             Style: Default,\(authoredFamily),32,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
 
             [Events]
@@ -45,7 +50,9 @@ struct MPVSubtitleFontTests {
         )
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: [
-                "ao": "null", "osd-level": "0", "sub-auto": "no",
+                "ao": "null",
+                "osd-level": "0",
+                "sub-auto": "no",
                 "sub-fonts-dir": fonts.directory.path,
                 "sub-font": fonts.fallback.family,
                 // Only the files supplied by this client may satisfy font selection.
@@ -68,6 +75,7 @@ struct MPVSubtitleFontTests {
         var sawSemanticText = false
         var observation: Task<Void, Never>?
         if useCase != .plainText {
+            player.setTextSubtitleInterceptionEnabled(true)
             let stream = player.textSubtitleStream()
             observation = Task { @MainActor in
                 for await snapshot in stream where !snapshot.isEmpty {
@@ -89,6 +97,7 @@ struct MPVSubtitleFontTests {
         for destination in [1.0, 10.5, 11.7, 0.1, 7.0] {
             try #require(await player.seekForPictureInPicture(to: .seconds(destination)))
         }
+
         let track = try #require(player.subtitleTracks.first { $0.isExternal })
         player.disableTrack(.subtitle)
         try await eventually("subtitles disabled") { !player.subtitleTracks.contains(where: \.isSelected) }
@@ -104,6 +113,7 @@ struct MPVSubtitleFontTests {
         try await eventually("playback through the cue") { player.position.seconds > 8 }
         player.pause()
         try await eventually("paused playback") { player.isPaused }
+
         #expect(!sawSemanticText)
         #expect(player.lastError == nil)
         #expect(player.videoOutput == videoOutput)
@@ -111,6 +121,7 @@ struct MPVSubtitleFontTests {
             #expect(player.sampleBufferDisplayLayer.sampleBufferRenderer.status != .failed)
         }
         let failures = logs.filter { $0.contains("Error opening font") || $0.contains("failed to find any fallback") }
+
         #expect(failures.isEmpty, "Unexpected font failures: \(failures)")
     }
 }

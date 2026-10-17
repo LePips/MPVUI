@@ -197,7 +197,7 @@ diff --git a/video/out/avfoundation_color_math.h b/video/out/avfoundation_color_
 diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
 --- a/video/out/vo_avfoundation.m
 +++ b/video/out/vo_avfoundation.m
-@@ -326,17 +326,25 @@
+@@ -326,17 +326,26 @@
      __strong id<MTLDevice> mtlDevice;
      __strong CIContext *ciContext;
      CVPixelBufferPoolRef outputPool;
@@ -215,6 +215,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
      // Software upload.
      CVPixelBufferPoolRef swUploadPool;
 +    CVPixelBufferPoolRef swUploadReservePool;
++    int64_t pool_frame_duration_ns;
      int sw_pool_w, sw_pool_h;
      OSType sw_pool_format;
 +    CFDictionaryRef sw_upload_attachments;
@@ -223,27 +224,44 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      // Cache format description; rebuild when dimensions, format, or
      // attachments change.
-@@ -1201,13 +1209,108 @@
+@@ -1201,13 +1210,126 @@
      return device_ref;
  }
  
 -// Pool cap: eight buffers. Readiness/queue lead bound scheduling; drop frame
 -// under pressure, never grow pool.
-+// Presentation uses seven regular buffers and one paused replacement reserve.
++// Presentation pool capacity follows the scheduled queue, with three buffers for
++// renderer retention/upload and a separate paused replacement reserve. A fixed
++// seven-buffer pool can exhaust before queued 120 fps samples are retired.
++// Keep allocation lazy and bounded even with extreme frame rates or queue leads.
++enum { AVF_POOL_MAX_BUFFERS = 32 };
++
++static int avf_presentation_pool_limit(int queue_lead_ms, int64_t frame_duration_ns,
++                                      bool presentation_host)
++{
++    int regular = 7;
++    if (frame_duration_ns > 0) {
++        int64_t lead = MP_TIME_MS_TO_NS(queue_lead_ms);
++        int64_t queued = lead / frame_duration_ns + (lead % frame_duration_ns != 0);
++        regular = MPMAX(regular, MPMIN(queued + 3, AVF_POOL_MAX_BUFFERS - 1));
++    }
++    return regular + (presentation_host ? 1 : 0);
++}
++
 +// AVFoundation can retain queued buffers after flush until a new image arrives.
 +static CVReturn avf_pool_get_buffer_with_limit(CVPixelBufferPoolRef pool,
 +                                               int limit, CVPixelBufferRef *out)
 +{
-+    static NSDictionary *attributes[3];
++    if (limit < 1 || limit > AVF_POOL_MAX_BUFFERS)
++        return kCVReturnInvalidArgument;
++    static NSDictionary *attributes[AVF_POOL_MAX_BUFFERS];
 +    static dispatch_once_t once;
 +    dispatch_once(&once, ^{
-+        attributes[0] = [@{(id)kCVPixelBufferPoolAllocationThresholdKey: @1} retain];
-+        attributes[1] = [@{(id)kCVPixelBufferPoolAllocationThresholdKey: @7} retain];
-+        attributes[2] = [@{(id)kCVPixelBufferPoolAllocationThresholdKey: @8} retain];
++        for (int i = 0; i < AVF_POOL_MAX_BUFFERS; i++)
++            attributes[i] = [@{(id)kCVPixelBufferPoolAllocationThresholdKey: @(i + 1)} retain];
 +    });
-+    int index = limit == 1 ? 0 : limit == 7 ? 1 : 2;
 +    return CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
-+        kCFAllocatorDefault, pool, (__bridge CFDictionaryRef)attributes[index], out);
++        kCFAllocatorDefault, pool, (__bridge CFDictionaryRef)attributes[limit - 1], out);
 +}
 +
  static CVReturn avf_pool_get_buffer(CVPixelBufferPoolRef pool, CVPixelBufferRef *out)
@@ -284,7 +302,8 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
 +{
 +    struct priv *p = vo->priv;
 +    bool allow_reserve = p->playback_paused && !p->presentation_host;
-+    int limit = p->presentation_host ? 8 : 7;
++    int limit = avf_presentation_pool_limit(p->opts->queue_lead_ms,
++        p->pool_frame_duration_ns, p->presentation_host);
 +    CVReturn status = avf_pool_get_buffer_with_limit(pool, limit, out);
 +    if (status == kCVReturnWouldExceedAllocationThreshold && allow_reserve)
 +        status = avf_pool_get_reserve_buffer(pool, reserve_pool, out);
@@ -337,7 +356,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  }
  
  // Create pixel-buffer pool.
-@@ -1386,8 +1489,12 @@
+@@ -1386,8 +1508,12 @@
                  ok = false;
                  break;
              }
@@ -352,7 +371,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          }
      } else if (ok) {
          uint8_t *src_base = CVPixelBufferGetBaseAddress(src);
-@@ -1398,8 +1505,12 @@
+@@ -1398,8 +1524,12 @@
          size_t bytes = MPMIN(src_stride, dst_stride);
          ok = src_base && dst_base;
          if (ok) {
@@ -367,7 +386,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          }
      }
  
-@@ -1466,6 +1577,41 @@
+@@ -1466,6 +1596,41 @@
          &p->sw_pool_h, &p->sw_pool_format, w, h, format, "software upload");
  }
  
@@ -409,7 +428,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  static void reset_osd_buf_states(struct priv *p)
  {
      for (int i = 0; i < p->osd_buf_state_count; i++) {
-@@ -1688,7 +1834,8 @@
+@@ -1688,7 +1853,8 @@
          return NULL;
  
      CVPixelBufferRef pixbuf = NULL;
@@ -419,7 +438,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !pixbuf) {
          MP_ERR(vo, "Failed to get upload buffer: %d\n", status);
-@@ -1756,7 +1903,7 @@
+@@ -1756,7 +1922,7 @@
      }
  
      CVPixelBufferUnlockBaseAddress(pixbuf, 0);
@@ -428,7 +447,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      return pixbuf;
  }
-@@ -2379,31 +2526,44 @@
+@@ -2379,31 +2545,44 @@
      }
      void *base = CVPixelBufferGetBaseAddress(buf);
      size_t stride = CVPixelBufferGetBytesPerRow(buf);
@@ -482,7 +501,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
      CVPixelBufferUnlockBaseAddress(buf, 0);
      p->cachedSubtitleBuffer = buf;
      p->subtitle_x0 = bounds.x0;
-@@ -2496,11 +2656,16 @@
+@@ -2496,11 +2675,16 @@
      for (int i = 0; cvprim && i < MP_ARRAY_SIZE(candidates); i++)
          if (CFEqual(cvprim, get_cv_color_primaries(candidates[i]))) prim = candidates[i];
      if (prim == PL_COLOR_PRIM_UNKNOWN) prim = PL_COLOR_PRIM_BT_709;
@@ -504,7 +523,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      return color;
  }
-@@ -2567,7 +2732,8 @@
+@@ -2567,7 +2751,8 @@
          if (!create_output_pool(vo, videoW, videoH, sourceFormat))
              return NULL;
  
@@ -514,7 +533,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (status != kCVReturnSuccess || !outputBuffer) {
              MP_ERR(vo, "Failed to get YUV composite buffer: %d\n", status);
              return NULL;
-@@ -2614,38 +2780,73 @@
+@@ -2614,38 +2799,73 @@
      double cCenter = p010 ? 512.0 : 128.0;
      double cRange = fullRange ? (p010 ? 1023.0 : 255.0) : (p010 ? 896.0 : 224.0);
  
@@ -606,7 +625,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
              }
              for (int k = 0; k < 2; k++) {
                  double code = cCenter + cRange * uv[k];
-@@ -2691,7 +2892,8 @@
+@@ -2691,7 +2911,8 @@
          return NULL;
  
      CVPixelBufferRef outputBuffer = NULL;
@@ -616,7 +635,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !outputBuffer) {
          MP_ERR(vo, "Failed to get geometry output buffer: %d\n", status);
-@@ -2780,7 +2982,8 @@
+@@ -2780,7 +3001,8 @@
  }
  
  // GPU Core Image subtitle composite; HDR-compatible.
@@ -626,7 +645,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  {
      struct priv *p = vo->priv;
  
-@@ -2796,7 +2999,7 @@
+@@ -2796,7 +3018,7 @@
  
      OSType sourceFormat = CVPixelBufferGetPixelFormatType(videoBuffer);
      if (is_biplanar_yuv_format(sourceFormat)) {
@@ -635,7 +654,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (composited)
              return composited;
      }
-@@ -2828,7 +3031,8 @@
+@@ -2828,7 +3050,8 @@
  
      // Acquire output buffer.
      CVPixelBufferRef outputBuffer = NULL;
@@ -645,7 +664,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !outputBuffer) {
          MP_ERR(vo, "Failed to get output buffer from pool: %d\n", status);
-@@ -3066,6 +3270,7 @@
+@@ -3066,6 +3289,7 @@
  
          CVPixelBufferRef finalBuffer = pixbuf;
          bool needsRelease = false;
@@ -653,7 +672,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
          bool applyGeometry = should_apply_video_geometry(vo);
          // Native dvh1 RPU describes untouched frames. Core Image redraw
-@@ -3083,11 +3288,14 @@
+@@ -3083,11 +3307,14 @@
          if (applyGeometry) {
              CVPixelBufferRef overlay = NULL;
              if (p->has_subtitle && is_biplanar_yuv_format(CVPixelBufferGetPixelFormatType(pixbuf)))
@@ -670,7 +689,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  CVPixelBufferRelease(overlay);
              }
              if (rendered) {
-@@ -3104,6 +3312,7 @@
+@@ -3104,6 +3331,7 @@
                  }
                  finalBuffer = rendered;
                  needsRelease = true;
@@ -678,7 +697,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  p->applied_geometry_last_frame = true;
                  p->geometry_render_failure_logged = false;
              } else if (!p->geometry_render_failure_logged) {
-@@ -3125,8 +3334,8 @@
+@@ -3125,8 +3353,8 @@
  
          if (!needsRelease && !applyGeometry && should_composite_into_video(p)) {
              // Composite this flip's subtitle.
@@ -689,7 +708,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  p->video_statistics.pixel_buffer_copies++;
              if (composited && should_use_frame_space_osd(p) &&
                  (CVPixelBufferGetWidth(composited) != CVPixelBufferGetWidth(pixbuf) ||
-@@ -3149,6 +3358,7 @@
+@@ -3149,6 +3377,7 @@
              if (composited) {
                  finalBuffer = composited;
                  needsRelease = true;
@@ -697,7 +716,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
              }
          }
  
-@@ -3219,7 +3429,7 @@
+@@ -3219,7 +3448,7 @@
          // Static source mastering metadata remains meaningful after an overlay,
          // but dynamic scene mapping describes the untouched original pixels.
          int hdr_state = avf_attach_hdr10plus(buf, hdr10plus, hdr10plus_size,
@@ -706,7 +725,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (hdr_state != p->hdr10plus_state) {
              const char *states[] = {"absent", "attached", "invalid",
                                      "pixels-transformed", "os-unavailable"};
-@@ -3330,6 +3540,8 @@
+@@ -3330,6 +3559,8 @@
          p->video_statistics.sample_build_count++;
          p->video_statistics.last_sample_build_ns = sample_ns;
          p->video_statistics.total_sample_build_ns += sample_ns;
@@ -715,7 +734,17 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
          bool osd_enqueued = !osd_needed;
  
-@@ -3478,6 +3690,7 @@
+@@ -3429,6 +3660,9 @@
+                                     frame->ideal_frame_duration > 0.0
+             ? MP_TIME_S_TO_NS(frame->ideal_frame_duration)
+             : frame->duration > 0.0 ? (int64_t)llrint(frame->duration) : 0;
++        // Preserve the last scheduled interval for paused redraws and seeks.
++        if (frame_duration_ns > 0)
++            p->pool_frame_duration_ns = frame_duration_ns;
+         p->next_timebase_rate_valid = avf_rate_sample(
+             &p->rate_est, p->next_media_pts_ns, frame_duration_ns,
+             p->timebase_rate > 0.0 ? p->timebase_rate : 1.0,
+@@ -3478,6 +3712,7 @@
      p->dovi_validated_state = p->hdr10plus_state = 0;
      p->video_statistics = (struct voctrl_native_video_statistics){0};
      p->dovi_unsupported_logged = false;
@@ -723,7 +752,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (params->repr.sys == PL_COLOR_SYSTEM_DOLBYVISION &&
          params->imgfmt != IMGFMT_VIDEOTOOLBOX) {
-@@ -3509,6 +3722,13 @@
+@@ -3509,6 +3744,13 @@
      }
  
      clear_subtitle_cache(p);

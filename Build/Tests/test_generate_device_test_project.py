@@ -1,4 +1,5 @@
 import json
+import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,11 +27,14 @@ class DeviceTestProjectTests(unittest.TestCase):
         target = spec["targets"]["MPVUITests"]
         self.assertEqual(target["type"], "bundle.unit-test")
         self.assertEqual(target["sources"][0]["path"], str(self.repository / "Tests"))
-        self.assertEqual(target["sources"][2], {"path": str(self.output / "GeneratedMedia"), "buildPhase": "resources"})
+        self.assertEqual(target["sources"][0]["excludes"], ["Core"])
+        self.assertEqual(target["sources"][2], {"path": str(self.output / "GeneratedMedia"), "type": "folder", "buildPhase": "resources"})
         self.assertEqual(target["settings"]["base"]["DEVELOPMENT_TEAM"], "ABC123DE45")
         self.assertFalse(spec["schemes"][project.SCHEME]["test"]["parallelizable"])
-        self.assertEqual(run.call_args_list[0].args[0][-1], str(self.output / "GeneratedMedia"))
-        self.assertEqual(run.call_count, 2)
+        run.assert_called_once_with(
+            ["/bin/xcodegen", "generate", "--spec", str(self.output / "project.json"), "--project", str(self.output)], check=True
+        )
+        self.assertEqual(list((self.output / "GeneratedMedia").iterdir()), [])
 
     def test_device_test_bundle_has_an_application_host_and_matching_signing(self):
         with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(project.subprocess, "run"):
@@ -61,6 +65,12 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(info["properties"]["NSAppTransportSecurity"], {"NSAllowsLocalNetworking": True})
         self.assertNotIn("info", spec["targets"]["MPVUITests"])
 
+    def test_package_access_uses_the_checkout_identity_as_one_compiler_argument(self):
+        repository = self.repository / "MPVUI Shared Core"
+        spec = project.project_spec(repository, self.output, None)
+        flags = spec["targets"]["MPVUITests"]["settings"]["base"]["OTHER_SWIFT_FLAGS"]
+        self.assertEqual(shlex.split(flags), ["$(inherited)", "-package-name", "mpvui shared core"])
+
     def test_foreground_host_retains_and_restores_prior_idle_timer_state(self):
         # The generated host prevents lock only while active. SDK typechecking
         # validates the SwiftUI scene lifecycle hook separately.
@@ -82,7 +92,7 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(list((self.repository / "Tests").iterdir()), [])
 
     def test_missing_generator_and_unsigned_mode_are_explicit(self):
-        with patch.object(project.shutil, "which", return_value=None), self.assertRaisesRegex(RuntimeError, "brew install xcodegen"):
+        with patch.object(project.shutil, "which", return_value=None), self.assertRaisesRegex(RuntimeError, "brew bundle"):
             project.generate(self.repository, self.output)
         self.assertFalse(self.output.exists())
         settings = project.project_spec(self.repository, self.output, None)["targets"]["MPVUITests"]["settings"]["base"]

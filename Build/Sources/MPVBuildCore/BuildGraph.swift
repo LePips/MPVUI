@@ -1,6 +1,7 @@
 import Foundation
 
 struct ComponentKey: Encodable {
+
     let component: String
     let sourceTree: String
     let implementation: [String: String]
@@ -12,7 +13,8 @@ struct ComponentKey: Encodable {
     let environment: [String: String]
 }
 
-struct ThinProduct: Codable, Sendable {
+struct ThinProduct: Codable {
+
     let component: String
     let slice: Slice
     let architecture: String
@@ -21,12 +23,25 @@ struct ThinProduct: Codable, Sendable {
     let directory: String
 }
 
-struct BuildGraph: Sendable {
+struct BuildGraph {
+
+    static let operationalFiles: Set<String> = [
+        "CLI.swift",
+        "Generation.swift",
+        "Publication.swift",
+        "ConsumerTests.swift",
+        "Selection.swift",
+        "Update.swift",
+        "Bootstrap.swift",
+        "Diagnostics.swift",
+        "Reproducibility.swift"
+    ]
     let root: URL
     let native: NativeLock
     let store: ManagedStore
     let runner: Runner
     let inputs: InputStore
+
     var codeRoot: URL {
         if let snapshot = ProcessInfo.processInfo.environment["MPVBUILD_CODE_ROOT"] {
             return URL(fileURLWithPath: snapshot)
@@ -44,22 +59,14 @@ struct BuildGraph: Sendable {
             result[relative] = try digest(file)
         }
         for (name, value) in try tree(root.appendingPathComponent("Build/Support")) {
+            if name.hasPrefix("media/") && component != "mpv" {
+                continue
+            }
             result["support/" + name] = value
         }
         return result
     }
 
-    static let operationalFiles: Set<String> = [
-        "CLI.swift",
-        "Generation.swift",
-        "Publication.swift",
-        "ConsumerTests.swift",
-        "Selection.swift",
-        "Update.swift",
-        "Bootstrap.swift",
-        "Diagnostics.swift",
-        "Reproducibility.swift"
-    ]
     func component(
         _ id: String,
         source: URL,
@@ -93,8 +100,8 @@ struct BuildGraph: Sendable {
             implementation: implementation(component: id),
             tools: tools,
             slice: slice.selecting([arch]),
-            features: native.features,
-            sourceDateEpoch: native.sourceDateEpoch,
+            features: native.apple.features,
+            sourceDateEpoch: native.apple.sourceDateEpoch,
             dependencies: dependencyDigests,
             environment: environment
         ))
@@ -104,7 +111,7 @@ struct BuildGraph: Sendable {
                 let binary = prefix.appendingPathComponent("lib/lib\(library).a")
                 _ = try MachO.validate(binary, slice: slice, arch: arch)
                 if id == "mpv" {
-                    try verifyMPV(binary, slice: slice, contracts: native.contracts, runner: runner)
+                    try verifyMPV(binary, slice: slice, contracts: native.apple.contracts, runner: runner)
                 }
             }
         }
@@ -163,7 +170,7 @@ struct BuildGraph: Sendable {
     }
 
     func build(slices: [Slice], jobs: Int, workers: Int, fresh: Bool) throws -> [ThinProduct] {
-        let tools = try runner.doctor(native.toolchain)
+        let tools = try runner.doctor(native.apple.toolchain)
         try inputs.preflight(native, slices: slices)
         let dependencyBuilder = DependencyBuilder(inputs: inputs, runner: runner, store: store)
         var targets: [TargetInputs] = []
@@ -171,7 +178,7 @@ struct BuildGraph: Sendable {
         for slice in slices {
             for arch in slice.architectures {
                 var dependencies: [String: URL] = [:]
-                for dependency in native.dependencies
+                for dependency in native.apple.dependencies
                     where dependency.slices.contains(slice.id)
                 {
                     dependencies[dependency.id] = try dependencyBuilder.materialize(
@@ -183,7 +190,7 @@ struct BuildGraph: Sendable {
                 targets.append(TargetInputs(slice: slice, arch: arch, dependencies: dependencies))
             }
         }
-        let sources = try Dictionary(uniqueKeysWithValues: native.sources.map { try ($0.id, inputs.prepare($0)) })
+        let sources = try Dictionary(uniqueKeysWithValues: native.sources(for: .apple).map { try ($0.id, inputs.prepare($0)) })
         let width = max(1, min(workers, jobs, targets.count))
         let perWorker = max(1, jobs / width)
         let results = WorkerResults()
@@ -197,7 +204,7 @@ struct BuildGraph: Sendable {
                 do {
                     var dependencies = target.dependencies
                     let ffDependencies = dependencies
-                        .filter { entry in native.dependencies.first(where: { $0.id == entry.key })!.consumers.contains("ffmpeg") }
+                        .filter { entry in native.apple.dependencies.first(where: { $0.id == entry.key })!.consumers.contains("ffmpeg") }
                     let ff = try component(
                         "ffmpeg",
                         source: sources["ffmpeg"]!,
@@ -228,15 +235,19 @@ struct BuildGraph: Sendable {
     }
 }
 
-private struct TargetInputs: Sendable { let slice: Slice
+private struct TargetInputs {
+
+    let slice: Slice
     let arch: String
     let dependencies: [String: URL]
 }
 
 private final class WorkerResults: @unchecked Sendable {
+
     private let lock = NSLock()
     private var products: [ThinProduct] = []
     private var error: Error?
+
     var failed: Bool {
         lock.lock()
         defer { lock.unlock() }

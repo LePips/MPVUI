@@ -23,9 +23,8 @@ METRICS = ("lines", "functions", "regions")
 
 def input_digest(root):
     inputs = [root / "Package.swift"]
-    for folder in ("Sources", "Tests", "Example/MPVUIExample/Shared/Resources"):
+    for folder in ("Sources", "Tests", "Example/Sources/MPVUIExample/Resources"):
         inputs.extend(path for path in (root / folder).rglob("*") if path.is_file())
-    inputs.extend((root / "Plugins").rglob("*.swift"))
     inputs.extend((root / "Build/Tests").rglob("*.py"))
     inputs.extend(path for path in (root / "Build/validation.py", root / "Build/result.schema.json") if path.exists())
     digest = hashlib.sha256()
@@ -100,14 +99,40 @@ def suites(root, folders):
     return "(" + "|".join(sorted(set(names))) + ")/"
 
 
+def export_test_bundles(scratch, report, destination):
+    """SwiftPM may export only the final test bundle; include every linked image."""
+    binaries = []
+    for bundle in sorted(scratch.rglob("*.xctest")):
+        binary = bundle / "Contents/MacOS" / bundle.stem if bundle.is_dir() else bundle
+        if binary.is_file():
+            binaries.append(binary)
+    if len(binaries) < 2:
+        return report
+    profile = report.with_name("default.profdata")
+    if not profile.is_file():
+        raise ValueError(f"Missing merged test profile: {profile}")
+    tool = subprocess.check_output(["xcrun", "--find", "llvm-cov"], text=True).strip()
+    command = [tool, "export", str(binaries[0]), "-instr-profile", str(profile)]
+    for binary in binaries[1:]:
+        command += ["-object", str(binary)]
+    with destination.open("w") as stream:
+        subprocess.run(command, stdout=stream, check=True)
+    return destination
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lane", choices=["default", "unit", "integration", "system", "benchmarks"], default="default")
-    parser.add_argument("--check", action="store_true", help="Enforce default-lane coverage floors")
+    parser.add_argument(
+        "--lane",
+        choices=["default", "all", "unit", "integration", "system", "benchmarks"],
+        default="default",
+        help="all combines core, unit, integration and system suites; system opt-ins still apply",
+    )
+    parser.add_argument("--check", action="store_true", help="Enforce complete-suite coverage floors")
     parser.add_argument("--report", type=Path, help="Summarize an existing LLVM JSON export without running tests")
     args = parser.parse_args()
-    if args.check and args.lane != "default":
-        parser.error("--check requires the complete default lane")
+    if args.check and args.lane not in ("default", "all"):
+        parser.error("--check requires the complete default or all lane")
     if args.check and args.report:
         parser.error("--check requires a fresh passing test run, not an unverified export")
 
@@ -122,21 +147,19 @@ def main():
         # Own a dedicated build directory. Remove earlier raw counters so a
         # filtered or failed run cannot inflate this run's report.
         scratch = ROOT / ".build" / "coverage-build"
-        for old in scratch.glob("*/debug/codecov"):
+        for old in scratch.rglob("codecov"):
             shutil.rmtree(old)
-        command = ["swift", "test", "--scratch-path", str(scratch), "--enable-code-coverage", "--no-parallel"]
-        folders = (
-            ["Unit", "Integration"]
-            if args.lane == "default"
-            else [
-                {
-                    "unit": "Unit",
-                    "integration": "Integration",
-                    "system": "System",
-                    "benchmarks": "Benchmarks",
-                }[args.lane]
-            ]
-        )
+        command = [sys.executable, str(ROOT / "Build/Tests/run_swift_tests.py"), "--scratch-path", str(scratch), "--enable-code-coverage"]
+        folders = {
+            "default": ["Unit", "Integration"],
+            "all": ["Unit", "Integration", "System"],
+            "unit": ["Unit"],
+            "integration": ["Integration"],
+            "system": ["System"],
+            "benchmarks": ["Benchmarks"],
+        }[args.lane]
+        if args.lane in ("default", "all", "unit"):
+            folders.append("Core")
         command += ["--filter", suites(ROOT, folders)]
         if sys.platform == "darwin" and args.lane != "unit":
             # AVFoundation readback and system PiP need an awake display. Keep
@@ -187,9 +210,14 @@ def main():
                 text=True,
             ).strip()
         )
+        report = export_test_bundles(scratch, report, output / "merged-coverage.json")
 
     document = json.loads(report.read_text())
     summary = summarize(document, ROOT)
+    if not args.report:
+        for source in ("Sources/Player/MPVPlayer.swift", "Sources/MPVCore/Session/MPVEngine.swift"):
+            if (ROOT / source).is_file() and source not in summary["files"]:
+                raise ValueError(f"Coverage omitted a production target: {source}")
     summary["lane"] = args.lane
     if not args.report:
         summary["testResult"] = match[0]

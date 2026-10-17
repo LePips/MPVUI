@@ -1,9 +1,11 @@
 import CoreGraphics
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVRenderSurfaceConfigurationTests {
+
     private let sdr = MPVRenderSurfaceConfiguration(
         displaySupportsExtendedDynamicRange: false,
         drawableSize: CGSize(width: 640, height: 360),

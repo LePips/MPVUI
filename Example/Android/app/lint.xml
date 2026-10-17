@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- SkipUI includes a notification API; this player never invokes it. -->
+    <issue id="NotificationPermission">
+        <ignore regexp="usage from skip.ui.NotificationWorker" />
+    </issue>
+</lint>

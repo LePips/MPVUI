@@ -1,8 +1,11 @@
 import Foundation
+import MPVCore
 
 /// Testable policy independent of HDMI hardware or notification timing.
 struct MPVDisplayMatchingState {
+
     enum Action: Equatable {
+
         case keep
         case clear
         case apply(MPVDisplayMatchingContent)
@@ -62,14 +65,19 @@ struct MPVDisplayMatchingState {
 /// lifecycle stay shared. The endpoint translates requests and OS events.
 @MainActor
 protocol MPVDisplayMatchingTarget: AnyObject {
+
     /// Stable across wrappers for the same physical/window-owned endpoint.
     var identity: ObjectIdentifier { get }
+
     var isMatchingEnabled: Bool { get }
+
     var isModeSwitchInProgress: Bool { get }
+
     /// Returns `false` when the platform cannot represent a nonempty hint.
     /// A `nil` hint releases this player's preference.
     @discardableResult
     func apply(_ content: MPVDisplayMatchingContent?) -> Bool
+
     /// The returned closure cancels observation. The coordinator owns its lifetime.
     func observeChanges(_ onChange: @escaping @MainActor () -> Void) -> @MainActor () -> Void
 }
@@ -78,26 +86,32 @@ protocol MPVDisplayMatchingTarget: AnyObject {
 /// neither clear nor reclaim a successor's criteria merely by being detached.
 @MainActor
 final class MPVDisplayMatchingCoordinator {
-    private static var owners: [ObjectIdentifier: WeakBox<MPVDisplayMatchingCoordinator>] = [:]
-
-    private var target: (any MPVDisplayMatchingTarget)?
-    private var cancelObservation: (@MainActor () -> Void)?
-    private var matchingState = MPVDisplayMatchingState()
-    var content: MPVDisplayMatchingContent? {
-        matchingState.content
-    }
-
-    private var latestInput: Input?
-    private(set) var isDisplayModeSwitchInProgress = false
-    var displayModeSwitchDidChange: ((Bool) -> Void)?
 
     private struct Input {
+
         let media: MPVMediaInformation
         let mediaGeneration: UInt64
         let state: MPVPlaybackState
         let outputUsesHDR: Bool
         let videoOutput: MPVPlayerConfiguration.VideoOutput
         let dolbyVisionStatus: MPVDolbyVisionStatus
+    }
+
+    private static var owners: [ObjectIdentifier: WeakBox<MPVDisplayMatchingCoordinator>] = [:]
+
+    private(set) var isDisplayModeSwitchInProgress = false
+    var displayModeSwitchDidChange: ((Bool) -> Void)?
+    private var target: (any MPVDisplayMatchingTarget)?
+    private var cancelObservation: (@MainActor () -> Void)?
+    private var matchingState = MPVDisplayMatchingState()
+    private var latestInput: Input?
+
+    var content: MPVDisplayMatchingContent? {
+        matchingState.content
+    }
+
+    isolated deinit {
+        detach()
     }
 
     func update(
@@ -116,9 +130,12 @@ final class MPVDisplayMatchingCoordinator {
         }
         attach(to: target)
         latestInput = Input(
-            media: media, mediaGeneration: mediaGeneration,
-            state: state, outputUsesHDR: outputUsesHDR,
-            videoOutput: videoOutput, dolbyVisionStatus: dolbyVisionStatus
+            media: media,
+            mediaGeneration: mediaGeneration,
+            state: state,
+            outputUsesHDR: outputUsesHDR,
+            videoOutput: videoOutput,
+            dolbyVisionStatus: dolbyVisionStatus
         )
         refresh()
     }
@@ -133,10 +150,6 @@ final class MPVDisplayMatchingCoordinator {
         matchingState = MPVDisplayMatchingState()
         latestInput = nil
         setModeSwitchInProgress(false)
-    }
-
-    isolated deinit {
-        detach()
     }
 
     private func attach(to target: any MPVDisplayMatchingTarget) {
@@ -169,8 +182,10 @@ final class MPVDisplayMatchingCoordinator {
         else { return }
         setModeSwitchInProgress(target.isModeSwitchInProgress)
         let candidate = MPVDisplayMatchingContent(
-            media: input.media, outputUsesHDR: input.outputUsesHDR,
-            videoOutput: input.videoOutput, dolbyVisionStatus: input.dolbyVisionStatus
+            media: input.media,
+            outputUsesHDR: input.outputUsesHDR,
+            videoOutput: input.videoOutput,
+            dolbyVisionStatus: input.dolbyVisionStatus
         )
         let action = matchingState.update(
             candidate: candidate,

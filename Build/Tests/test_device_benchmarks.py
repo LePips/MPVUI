@@ -89,10 +89,10 @@ class DeviceBenchmarkTests(unittest.TestCase):
             self.assertIsNone(url)
 
     def test_build_identity_changes_when_app_or_benchmark_protocol_changes(self):
-        app = self.write("Example/MPVUIExample/Shared/PlaybackBenchmark.swift", "app protocol v1")
+        app = self.write("Example/Sources/MPVUIExample/PlaybackBenchmark.swift", "app protocol v1")
         runner = self.write("Build/Benchmarks/device_playback.py", "host protocol v1")
         self.write("Package.swift", "// remote binary selection")
-        self.write("Example/MPVUIExample/MPVUIExample.xcodeproj/project.pbxproj", "project configuration")
+        self.write("Example/Darwin/MPVUIExample.xcodeproj/project.pbxproj", "project configuration")
         with (
             patch.object(device, "ROOT", self.root),
             patch.object(benchmark, "source_identity", side_effect=lambda _: {"files": {"Sources/Player.swift": "source"}}),

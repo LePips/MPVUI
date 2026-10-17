@@ -1,10 +1,12 @@
 import Combine
+import MPVCore
 import SwiftUI
 
 /// Rasterizes only the overlay. mpv continues to decode and schedule video.
 /// Keeps at most one submission in flight and combines intermediate invalidations.
 @MainActor
 final class MPVVideoOverlayRenderer {
+
     private let renderer: ImageRenderer<AnyView>
     private var content: AnyView
     private let submit: @MainActor (MPVVideoOverlayBitmap?) async -> Bool
@@ -30,6 +32,8 @@ final class MPVVideoOverlayRenderer {
             Task { @MainActor [weak self] in self?.setNeedsRender() }
         }
     }
+
+    isolated deinit { invalidate() }
 
     func updateContent(_ content: AnyView) {
         self.content = content
@@ -65,12 +69,6 @@ final class MPVVideoOverlayRenderer {
         setNeedsRender()
     }
 
-    private func updateRendererContent() {
-        // A proposal alone lets intrinsic-size content shrink the bitmap, which
-        // mpv would then stretch across the entire video frame.
-        renderer.content = AnyView(content.frame(width: size.width, height: size.height))
-    }
-
     func invalidate() {
         isInvalidated = true
         observation = nil
@@ -78,7 +76,11 @@ final class MPVVideoOverlayRenderer {
         renderTask = nil
     }
 
-    isolated deinit { invalidate() }
+    private func updateRendererContent() {
+        // A proposal alone lets intrinsic-size content shrink the bitmap, which
+        // mpv would then stretch across the entire video frame.
+        renderer.content = AnyView(content.frame(width: size.width, height: size.height))
+    }
 
     private func setNeedsRender() {
         guard !isInvalidated, size.width > 0, size.height > 0 else { return }
@@ -87,17 +89,22 @@ final class MPVVideoOverlayRenderer {
         renderTask = Task { @MainActor [weak self] in
             // Deferring lets SwiftUI settle the change that invalidated the image.
             await Task.yield()
-            while let self, !self.isInvalidated, !Task.isCancelled, self.isDirty {
+            while let self, !self.isInvalidated, !Task.isCancelled, self
+                .isDirty
+            {
                 self.isDirty = false
                 // Draw directly into CPU-owned storage. This does not depend
                 // on a visible UIKit view or a foreground window snapshot.
                 var bitmap: MPVVideoOverlayBitmap?
-                self.renderer.render(rasterizationScale: self.rasterScale) { size, draw in
-                    bitmap = MPVVideoOverlayBitmap(size: size, scale: self.rasterScale, draw: draw)
-                }
-                let accepted = await self.submit(bitmap)
+                self.renderer
+                    .render(rasterizationScale: self.rasterScale) { size, draw in
+                        bitmap = MPVVideoOverlayBitmap(size: size, scale: self.rasterScale, draw: draw)
+                    }
+                let accepted = await self
+                    .submit(bitmap)
                 guard !self.isInvalidated, !Task.isCancelled else { return }
-                self.availabilityChanged(bitmap != nil && accepted)
+                self
+                    .availabilityChanged(bitmap != nil && accepted)
                 // Bound rapidly changing overlays to 30 updates/sec. Video is
                 // still scheduled independently at its original frame rate.
                 do { try await Task.sleep(for: .milliseconds(34)) } catch { return }

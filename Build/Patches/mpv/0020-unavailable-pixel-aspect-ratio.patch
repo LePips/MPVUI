@@ -1,0 +1,18 @@
+From: MPVUI contributors
+Subject: [PATCH] player: omit unavailable pixel aspect ratios
+
+Target color parameters have no geometry. Do not expose 0/0 as a NaN:
+NaN never compares equal and invalidates typed observers every frame.
+
+--- a/player/command.c
++++ b/player/command.c
+@@ -2463,7 +2463,8 @@
+         {"crop-h",          SUB_PROP_INT(mp_rect_h(p->crop)), .unavailable = !has_crop},
+         {"aspect",          SUB_PROP_DOUBLE(d_w / (double)d_h)},
+         {"aspect-name",     SUB_PROP_STR(aspect_name), .unavailable = !aspect_name},
+-        {"par",             SUB_PROP_DOUBLE(p->p_w / (double)p->p_h)},
++        {"par",             SUB_PROP_DOUBLE(p->p_h ? p->p_w / (double)p->p_h : 0),
++                            .unavailable = p->p_w <= 0 || p->p_h <= 0},
+         {"sar",             SUB_PROP_DOUBLE(p->w / (double)p->h)},
+         {"sar-name",        SUB_PROP_STR(sar_name), .unavailable = !sar_name},
+         {"colormatrix",

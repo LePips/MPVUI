@@ -1,34 +1,47 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .subtitles), .serialized)
 @MainActor
 struct MPVSubtitleSwitchingTests {
+
     @Test(arguments: MPVSubtitleRole.allCases)
     func `subtitle preroll keeps buffered audio and video playable`(role: MPVSubtitleRole) async throws {
         let stream = try SeekGatedMediaStream(TestPaths.multitrackMedia)
         let session = try NativePlaybackSession(options: [
-            "audio": "auto", "sid": "no", "sub-auto": "no", "sub-text-intercept": "yes",
-            "cache": "yes", "cache-secs": "10", "cache-pause": "yes", "start": "1",
+            "audio": "auto",
+            "sid": "no",
+            "sub-auto": "no",
+            "sub-text-intercept": "yes",
+            "cache": "yes",
+            "cache-secs": "10",
+            "cache-pause": "yes",
+            "start": "1",
         ])
         defer {
             stream.resume()
             withExtendedLifetime(stream) { session.close() }
         }
         try session.registerStream(
-            protocol: "gated", userData: Unmanaged.passUnretained(stream).toOpaque(), open: SeekGatedMediaStream.open
+            protocol: "gated",
+            userData: Unmanaged.passUnretained(stream).toOpaque(),
+            open: SeekGatedMediaStream.open
         )
         try session.command(["loadfile", "gated://multitrack.mkv"])
+        try await eventually("paused playback finishes decoder initialization") { session.consumePlaybackRestart() }
         try await eventually("audio and video are buffered") {
             session.property("demuxer-cache-duration")?.doubleValue ?? 0 > 8
                 && session.property("time-pos")?.doubleValue != nil
                 && session.property("demuxer-cache-state")?.mapValue?["idle"]?.boolValue == true
         }
+
         let beforeBytes = try #require(session.property("demuxer-cache-state")?.mapValue?["fw-bytes"]?.integerValue)
         stream.arm()
         try session.command(["set", role.selectionProperty, "1"])
         try await eventually("subtitle refresh seek reaches the delayed source") { stream.isBlocked }
+
         let buffered = try #require(session.property("demuxer-cache-state")?.mapValue)
         #expect(buffered["fw-bytes"]?.integerValue == beforeBytes)
         #expect(buffered["cache-duration"]?.doubleValue ?? 0 > 8)
@@ -40,6 +53,7 @@ struct MPVSubtitleSwitchingTests {
         try await eventually("video plays from retained packets during subtitle preroll", timeout: .seconds(3)) {
             session.property("time-pos")?.doubleValue ?? 0 > position + 1
         }
+
         #expect(stream.isBlocked)
         stream.resume()
         try await eventually("subtitle catch-up returns the current cue") {
@@ -59,14 +73,21 @@ struct MPVSubtitleSwitchingTests {
             MPVTextSubtitleParser.snapshot(from: session.property("sub-text-snapshot")).text.contains("EN track cue 2")
         }
         try session.command(["set", role.selectionProperty, "no"])
+
         #expect(MPVTextSubtitleParser.snapshot(from: session.property("sub-text-snapshot")).isEmpty)
     }
 
     @Test(arguments: MPVSubtitleRole.allCases)
     func `paused subtitle switches recover cues when the packet cache is full`(role: MPVSubtitleRole) async throws {
         let session = try NativePlaybackSession(options: [
-            "audio": "auto", "sid": "no", "sub-auto": "no", "sub-text-intercept": "yes",
-            "cache": "yes", "cache-secs": "20", "demuxer-max-bytes": "65536", "start": "1",
+            "audio": "auto",
+            "sid": "no",
+            "sub-auto": "no",
+            "sub-text-intercept": "yes",
+            "cache": "yes",
+            "cache-secs": "20",
+            "demuxer-max-bytes": "65536",
+            "start": "1",
         ])
         defer { session.close() }
         try await session.load(TestPaths.multitrackMedia)
@@ -88,11 +109,14 @@ struct MPVSubtitleSwitchingTests {
             options["log-file"] = log
         }
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: options, autoPlay: false, logLevel: .verbose
+            additionalOptions: options,
+            autoPlay: false,
+            logLevel: .verbose
         ))
         defer { fixture.close() }
         let player = fixture.player
         var latest = TextSubtitleSnapshot()
+        player.setTextSubtitleInterceptionEnabled(true)
         let stream = player.textSubtitleStream()
         let observation = Task { @MainActor in
             for await snapshot in stream {
@@ -117,14 +141,18 @@ struct MPVSubtitleSwitchingTests {
             player.selectSubtitle(track.id)
             try await eventually("subtitle track selected") { player.selectedSubtitle()?.id == track.id }
             try await Task.sleep(for: .milliseconds(400))
+
             #expect(player.position > position)
             #expect(latest.regions.allSatisfy { $0.trackID == track.id })
         }
         let after = await player.lifecycleDiagnostics()
         print(
-            "Subtitle switches: 12; output drops:", beforeDiagnostics.outputDroppedFrames as Any,
-            "->", player.playbackDiagnostics.outputDroppedFrames as Any
+            "Subtitle switches: 12; output drops:",
+            beforeDiagnostics.outputDroppedFrames as Any,
+            "->",
+            player.playbackDiagnostics.outputDroppedFrames as Any
         )
+
         #expect(!logs.contains { $0.contains("Video frame delayed due to waiting on subtitles") })
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.seekingStateTransitions == before.seekingStateTransitions)

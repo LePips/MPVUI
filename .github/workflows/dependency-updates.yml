@@ -36,5 +36,4 @@ jobs:
           commit-message: ${{ steps.updates.outputs.title }}
           body-path: .build/dependency-update.md
           draft: false
-          # Git's pathspec also matches the Android lock when that project is present.
-          add-paths: Build/*.lock.json
+          add-paths: Build/Inputs.lock.json

@@ -1,16 +1,19 @@
 #if os(macOS)
 import AppKit
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.system), .serialized)
 @MainActor
 struct MPVInterlacedPlaybackTests {
+
     @Test(
         .enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_INTERLACE_VALIDATION"] == "1"),
         arguments: MPVPlayerConfiguration.VideoOutput.allCases
     )
+
     func `deinterlacing retains field cadence on either renderer`(output: MPVPlayerConfiguration.VideoOutput) async throws {
         let cases: [(String, Double, MPVDeinterlacePolicy)] = [
             ("interlaced-480i-bottom", 60000.0 / 1001, .init(mode: .automatic)),
@@ -31,11 +34,14 @@ struct MPVInterlacedPlaybackTests {
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(
                 contentRect: CGRect(x: 0, y: 0, width: 640, height: 360),
-                styleMask: [.titled], backing: .buffered, defer: false
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
             )
             window.contentView = surface
             surface.layoutSubtreeIfNeeded()
             surface.activateRenderingSurface()
+            player.setDiagnosticsEnabled(true)
             player.load(source)
             for _ in 0 ..< 120 {
                 if let fps = player.playbackDiagnostics.estimatedFilterFramesPerSecond,
@@ -48,8 +54,10 @@ struct MPVInterlacedPlaybackTests {
                 }
                 try await Task.sleep(for: .milliseconds(50))
             }
+
             #expect(player.videoOutput == output)
             let status = player.playbackDiagnostics
+
             #expect(player.lastError == nil)
             #expect(abs((status.estimatedFilterFramesPerSecond ?? 0) - expectedCadence) < 0.4)
             #expect(status.deinterlace.requiresSoftwareFrames == true)

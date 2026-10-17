@@ -1,13 +1,88 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit), .serialized)
 struct MPVEngineEventTests {
+
+    @Test(arguments: [true, false], [29.0, 29.9995, 30.0])
+    func `EOF completes only picture in picture seeks that reached the requested endpoint`(knownDuration: Bool, target: Double) async {
+        let engine = MPVSession(configuration: .init()) { _ in }
+        defer { engine.close() }
+        let result = await withCheckedContinuation { continuation in
+            engine.queue.async {
+                engine.playbackRequestIsActive = true
+                engine.isFileLoaded = true
+                engine.lastDuration = knownDuration ? .seconds(30) : .zero
+                engine.pendingPiPSeek = .init(id: UUID(), target: .seconds(target), continuation: continuation)
+                var end = mpv_event_end_file()
+                end.reason = MPV_END_FILE_REASON_EOF
+                withUnsafeMutablePointer(to: &end) { pointer in
+                    var event = mpv_event()
+                    event.event_id = MPV_EVENT_END_FILE
+                    event.data = UnsafeMutableRawPointer(pointer)
+                    engine.handleEvent(event)
+                }
+            }
+        }
+        #expect(result == (knownDuration && target >= 29.999))
+        #expect(engine.snapshot.state == .ended && engine.snapshot.position == (knownDuration ? .seconds(30) : .zero))
+        #expect(engine.queue.sync { engine.pendingPiPSeek == nil })
+    }
+
+    @Test
+    func `metadata observations clear unavailable values and identify properties without borrowed names`() {
+        let engine = MPVSession(configuration: .init()) { _ in }
+        defer { engine.close() }
+        engine.queue.sync {
+            engine.playbackRequestIsActive = true
+            func deliver(_ property: inout mpv_event_property, id: UInt64) {
+                withUnsafeMutablePointer(to: &property) { pointer in
+                    var event = mpv_event()
+                    event.event_id = MPV_EVENT_PROPERTY_CHANGE
+                    event.reply_userdata = id
+                    event.data = UnsafeMutableRawPointer(pointer)
+                    engine.handleEvent(event)
+                }
+            }
+            let chapterID = UInt64(MPVSession.observedProperties.firstIndex(of: "chapter")! + 1)
+            let durationID = UInt64(MPVSession.observedProperties.firstIndex(of: "duration")! + 1)
+            var property = mpv_event_property()
+            property.format = MPV_FORMAT_INT64
+            for chapter: Int64 in [2, -1, 0] {
+                var value = chapter
+                withUnsafeMutablePointer(to: &value) { pointer in
+                    property.data = UnsafeMutableRawPointer(pointer)
+                    deliver(&property, id: chapterID)
+                }
+                #expect(engine.latestSnapshot.currentChapterIndex == (chapter < 0 ? nil : Int(chapter)))
+            }
+            property.format = MPV_FORMAT_NONE
+            property.data = nil
+            deliver(&property, id: chapterID)
+            #expect(engine.latestSnapshot.currentChapterIndex == nil)
+            for seconds in [4.25, Double.nan, .infinity, -2] {
+                var value = seconds
+                property.format = MPV_FORMAT_DOUBLE
+                withUnsafeMutablePointer(to: &value) { pointer in
+                    property.data = UnsafeMutableRawPointer(pointer)
+                    deliver(&property, id: durationID)
+                }
+                #expect(engine.latestSnapshot.duration == (seconds == 4.25 ? .seconds(4.25) : .zero))
+            }
+            let before = engine.lifecycleDiagnostics.engineActivity.propertyChangeEvents
+            property.format = MPV_FORMAT_NONE
+            property.data = nil
+            deliver(&property, id: 0)
+            #expect(engine.lifecycleDiagnostics.engineActivity.propertyChangeEvents == before)
+        }
+    }
+
     @Test(arguments: [("yes", true as Bool?), ("no", false as Bool?), ("unknown", nil as Bool?)])
     func `decoder session evidence only updates the matching active media`(hardware: String, expected: Bool?) {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.requestedPlaylistEntryID = 2
@@ -25,9 +100,11 @@ struct MPVEngineEventTests {
                             event.event_id = MPV_EVENT_LOG_MESSAGE
                             event.data = UnsafeMutableRawPointer(pointer)
                             engine.handleEvent(event)
+
                             #expect(engine.videoToolboxSessionUsesHardware == true)
                             engine.activePlaylistEntryID = 2
                             engine.handleEvent(event)
+
                             #expect(engine.videoToolboxSessionUsesHardware == expected)
                         }
                     }
@@ -36,10 +113,11 @@ struct MPVEngineEventTests {
         }
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `native output rejection reports one fatal error without requesting a replacement`() async throws {
         var rejected: [String] = []
-        let engine = MPVEngine(configuration: .init(additionalOptions: ["ao": "null"], videoOutput: .sampleBuffer)) { emission in
+        let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null"], videoOutput: .sampleBuffer)) { emission in
             if case let .error(.nativeVideoOutputUnavailable(reason), fatal: true) = emission.update {
                 rejected.append(reason)
             }
@@ -67,6 +145,7 @@ struct MPVEngineEventTests {
                     }
                 }
             }
+
             #expect(engine.didRejectNativeOutput && !engine.needsSourceLoad)
             #expect(!engine.playbackRequestIsActive)
             #expect(engine.videoOutput == .sampleBuffer)
@@ -74,6 +153,7 @@ struct MPVEngineEventTests {
             #expect(engine.desiredProperties["vid"] == "1")
         }
         try await eventually("native rejection is published exactly once") { !rejected.isEmpty }
+
         #expect(rejected == ["Rejected pixel format"])
         engine.load(TestPaths.baselineMedia, autoPlay: false, startTime: nil, generation: 1)
         _ = await engine.lifecycleSnapshot()
@@ -86,10 +166,11 @@ struct MPVEngineEventTests {
         }
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `missing native log fields use safe defaults without dropping the message`() async throws {
         var logs: [MPVLogMessage] = []
-        let engine = MPVEngine(configuration: .init(logLevel: .info)) { emission in
+        let engine = MPVSession(configuration: .init(logLevel: .info)) { emission in
             if case let .log(log) = emission.update {
                 logs.append(log)
             }
@@ -104,12 +185,13 @@ struct MPVEngineEventTests {
             }
         }
         try await eventually("missing log fields are copied") { !logs.isEmpty }
+
         #expect(logs == [MPVLogMessage(prefix: "mpv", level: .info, message: "")])
     }
 
     @Test
     func `unavailable pause and timestamp properties preserve the last known values`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.isPaused = true
@@ -127,6 +209,7 @@ struct MPVEngineEventTests {
                     }
                 }
             }
+
             #expect(engine.isPaused)
             #expect(engine.lastPosition == .seconds(3))
         }
@@ -134,7 +217,7 @@ struct MPVEngineEventTests {
 
     @Test
     func `start events cannot resurrect an inactive or superseded request`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             var start = mpv_event_start_file()
             start.playlist_entry_id = 12
@@ -143,14 +226,17 @@ struct MPVEngineEventTests {
                 event.event_id = MPV_EVENT_START_FILE
                 event.data = UnsafeMutableRawPointer(pointer)
                 engine.handleEvent(event)
+
                 #expect(engine.lastState == .idle)
                 engine.playbackRequestIsActive = true
                 engine.requestedPlaylistEntryID = 13
                 engine.handleEvent(event)
+
                 #expect(engine.activePlaylistEntryID == nil)
                 #expect(engine.lastState == .idle)
                 engine.requestedPlaylistEntryID = 12
                 engine.handleEvent(event)
+
                 #expect(engine.activePlaylistEntryID == 12)
                 #expect(engine.lastState == .loading)
                 #expect(engine.isLoading && !engine.isFileLoaded)
@@ -161,7 +247,7 @@ struct MPVEngineEventTests {
 
     @Test
     func `redirect awaits a new playlist identity while stop leaves typed ownership intact`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.requestedPlaylistEntryID = 12
@@ -177,9 +263,11 @@ struct MPVEngineEventTests {
                 event.event_id = MPV_EVENT_END_FILE
                 event.data = UnsafeMutableRawPointer(pointer)
                 engine.handleEvent(event)
+
                 #expect(engine.playbackRequestIsActive && engine.isFileLoaded)
                 pointer.pointee.reason = MPV_END_FILE_REASON_REDIRECT
                 engine.handleEvent(event)
+
                 #expect(engine.playbackRequestIsActive)
                 #expect(engine.requestedPlaylistEntryID == nil && engine.activePlaylistEntryID == nil)
                 #expect(engine.isLoading && !engine.isFileLoaded)
@@ -191,7 +279,7 @@ struct MPVEngineEventTests {
 
     @Test(arguments: [MPV_END_FILE_REASON_EOF.rawValue, MPV_END_FILE_REASON_QUIT.rawValue, MPV_END_FILE_REASON_ERROR.rawValue])
     func `terminal events clear request state and preserve the specific outcome`(reason: UInt32) {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.requestedPlaylistEntryID = 12
@@ -208,6 +296,7 @@ struct MPVEngineEventTests {
                 event.data = UnsafeMutableRawPointer(pointer)
                 engine.handleEvent(event)
             }
+
             #expect(!engine.playbackRequestIsActive && !engine.isFileLoaded)
             #expect(engine.isIdle && !engine.hasPlaybackStarted)
             #expect(engine.requestedPlaylistEntryID == nil && engine.activePlaylistEntryID == nil)
@@ -219,7 +308,8 @@ struct MPVEngineEventTests {
                 #expect(engine.lastState == .stopped)
             default:
                 #expect(engine.lastState == .failed(.playbackFailed(
-                    code: MPV_ERROR_LOADING_FAILED.rawValue, message: "loading failed"
+                    code: MPV_ERROR_LOADING_FAILED.rawValue,
+                    message: "loading failed"
                 )))
             }
         }
@@ -227,7 +317,7 @@ struct MPVEngineEventTests {
 
     @Test
     func `end for a displaced entry only retires that old active identity`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.requestedPlaylistEntryID = 13
@@ -241,6 +331,7 @@ struct MPVEngineEventTests {
                 event.data = UnsafeMutableRawPointer(pointer)
                 engine.handleEvent(event)
             }
+
             #expect(engine.playbackRequestIsActive)
             #expect(engine.requestedPlaylistEntryID == 13)
             #expect(engine.activePlaylistEntryID == nil)
@@ -251,36 +342,41 @@ struct MPVEngineEventTests {
 
     @Test
     func `missing payloads and unknown events do not dereference unavailable native storage`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             for id in [MPV_EVENT_START_FILE, MPV_EVENT_PROPERTY_CHANGE, MPV_EVENT_COMMAND_REPLY, MPV_EVENT_NONE] {
                 var event = mpv_event()
                 event.event_id = id
                 engine.handleEvent(event)
+
                 #expect(engine.lastState == .idle)
             }
             var event = mpv_event()
             event.event_id = MPV_EVENT_END_FILE
             engine.handleEvent(event)
+
             #expect(engine.lastState == .ended)
             #expect(!engine.playbackRequestIsActive)
             event.event_id = MPV_EVENT_SHUTDOWN
             engine.handleEvent(event)
+
             #expect(engine.handle == nil)
         }
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `overflow reports a recoverable error and refreshes the active snapshot`() async throws {
         var updates: [MPVEngineUpdate] = []
-        let engine = MPVEngine(configuration: .init(volume: 37)) { updates.append($0.update) }
+        let engine = MPVSession(configuration: .init(volume: 37)) { updates.append($0.update) }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.isPausedForCache = true
             var event = mpv_event()
             event.event_id = MPV_EVENT_QUEUE_OVERFLOW
             engine.handleEvent(event)
+
             #expect(engine.lastState == .buffering)
             #expect(engine.lifecycleDiagnostics.bufferingStateTransitions == 1)
         }
@@ -293,6 +389,7 @@ struct MPVEngineEventTests {
                 }
             }
         }
+
         #expect(updates.contains {
             if case .error(.eventQueueOverflow, fatal: false) = $0 {
                 true
@@ -300,6 +397,7 @@ struct MPVEngineEventTests {
                 false
             }
         })
+
         #expect(updates.contains {
             if case let .buffer(buffer) = $0 {
                 buffer.isBuffering
@@ -307,12 +405,13 @@ struct MPVEngineEventTests {
                 false
             }
         })
+
         #expect(engine.queue.sync { engine.fatalPlaybackError == nil })
     }
 
     @Test(arguments: ["time-pos", "paused-for-cache", "core-idle", "seeking", "unknown-property"])
     func `property events use copied time values and preserve unavailable state`(name: String) {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.playbackRequestIsActive = true
             engine.lastPosition = .seconds(9)
@@ -332,6 +431,7 @@ struct MPVEngineEventTests {
                     }
                 }
             }
+
             #expect(engine.lastPosition == (name == "time-pos" ? .zero : .seconds(9)))
             #expect(engine.isPausedForCache)
         }
@@ -339,7 +439,7 @@ struct MPVEngineEventTests {
 
     @Test(arguments: ["cancelled", "native-error", "missing-result", "empty-timeline"])
     func `subtitle command replies complete and remove exactly their pending query`(outcome: String) async {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         let cancellation = MPVSubtitleQueryCancellation()
         if outcome == "cancelled" {
             cancellation.cancel()
@@ -363,6 +463,7 @@ struct MPVEngineEventTests {
                     }
                 }
             }
+
             #expect(outcome == "empty-timeline")
             #expect(snapshots.isEmpty)
         } catch is CancellationError {
@@ -377,29 +478,36 @@ struct MPVEngineEventTests {
 
     @Test
     func `state precedence retains failures and terminal outcomes ahead of transient flags`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         engine.queue.sync {
             engine.isIdle = false
             engine.isFileLoaded = false
             engine.refreshState()
+
             #expect(engine.lastState == .idle)
             engine.isFileLoaded = true
             engine.refreshState()
+
             #expect(engine.lastState == .ready)
             engine.isPausedForCache = true
             engine.refreshState()
+
             #expect(engine.lastState == .buffering)
             engine.isSeeking = true
             engine.refreshState()
+
             #expect(engine.lastState == .seeking)
             engine.isLoading = true
             engine.refreshState()
+
             #expect(engine.lastState == .loading)
             engine.didReachEnd = true
             engine.refreshState()
+
             #expect(engine.lastState == .ended)
             engine.fatalPlaybackError = .clientCreationFailed
             engine.refreshState()
+
             #expect(engine.lastState == .failed(.clientCreationFailed))
         }
     }

@@ -20,6 +20,9 @@ import sys
 import tempfile
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from native_inputs import inputs_for, load
+
 HARNESS_ROOT = Path(__file__).resolve().parents[2]
 HEADERS = ("video/out/avfoundation_color.h", "video/out/avfoundation_color_math.h")
 
@@ -125,8 +128,7 @@ def run(args: argparse.Namespace) -> dict:
     if platform.system() != "Darwin":
         raise BenchmarkError("The native subtitle benchmark requires macOS and the pinned Xcode")
     source_root = args.source_root.expanduser().resolve()
-    lock_path = source_root / "Build/Inputs.lock.json"
-    lock = json.loads(lock_path.read_text())
+    lock = inputs_for(load(source_root), "apple")
     patch_fingerprint = validate_patches(source_root, lock)
     clang, sdk, compiler = find_toolchain(lock)
     include, libplacebo = find_libplacebo(source_root, args.libplacebo_include)

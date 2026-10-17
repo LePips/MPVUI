@@ -1,12 +1,21 @@
-# version: 0.63.0
-
 --swiftversion 6.3
 
 --assetliterals visual-width
 --computedvarattrs prev-line
+--complexattributes prev-line
+--emptybraces no-space
 --funcattributes prev-line
---ifdef no-indent 
+--ifdef no-indent
+--importgrouping alpha
+--indent 4
+--linebreaks lf
 --maxwidth 140
+--organizationmode type
+--organizetypes class,actor,struct,enum,extension
+--markcategories false
+--groupblanklines false
+--typeorder nestedType,beforeMarks,staticProperty,staticPropertyWithBody,classPropertyWithBody,instanceProperty,swiftUIPropertyWrapper,computedProperty,instanceLifecycle,swiftUIProperty,swiftUIMethod,overriddenMethod,staticMethod,classMethod,instanceMethod
+--typeblanklines start-only
 --semicolons never
 --shortoptionals "always"
 --storedvarattrs prev-line
@@ -15,14 +24,17 @@
 --trailingclosures
 --typeattributes prev-line
 --wraparguments before-first
+--allowpartialwrapping false
 --wrapcollections before-first
 --wrapconditions after-first
 --wrapparameters before-first
 --xcodeindentation enabled
 
 --enable blankLinesAroundMark,   \
+    blankLinesAtStartOfScope, \
     isEmpty,                \
     leadingDelimiters,      \
+    organizeDeclarations,  \
     redundantInit,          \
     redundantLet,           \
     spaceInsideBraces,      \
@@ -30,13 +42,14 @@
     spaceInsideComments,    \
     spaceInsideGenerics,    \
     spaceInsideParens,      \
+    singlePropertyPerLine,  \
     trailingSpace,          \
     typeSugar,              \
     void,                   \
-    wrapEnumCases
+    wrapEnumCases,          \
+    wrapMultilineFunctionChains
 
 --disable andOperator,       \
-    blankLinesAtStartOfScope,\
     docComments,             \
     redundantClosure,       \
     redundantFileprivate,   \
@@ -47,4 +60,4 @@
     trailingCommas,         \
     yodaConditions
 
---header ""
+--header ignore

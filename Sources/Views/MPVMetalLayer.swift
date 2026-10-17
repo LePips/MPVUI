@@ -1,13 +1,27 @@
 import CoreGraphics
 import Foundation
 import Metal
+import MPVCore
 import QuartzCore
 
 /// A shared Metal layer that preserves MPVUI's host contract while MoltenVK
 /// retires or replaces a swapchain.
 final class MPVMetalLayer: CAMetalLayer {
+
     /// Native libmpv and MoltenVK surface extents use a signed C `int`.
     static let maximumDrawableDimension = CGFloat(Int32.max)
+
+    /// Native video is a child of the view's backing layer. Keep it in the
+    /// same geometry transaction, including explicit UIKit/SwiftUI animations.
+    weak var videoSublayer: CALayer? {
+        didSet { layoutVideoSublayer() }
+    }
+
+    var geometryAnimationDidStart: (@MainActor () -> Void)?
+
+    override var bounds: CGRect {
+        didSet { layoutVideoSublayer() }
+    }
 
     #if os(iOS)
     private var hostExtendedDynamicRangeContent: Bool?
@@ -24,118 +38,9 @@ final class MPVMetalLayer: CAMetalLayer {
     private var presentationObserver: (@Sendable (CFTimeInterval) -> Void)?
     #endif
 
-    /// Native video is a child of the view's backing layer. Keep it in the
-    /// same geometry transaction, including explicit UIKit/SwiftUI animations.
-    weak var videoSublayer: CALayer? {
-        didSet { layoutVideoSublayer() }
-    }
-
-    var geometryAnimationDidStart: (@MainActor () -> Void)?
-
     var hasGeometryAnimation: Bool {
         (animationKeys() ?? []).contains { key in
             animation(forKey: key).flatMap(Self.geometryAnimation) != nil
-        }
-    }
-
-    override var bounds: CGRect {
-        didSet { layoutVideoSublayer() }
-    }
-
-    private func layoutVideoSublayer() {
-        guard let videoSublayer, videoSublayer.superlayer === self else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        videoSublayer.anchorPoint = .zero
-        videoSublayer.position = bounds.origin
-        videoSublayer.bounds = bounds
-        CATransaction.commit()
-    }
-
-    override func add(_ animation: CAAnimation, forKey key: String?) {
-        super.add(animation, forKey: key)
-        guard let geometry = Self.geometryAnimation(animation) else { return }
-        // Copy the actual animation, preserving spring parameters, keyframes,
-        // timing, and interactive interruption. A new default-duration implicit
-        // animation would visibly lag behind the hosting view.
-        if let videoSublayer, videoSublayer.superlayer === self {
-            videoSublayer.add(geometry, forKey: key)
-        }
-        if Thread.isMainThread {
-            let didStart = geometryAnimationDidStart
-            MainActor.assumeIsolated { didStart?() }
-        }
-    }
-
-    override func removeAnimation(forKey key: String) {
-        if videoSublayer?.superlayer === self,
-           animation(forKey: key).flatMap(Self.geometryAnimation) != nil
-        {
-            videoSublayer?.removeAnimation(forKey: key)
-        }
-        super.removeAnimation(forKey: key)
-    }
-
-    override func removeAllAnimations() {
-        for key in animationKeys() ?? [] {
-            removeAnimation(forKey: key)
-        }
-        super.removeAllAnimations()
-    }
-
-    private static func geometryAnimation(_ animation: CAAnimation) -> CAAnimation? {
-        if let group = animation as? CAAnimationGroup {
-            let children = group.animations?.compactMap(geometryAnimation) ?? []
-            guard !children.isEmpty, let copy = group.copy() as? CAAnimationGroup else { return nil }
-            copy.animations = children
-            return copy
-        }
-        guard let property = animation as? CAPropertyAnimation,
-              let path = property.keyPath,
-              path == "bounds" || path.hasPrefix("bounds.")
-        else { return nil }
-        return animation
-    }
-
-    #if DEBUG
-    /// Opt-in measurement of displayed frames, rather than resize requests or
-    /// submitted command buffers. No drawable handlers are installed normally.
-    func observePresentation(_ observer: (@Sendable (CFTimeInterval) -> Void)?) {
-        presentationObserverLock.lock()
-        presentationObserver = observer
-        presentationObserverLock.unlock()
-    }
-
-    override func nextDrawable() -> (any CAMetalDrawable)? {
-        let drawable = super.nextDrawable()
-        #if !targetEnvironment(simulator)
-        presentationObserverLock.lock()
-        let observer = presentationObserver
-        presentationObserverLock.unlock()
-        if let observer {
-            drawable?.addPresentedHandler { presented in
-                observer(presented.presentedTime)
-            }
-        }
-        #endif
-        return drawable
-    }
-    #endif
-
-    /// MoltenVK may set a generic swapchain colorspace while rebuilding. The
-    /// host's exact profile is authoritative, particularly in calibrated ICC
-    /// mode where a second display transform would corrupt the result.
-    func configureHostColorSpace(_ colorSpace: CGColorSpace, pixelFormat: MTLPixelFormat) {
-        precondition(Thread.isMainThread)
-        colorStateLock.lock()
-        defer { colorStateLock.unlock() }
-        hostColorSpace = colorSpace
-        hostPixelFormat = pixelFormat
-        if !Self.matchesColorSpace(super.colorspace, colorSpace) {
-            super.colorspace = colorSpace
-        }
-        if super.pixelFormat != pixelFormat {
-            super.pixelFormat = pixelFormat
         }
     }
 
@@ -247,6 +152,37 @@ final class MPVMetalLayer: CAMetalLayer {
         }
     }
 
+    override func add(_ animation: CAAnimation, forKey key: String?) {
+        super.add(animation, forKey: key)
+        guard let geometry = Self.geometryAnimation(animation) else { return }
+        // Copy the actual animation, preserving spring parameters, keyframes,
+        // timing, and interactive interruption. A new default-duration implicit
+        // animation would visibly lag behind the hosting view.
+        if let videoSublayer, videoSublayer.superlayer === self {
+            videoSublayer.add(geometry, forKey: key)
+        }
+        if Thread.isMainThread {
+            let didStart = geometryAnimationDidStart
+            MainActor.assumeIsolated { didStart?() }
+        }
+    }
+
+    override func removeAnimation(forKey key: String) {
+        if videoSublayer?.superlayer === self,
+           animation(forKey: key).flatMap(Self.geometryAnimation) != nil
+        {
+            videoSublayer?.removeAnimation(forKey: key)
+        }
+        super.removeAnimation(forKey: key)
+    }
+
+    override func removeAllAnimations() {
+        for key in animationKeys() ?? [] {
+            removeAnimation(forKey: key)
+        }
+        super.removeAllAnimations()
+    }
+
     static func isValidDrawableSize(_ size: CGSize) -> Bool {
         size.width.isFinite
             && size.height.isFinite
@@ -254,6 +190,83 @@ final class MPVMetalLayer: CAMetalLayer {
             && size.height > 1
             && size.width <= maximumDrawableDimension
             && size.height <= maximumDrawableDimension
+    }
+
+    private static func geometryAnimation(_ animation: CAAnimation) -> CAAnimation? {
+        if let group = animation as? CAAnimationGroup {
+            let children = group.animations?.compactMap(geometryAnimation) ?? []
+            guard !children.isEmpty, let copy = group.copy() as? CAAnimationGroup else { return nil }
+            copy.animations = children
+            return copy
+        }
+        guard let property = animation as? CAPropertyAnimation,
+              let path = property.keyPath,
+              path == "bounds" || path.hasPrefix("bounds.")
+        else { return nil }
+        return animation
+    }
+
+    private static func isMoltenVKRetirementSentinel(_ size: CGSize) -> Bool {
+        size.width == 1 && size.height == 1
+    }
+
+    private static func matchesColorSpace(
+        _ lhs: CGColorSpace?,
+        _ rhs: CGColorSpace?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (lhs?, rhs?):
+            if lhs === rhs {
+                return true
+            }
+            return CFEqual(lhs, rhs)
+        default:
+            return false
+        }
+    }
+
+    #if DEBUG
+    /// Opt-in measurement of displayed frames, rather than resize requests or
+    /// submitted command buffers. No drawable handlers are installed normally.
+    func observePresentation(_ observer: (@Sendable (CFTimeInterval) -> Void)?) {
+        presentationObserverLock.lock()
+        presentationObserver = observer
+        presentationObserverLock.unlock()
+    }
+
+    override func nextDrawable() -> (any CAMetalDrawable)? {
+        let drawable = super.nextDrawable()
+        #if !targetEnvironment(simulator)
+        presentationObserverLock.lock()
+        let observer = presentationObserver
+        presentationObserverLock.unlock()
+        if let observer {
+            drawable?.addPresentedHandler { presented in
+                observer(presented.presentedTime)
+            }
+        }
+        #endif
+        return drawable
+    }
+    #endif
+
+    /// MoltenVK may set a generic swapchain colorspace while rebuilding. The
+    /// host's exact profile is authoritative, particularly in calibrated ICC
+    /// mode where a second display transform would corrupt the result.
+    func configureHostColorSpace(_ colorSpace: CGColorSpace, pixelFormat: MTLPixelFormat) {
+        precondition(Thread.isMainThread)
+        colorStateLock.lock()
+        defer { colorStateLock.unlock() }
+        hostColorSpace = colorSpace
+        hostPixelFormat = pixelFormat
+        if !Self.matchesColorSpace(super.colorspace, colorSpace) {
+            super.colorspace = colorSpace
+        }
+        if super.pixelFormat != pixelFormat {
+            super.pixelFormat = pixelFormat
+        }
     }
 
     /// Limits MoltenVK's retirement sentinel exception to a host-authorized
@@ -295,10 +308,6 @@ final class MPVMetalLayer: CAMetalLayer {
             super.drawableSize = storedLastValidDrawableSize
         }
         drawableStateLock.unlock()
-    }
-
-    private static func isMoltenVKRetirementSentinel(_ size: CGSize) -> Bool {
-        size.width == 1 && size.height == 1
     }
 
     #if os(iOS)
@@ -344,6 +353,16 @@ final class MPVMetalLayer: CAMetalLayer {
     }
     #endif
 
+    private func layoutVideoSublayer() {
+        guard let videoSublayer, videoSublayer.superlayer === self else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        videoSublayer.anchorPoint = .zero
+        videoSublayer.position = bounds.origin
+        videoSublayer.bounds = bounds
+        CATransaction.commit()
+    }
+
     #if canImport(UIKit)
     private func applyMinificationFilter(_ newValue: CALayerContentsFilter) {
         precondition(Thread.isMainThread)
@@ -357,21 +376,4 @@ final class MPVMetalLayer: CAMetalLayer {
         super.magnificationFilter = newValue
     }
     #endif
-
-    private static func matchesColorSpace(
-        _ lhs: CGColorSpace?,
-        _ rhs: CGColorSpace?
-    ) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil):
-            return true
-        case let (lhs?, rhs?):
-            if lhs === rhs {
-                return true
-            }
-            return CFEqual(lhs, rhs)
-        default:
-            return false
-        }
-    }
 }

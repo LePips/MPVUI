@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+@testable import MPVCore
 @testable import MPVUI
 import os
 import Testing
@@ -7,15 +8,18 @@ import Testing
 @Suite(.tags(.integration, .hdr), .serialized)
 @MainActor
 struct MPVEDRLiveUpdateTests {
+
     @Test
     func `constrained Metal HDR permits the requested compositor adaptation`() {
         guard #available(macOS 26.0, *) else { return }
         let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .constrained, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.configureMetalLayer(usesExtendedDynamicRange: true, scale: 1, outputHeadroom: 2)
+
         #expect(surface.metalLayer.preferredDynamicRange == .constrainedHigh)
         #expect(surface.metalLayer.toneMapMode == .ifSupported)
         surface.configureMetalLayer(usesExtendedDynamicRange: false, scale: 1, outputHeadroom: 1)
+
         #expect(surface.metalLayer.preferredDynamicRange == .standard)
         #expect(surface.metalLayer.toneMapMode == .never)
     }
@@ -45,6 +49,7 @@ struct MPVEDRLiveUpdateTests {
             case .disabled: .standard
             case .constrained: .constrainedHigh
             }
+
             #expect(player.sampleBufferDisplayLayer.preferredDynamicRange == expected)
             #expect(player.sampleBufferDisplayLayer.toneMapMode == .ifSupported)
             #expect(player.videoOutput == .sampleBuffer)
@@ -56,6 +61,7 @@ struct MPVEDRLiveUpdateTests {
             for _ in 0 ..< 10 {
                 surface.updateRenderingConfiguration()
             }
+
             #expect(scaleChanges.withLock { $0 } == 0)
             // Equality checks must read the layer's current policy rather than
             // cache a previous write: native lifecycle work can replace it.
@@ -63,6 +69,7 @@ struct MPVEDRLiveUpdateTests {
             layer.preferredDynamicRange = expected == .standard ? .high : .standard
             layer.toneMapMode = .never
             surface.updateRenderingConfiguration()
+
             #expect(layer.contentsScale == max(window.backingScaleFactor, 1))
             #expect(layer.preferredDynamicRange == expected)
             #expect(layer.toneMapMode == .ifSupported)
@@ -120,6 +127,7 @@ struct MPVEDRLiveUpdateTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         let changed = await player.lifecycleDiagnostics()
+
         #expect(changed.liveColorUpdates > before.liveColorUpdates)
         #expect(changed.handlesCreated == before.handlesCreated)
         #expect(changed.handlesDestroyed == before.handlesDestroyed)
@@ -136,6 +144,7 @@ struct MPVEDRLiveUpdateTests {
         surface.edrHeadroomOverrideForTesting = (current: 1.504, potential: 8)
         surface.updateRenderingConfiguration()
         try await Task.sleep(for: .milliseconds(100))
+
         #expect(await player.lifecycleDiagnostics().liveColorUpdates == changed.liveColorUpdates)
     }
 }

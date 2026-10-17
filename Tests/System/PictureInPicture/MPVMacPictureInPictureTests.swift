@@ -1,5 +1,6 @@
 #if os(macOS) && !targetEnvironment(macCatalyst)
 import AppKit
+@testable import MPVCore
 @testable import MPVUI
 import Observation
 import SwiftUI
@@ -7,10 +8,12 @@ import Testing
 
 @Suite(.tags(.system, .pictureInPicture), .serialized)
 struct MPVMacPictureInPictureTests {
+
     @Test(.enabled(
         if: ProcessInfo.processInfo.environment["MPVUI_RUN_MAC_PIP_SYSTEM_TESTS"] == "1",
         "Opt in on a logged-in Mac to open and validate real system PiP."
     ))
+
     @MainActor
     func `live overlay preserves environment state and intercepted subtitles in system PiP`() async throws {
         _ = NSApplication.shared
@@ -27,6 +30,7 @@ struct MPVMacPictureInPictureTests {
         window.makeKeyAndOrderFront(nil)
         host.layoutSubtreeIfNeeded()
         let pip = player.pictureInPicture
+        player.setTextSubtitleInterceptionEnabled(true)
         let subtitles = player.textSubtitleStream()
         let observation = Task { @MainActor in
             for await snapshot in subtitles {
@@ -46,6 +50,7 @@ struct MPVMacPictureInPictureTests {
         player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(1))
         player.loadExternalTrack(subtitle, type: .subtitle, select: true)
         try #require(await waitUntil { pip.isPossible && model.caption == "Intercepted caption" && model.identity != nil })
+
         let identity = try #require(model.identity)
         #expect(model.colorScheme == .dark)
         let surface = try #require(findSurface(in: host))
@@ -54,9 +59,11 @@ struct MPVMacPictureInPictureTests {
         pip.start()
         try #require(await waitUntil { pip.isActive || pip.lastError != nil })
         try #require(pip.isActive && pip.isVideoOverlayActive)
+
         #expect(overlayHost.window !== window)
         #expect(overlayHost.superview === surface.superview)
         try await Task.sleep(for: .milliseconds(150))
+
         #expect(model.caption == "Intercepted caption")
         #expect(await player.textSubtitleInterceptionForTesting() == true)
 
@@ -64,6 +71,7 @@ struct MPVMacPictureInPictureTests {
         host.rootView = AnyView(video())
         host.layoutSubtreeIfNeeded()
         try #require(await waitUntil { model.renderedUpdate })
+
         #expect(model.identity == identity)
         #expect(surface.videoOverlayHost === overlayHost)
 
@@ -75,6 +83,7 @@ struct MPVMacPictureInPictureTests {
         try #require(await waitUntil { !model.renderedUpdate })
         model.isUpdated = true
         try #require(await waitUntil { model.renderedUpdate })
+
         #expect(surface.videoOverlayHost === overlayHost)
         #expect(model.caption == "Intercepted caption")
         host.rootView = AnyView(video())
@@ -82,6 +91,7 @@ struct MPVMacPictureInPictureTests {
         try #require(await waitUntil { findSurface(in: host) != nil })
         pip.stop()
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
+
         #expect(findSurface(in: host)?.isActiveRenderingSurface == true)
         #expect(!pip.isVideoOverlayActive)
         #expect(await player.textSubtitleInterceptionForTesting() == true)
@@ -94,6 +104,7 @@ struct MPVMacPictureInPictureTests {
             "Opt in on a logged-in Mac to open and validate real system PiP."
         )
     )
+
     @MainActor
     func `SwiftUI source layout updates preserve the system hosted surface`() async throws {
         _ = NSApplication.shared
@@ -104,6 +115,7 @@ struct MPVMacPictureInPictureTests {
         sourceWindow.makeKeyAndOrderFront(nil)
         inlineHost.layoutSubtreeIfNeeded()
         try #require(await waitUntil { findSurface(in: inlineHost) != nil })
+
         let surface = try #require(findSurface(in: inlineHost))
         let pip = player.pictureInPicture
         defer {
@@ -117,6 +129,7 @@ struct MPVMacPictureInPictureTests {
         pip.start()
         try #require(await waitUntil { pip.isActive || pip.lastError != nil })
         try #require(pip.isActive && pip.lastError == nil)
+
         let pipWindow = try #require(surface.window)
         try #require(pipWindow !== sourceWindow)
 
@@ -124,6 +137,7 @@ struct MPVMacPictureInPictureTests {
         inlineHost.rootView = AnyView(MPVVideoPlayer(player: player))
         inlineHost.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(250))
+
         #expect(surface.window === pipWindow)
         #expect(surface.isActiveRenderingSurface)
         #expect(pip.isActive)
@@ -137,6 +151,7 @@ struct MPVMacPictureInPictureTests {
         inlineHost.rootView = AnyView(MPVVideoPlayer(player: player))
         inlineHost.layoutSubtreeIfNeeded()
         try #require(await waitUntil { findSurface(in: inlineHost) != nil })
+
         let replacement = try #require(findSurface(in: inlineHost))
         #expect(replacement !== surface)
         #expect(!replacement.isActiveRenderingSurface)
@@ -144,6 +159,7 @@ struct MPVMacPictureInPictureTests {
 
         pip.stop()
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
+
         #expect(replacement.window === sourceWindow)
         #expect(replacement.isActiveRenderingSurface)
         #expect(findSurface(in: inlineHost) === replacement)
@@ -158,6 +174,7 @@ struct MPVMacPictureInPictureTests {
             "Opt in on a logged-in Mac to open and validate real system PiP."
         )
     )
+
     @MainActor
     func `stalled application restoration cannot retain active PiP indefinitely`() async throws {
         _ = NSApplication.shared
@@ -191,6 +208,7 @@ struct MPVMacPictureInPictureTests {
         try #require(pip.isActive)
         pip.stop()
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
+
         #expect(lastFailure == .pictureInPictureTimedOut(operation: .restoreInterface))
         #expect(await waitUntil { restorationWasCancelled })
         #expect(surface.window === sourceWindow)
@@ -203,6 +221,7 @@ struct MPVMacPictureInPictureTests {
             "Opt in on a logged-in Mac to open and validate real system PiP."
         )
     )
+
     @MainActor
     func `real system host plays resizes and restores one mpv session`() async throws {
         _ = NSApplication.shared
@@ -232,6 +251,7 @@ struct MPVMacPictureInPictureTests {
         try #require(await waitUntil { pip.isActive || pip.lastError != nil })
         try #require(pip.lastError == nil, "\(String(describing: pip.lastError))")
         try #require(pip.isActive)
+
         let pipWindow = try #require(surface.window)
         #expect(pipWindow !== sourceWindow)
         #expect(pipWindow.isVisible)
@@ -244,7 +264,8 @@ struct MPVMacPictureInPictureTests {
         surface.requestAuthoritativeFinalResize()
         try #require(await waitUntil { surface.bounds.size != originalPiPSize })
         let resizedPixels = MPVRenderSurfaceConfiguration.drawableSize(
-            for: surface.bounds.size, scale: surface.metalLayer.contentsScale
+            for: surface.bounds.size,
+            scale: surface.metalLayer.contentsScale
         )
         try #require(await waitForOutput(player, size: resizedPixels))
         player.pause()
@@ -256,6 +277,7 @@ struct MPVMacPictureInPictureTests {
 
         pip.stop()
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
+
         #expect(pip.lastError == nil)
         #expect(sourceWindow.contentView === surface)
         #expect(surface.window === sourceWindow)
@@ -268,8 +290,10 @@ struct MPVMacPictureInPictureTests {
         try #require(pip.isActive && pip.lastError == nil)
         pip.stop()
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
+
         #expect(surface.window === sourceWindow)
         let finalLifecycle = await player.lifecycleDiagnostics()
+
         #expect(finalLifecycle.handlesCreated == initialLifecycle.handlesCreated)
         #expect(finalLifecycle.loadCommands == initialLifecycle.loadCommands)
         #expect(player.lastError == nil)
@@ -283,7 +307,9 @@ struct MPVMacPictureInPictureTests {
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
         )
         window.animationBehavior = .none
         return window
@@ -326,8 +352,10 @@ struct MPVMacPictureInPictureTests {
     }
 }
 
-@MainActor @Observable
+@MainActor
+@Observable
 private final class LiveOverlayModel {
+
     var caption = ""
     var isUpdated = false
     var renderedUpdate = false
@@ -335,12 +363,18 @@ private final class LiveOverlayModel {
     var colorScheme: ColorScheme?
 }
 
-private struct LiveOverlayProbe: View {
+private struct LiveOverlayProbe {
+
     let model: LiveOverlayModel
+
     @Environment(\.colorScheme)
     private var colorScheme
+
     @State
     private var identity = UUID()
+}
+
+extension LiveOverlayProbe: View {
 
     var body: some View {
         Text(model.caption)

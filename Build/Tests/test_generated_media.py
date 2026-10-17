@@ -112,6 +112,31 @@ class GeneratedMediaContractTests(unittest.TestCase):
                 self.assertEqual((stream["codec_name"], stream["pix_fmt"], stream["r_frame_rate"]), (codec, pixel_format, rate))
                 self.assertEqual((stream["width"], stream["height"]), (320, 180))
 
+    def test_startup_video_has_audio_and_widely_spaced_keyframes(self):
+        name = "video-h264-long-gop.mkv"
+        video, audio = self.probe(name)["streams"]
+        self.assertEqual((video["codec_name"], video["r_frame_rate"], audio["codec_name"]), ("h264", "24/1", "aac"))
+        packets = json.loads(
+            subprocess.check_output(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_packets",
+                    "-show_entries",
+                    "packet=pts_time,flags",
+                    "-of",
+                    "json",
+                    str(self.output / name),
+                ]
+            )
+        )["packets"]
+        keyframes = [float(packet["pts_time"]) for packet in packets if "K" in packet["flags"]]
+        self.assertEqual(len(keyframes), 2)
+        self.assertAlmostEqual(keyframes[1] - keyframes[0], 10, delta=0.01)
+
     def test_color_transfer_tags_and_static_metadata_survive_muxing(self):
         for name, transfer in [("color-hdr10", "smpte2084"), ("color-hlg", "arib-std-b67")]:
             with self.subTest(name=name):
@@ -241,7 +266,11 @@ class GeneratedMediaContractTests(unittest.TestCase):
 
     def test_subtitle_tracks_contain_bitmap_packets_and_have_finite_duration(self):
         info = self.probe("subtitles.mkv")
-        self.assertEqual([s["codec_name"] for s in info["streams"]], ["h264", "ass", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"])
+        self.assertEqual(
+            [s["codec_name"] for s in info["streams"]],
+            ["h264", "ass", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "hdmv_pgs_subtitle"],
+        )
+        self.assertEqual(info["streams"][-1]["tags"]["title"], "Color channel order")
         self.assertAlmostEqual(float(info["format"]["duration"]), 12, delta=0.1)
         packets = json.loads(
             subprocess.check_output(
@@ -260,9 +289,9 @@ class GeneratedMediaContractTests(unittest.TestCase):
                 ]
             )
         )["streams"]
-        self.assertEqual(len(packets), 4)
+        self.assertEqual(len(packets), 5)
         self.assertTrue(all(int(stream["nb_read_packets"]) > 0 for stream in packets))
-        for index in (1, 2, 3):
+        for index in (1, 2, 3, 4):
             # Decode each bitmap track and encode it as DVD subtitles. This
             # rejects empty/mislabeled tracks, broken RLE and missing palettes.
             decoded = subprocess.check_output(

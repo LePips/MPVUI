@@ -169,7 +169,7 @@ class SyncRunnerTests(unittest.TestCase):
         device_root = Path(runner.source_identity.__code__.co_filename).resolve().parents[2]
         self.assertTrue((device_root / "Build/Package.swift").is_file())
         self.assertEqual(runner.ROOT, device_root)
-        self.assertTrue((runner.ROOT / "Example/MPVUIExample/Shared/PlaybackBenchmark.swift").is_file())
+        self.assertTrue((runner.ROOT / "Example/Sources/MPVUIExample/PlaybackBenchmark.swift").is_file())
 
     def test_default_configuration_project_and_products_use_repository_root(self):
         device_root = Path(runner.source_identity.__code__.co_filename).resolve().parents[2]

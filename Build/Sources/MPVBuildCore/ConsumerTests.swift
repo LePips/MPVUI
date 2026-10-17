@@ -1,6 +1,7 @@
 import Foundation
 
 struct ConsumerTestRecord: Codable {
+
     let key: String
     let artifactDigests: [String: String]
     let checks: [String]
@@ -9,15 +10,82 @@ struct ConsumerTestRecord: Codable {
 }
 
 struct ConsumerTests {
+
+    struct Simulator {
+
+        let id: String
+        let runtime: String
+        let state: String
+    }
+
+    static let exampleBuildState: Set<String> = [
+        ".build",
+        ".gradle",
+        ".kotlin",
+        ".swiftpm",
+        ".skip",
+        ".idea",
+        "build",
+        "xcuserdata",
+        ".DS_Store",
+        "local.properties",
+        "keystore.properties"
+    ]
+
     let graph: BuildGraph
+
+    static func copyExample(_ source: URL, to destination: URL) throws {
+        try mkdir(destination)
+        for input in try files(source, pruning: exampleBuildState) {
+            let relative = String(input.path.dropFirst(source.path.count + 1))
+            let output = destination.appendingPathComponent(relative)
+            let values = try input.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values.isDirectory == true && values.isSymbolicLink != true {
+                try mkdir(output)
+            } else {
+                try fm.copyItem(at: input, to: output)
+            }
+        }
+    }
+
+    static func validateArchive(_ archive: URL, slice: Slice) throws {
+        let info = try PropertyListSerialization.propertyList(
+            from: Data(contentsOf: archive.appendingPathComponent("Info.plist")),
+            format: nil
+        )
+        guard let properties = (info as? [String: Any])?["ApplicationProperties"] as? [String: Any],
+              let path = properties["ApplicationPath"] as? String
+        else { throw BuildError("Missing application path in \(archive.path)") }
+        let app = try contained(archive.appendingPathComponent("Products"), path)
+        let frameworks = slice.platform == "macos" ? "Contents/Frameworks" : "Frameworks"
+        try MachO.validate(app.appendingPathComponent(frameworks + "/Libmpv.framework/Libmpv"), slice: slice)
+    }
+
+    static func validateConsoleSession(_ properties: [String: Any], user: String) throws {
+        let sessions = properties["IOConsoleUsers"] as? [[String: Any]] ?? []
+        let session = sessions.first {
+            $0["kCGSSessionUserNameKey"] as? String == user
+                && $0["kCGSSessionOnConsoleKey"] as? Bool == true
+                && $0["kCGSessionLoginDoneKey"] as? Bool == true
+        }
+        try require(
+            session != nil
+                && properties["IOConsoleLocked"] as? Bool != true
+                && session?["CGSSessionScreenIsLocked"] as? Bool != true,
+            "Apple playback validation requires an unlocked desktop session for \(user). "
+                + "Unlock the Mac and keep it unlocked until validation finishes."
+        )
+    }
+
     func testKey(_ index: ArtifactIndex, nativeOnly: Bool) throws -> String {
-        struct Identity: Encodable { let artifacts: ArtifactIndex
+        struct Identity: Encodable {
+
+            let artifacts: ArtifactIndex
             let sources: [String: String]
             let tests: [String: String]
             let manifest: String
             let examples: [String: String]
             let fixtureGenerators: [String: String]
-            let plugins: [String: String]
             let verifier: String
             let toolchain: ToolchainLock
             let nativeOnly: Bool
@@ -29,11 +97,10 @@ struct ConsumerTests {
             sources: tree(graph.root.appendingPathComponent("Sources")),
             tests: tree(graph.root.appendingPathComponent("Tests")),
             manifest: digest(graph.root.appendingPathComponent("Package.swift")),
-            examples: tree(graph.root.appendingPathComponent("Example")),
+            examples: tree(graph.root.appendingPathComponent("Example"), pruning: Self.exampleBuildState),
             fixtureGenerators: tree(graph.root.appendingPathComponent("Build/Tests")).filter { $0.key.hasSuffix(".py") },
-            plugins: tree(graph.root.appendingPathComponent("Plugins")),
             verifier: digest(graph.codeRoot.appendingPathComponent("ConsumerTests.swift")),
-            toolchain: graph.native.toolchain,
+            toolchain: graph.native.apple.toolchain,
             nativeOnly: nativeOnly,
             destinations: destinations
         ))
@@ -58,8 +125,12 @@ struct ConsumerTests {
         let stage = try graph.store.path("work/tests/\(key)/\(remote ? "remote-package" : "package")")
         try remove(stage)
         try mkdir(stage)
-        for name in ["Sources", "Tests", "Example", "Plugins", "Build/Tests"] {
+        for name in ["Sources", "Tests", "Example", "Build/Tests"] {
             try mkdir(stage.appendingPathComponent(name).deletingLastPathComponent())
+            if name == "Example" {
+                try Self.copyExample(graph.root.appendingPathComponent(name), to: stage.appendingPathComponent(name))
+                continue
+            }
             try fm.copyItem(
                 at: graph.root.appendingPathComponent(name),
                 to: stage.appendingPathComponent(name)
@@ -83,7 +154,7 @@ struct ConsumerTests {
 
     func validateRemote(_ index: ArtifactIndex) throws {
         try require(!graph.inputs.offline, "Fresh remote consumer validation requires network access")
-        _ = try graph.runner.doctor(graph.native.toolchain)
+        _ = try graph.runner.doctor(graph.native.apple.toolchain)
         let stage = try stagePackage([:], index: index, key: UUID().uuidString, remote: true)
         // Both workspace and SwiftPM download cache start empty; maintainer caches cannot hide a bad URL.
         try graph.runner.run(
@@ -94,7 +165,7 @@ struct ConsumerTests {
     }
 
     func run(_ candidate: URL, nativeOnly: Bool = false) throws -> URL {
-        _ = try graph.runner.doctor(graph.native.toolchain)
+        _ = try graph.runner.doctor(graph.native.apple.toolchain)
         let index = try read(ArtifactIndex.self, candidate.appendingPathComponent("Artifacts.lock.json"))
         try Generator.validate(index, native: graph.native, release: !nativeOnly)
         let key = try testKey(index, nativeOnly: nativeOnly)
@@ -115,7 +186,7 @@ struct ConsumerTests {
             }
         }
         if !nativeOnly {
-            // The staged package's plugin generates and verifies its own media;
+            // The staged test runner generates and verifies its own media;
             // source-tree fixtures and maintainer caches are not prerequisites.
             let stage = try stagePackage(paths, index: index, key: attempt)
             checks += try wrapperChecks(stage)
@@ -157,7 +228,15 @@ struct ConsumerTests {
 
     func wrapperChecks(_ stage: URL) throws -> [String] {
         var checks: [String] = []
-        try graph.runner.run("/usr/bin/swift", ["test", "--package-path", stage.path, "--no-parallel"])
+        let console = try graph.runner.run("/usr/sbin/ioreg", ["-l", "-a", "-n", "Root", "-d1"])
+        let properties = try PropertyListSerialization.propertyList(from: Data(console.utf8), format: nil)
+        try Self.validateConsoleSession(properties as? [String: Any] ?? [:], user: NSUserName())
+        // AVFoundation readback requires an awake display, including when the
+        // release verifier runs outside the regular Make test targets.
+        try graph.runner.run(
+            "/usr/bin/caffeinate",
+            ["-disu", "python3", stage.appendingPathComponent("Build/Tests/run_swift_tests.py").path]
+        )
         checks.append("macos-swift-tests")
         try graph.runner.run("/usr/bin/swift", ["build", "--package-path", stage.path, "-c", "release"])
         checks.append("macos-release-package")
@@ -165,7 +244,8 @@ struct ConsumerTests {
         for (platform, prefix) in [("iOS Simulator", "iOS"), ("tvOS Simulator", "tvOS")] {
             guard let device = devices.first(where: { $0.runtime.contains("." + prefix + "-") })
             else { throw BuildError("Missing required \(prefix) simulator runtime") }
-            var testTarget = ["-scheme", "MPVUI"]
+            // The product schemes do not include tests in a multi-product package.
+            var testTarget = ["-scheme", "MPVUI-Package"]
             if prefix == "iOS" {
                 // Rotation and presentation tests require an app-owned window scene.
                 let host = stage.appendingPathComponent(".build/ios-test-host")
@@ -173,19 +253,31 @@ struct ConsumerTests {
                     "python3",
                     [
                         stage.appendingPathComponent("Build/Tests/generate_device_test_project.py").path,
-                        "--repository", stage.path,
-                        "--output", host.path,
+                        "--repository",
+                        stage.path,
+                        "--output",
+                        host.path,
                     ],
                     env: ["USER": NSUserName()]
                 )
+                try graph.runner.run(
+                    "python3",
+                    [
+                        stage.appendingPathComponent("Build/Tests/prepare_test_media.py").path,
+                        "--output",
+                        host.appendingPathComponent("GeneratedMedia").path,
+                    ]
+                )
                 testTarget = [
-                    "-project", host.appendingPathComponent("MPVUIRegressionTests.xcodeproj").path,
-                    "-scheme", "MPVUIRegressionTests",
+                    "-project",
+                    host.appendingPathComponent("MPVUIRegressionTests.xcodeproj").path,
+                    "-scheme",
+                    "MPVUIRegressionTests",
                 ]
             }
             try graph.runner.run(
-                "/usr/bin/xcodebuild",
-                testTarget + [
+                "/usr/bin/caffeinate",
+                ["-disu", "/usr/bin/xcodebuild"] + testTarget + [
                     "-parallel-testing-enabled",
                     "NO",
                     "-destination",
@@ -199,7 +291,7 @@ struct ConsumerTests {
             )
             checks.append(prefix.lowercased() + "-simulator-swift-tests")
         }
-        let project = stage.appendingPathComponent("Example/MPVUIExample/MPVUIExample.xcodeproj")
+        let project = stage.appendingPathComponent("Example/Darwin/MPVUIExample.xcodeproj")
         for configuration in ["Debug", "Release"] {
             for (scheme, destination) in [
                 ("macOS", "generic/platform=macOS"),
@@ -212,7 +304,7 @@ struct ConsumerTests {
                         "-project",
                         project.path,
                         "-scheme",
-                        scheme,
+                        "MPVUI App",
                         "-configuration",
                         configuration,
                         "-destination",
@@ -220,9 +312,11 @@ struct ConsumerTests {
                         "-derivedDataPath",
                         stage.appendingPathComponent(".build/example-" + scheme).path,
                         "build",
-                        "CODE_SIGNING_ALLOWED=NO"
+                        "CODE_SIGNING_ALLOWED=NO",
+                        "-skipPackagePluginValidation"
                     ],
-                    cwd: stage
+                    cwd: stage,
+                    env: ["SKIP_DYNAMIC_LIBRARIES": "1", "SKIP_ACTION": "none"]
                 )
                 checks.append("example/\(scheme)/\(configuration)")
             }
@@ -233,13 +327,14 @@ struct ConsumerTests {
             ("iOS", "generic/platform=iOS"),
             ("tvOS", "generic/platform=tvOS")
         ] {
+            let archive = stage.appendingPathComponent(".build/archives/" + scheme + ".xcarchive")
             try graph.runner.run(
                 "/usr/bin/xcodebuild",
                 [
                     "-project",
                     project.path,
                     "-scheme",
-                    scheme,
+                    "MPVUI App",
                     "-configuration",
                     "Release",
                     "-destination",
@@ -247,20 +342,21 @@ struct ConsumerTests {
                     "-derivedDataPath",
                     stage.appendingPathComponent(".build/example-" + scheme).path,
                     "-archivePath",
-                    stage.appendingPathComponent(".build/archives/" + scheme + ".xcarchive").path,
+                    archive.path,
                     "archive",
-                    "CODE_SIGNING_ALLOWED=NO"
+                    "CODE_SIGNING_ALLOWED=NO",
+                    "-skipPackagePluginValidation"
                 ],
-                cwd: stage
+                cwd: stage,
+                env: ["SKIP_DYNAMIC_LIBRARIES": "1", "SKIP_ACTION": "none"]
             )
             checks.append("example/\(scheme)/archive")
+            guard let slice = graph.native.apple.slices.first(where: { $0.id == scheme.lowercased() })
+            else { throw BuildError("Missing native slice for \(scheme) archive") }
+            try Self.validateArchive(archive, slice: slice)
+            checks.append("example/\(scheme)/archive-native-architectures")
         }
         return checks
-    }
-
-    struct Simulator { let id: String
-        let runtime: String
-        let state: String
     }
 
     func simulators() throws -> [Simulator] {
@@ -281,7 +377,11 @@ struct ConsumerTests {
                 // Simulate a host that already exports an incompatible FFmpeg.
                 // mpv must use its own avcodec_version, while the host keeps 0.
                 "\nunsigned avcodec_version(void) { return 0; }\n" +
-                "int main(void) { mpv_handle *h = mpv_create(); if (!h) return 2; mpv_set_option_string(h, \"vo\", \"null\"); mpv_set_option_string(h, \"ao\", \"null\"); int rc = mpv_initialize(h); if (rc < 0) { mpv_destroy(h); return 3; } mpv_terminate_destroy(h); return avcodec_version() != 0; }\n",
+                """
+                int main(void) { mpv_handle *h = mpv_create(); if (!h) return 2; mpv_set_option_string(h, \"vo\", \"null\"); \
+                mpv_set_option_string(h, \"ao\", \"null\"); int rc = mpv_initialize(h); if (rc < 0) { mpv_destroy(h); return 3; } \
+                mpv_terminate_destroy(h); return avcodec_version() != 0; }\n
+                """,
             source
         )
         try require(paths.count == 1 && paths["Libmpv-GPL"] != nil, "Consumer must link only the combined native artifact")

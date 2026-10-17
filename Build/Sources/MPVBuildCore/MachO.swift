@@ -1,6 +1,7 @@
 import Foundation
 
 struct ObjectMetadata: Codable {
+
     let member: String
     let architecture: String
     let platform: Int
@@ -8,6 +9,7 @@ struct ObjectMetadata: Codable {
 }
 
 enum MachO {
+
     static func objects(_ data: Data, name: String = "binary", inheritedArchitecture: String? = nil) throws -> [ObjectMetadata] {
         try require(data.count >= 8, "Truncated binary \(name)")
         let magic = try data.uint(0)
@@ -105,6 +107,18 @@ enum MachO {
         "\(value >> 16).\((value >> 8) & 255).\(value & 255)"
     }
 
+    static func validate(_ binary: URL, slice: Slice) throws {
+        try autoreleasepool {
+            let all = try objects(Data(contentsOf: binary, options: .mappedIfSafe))
+            let architectures = Set(all.map(\.architecture))
+            try require(
+                architectures == Set(slice.architectures),
+                "\(binary.path): architectures \(architectures.sorted()), expected \(slice.architectures.sorted()) for \(slice.id)"
+            )
+            try validateMetadata(all, binary: binary, slice: slice)
+        }
+    }
+
     static func validate(_ binary: URL, slice: Slice, arch: String, allowOtherArchitectures: Bool = false) throws -> [ObjectMetadata] {
         try autoreleasepool {
             let all = try objects(Data(contentsOf: binary, options: .mappedIfSafe))
@@ -113,21 +127,25 @@ enum MachO {
             if !allowOtherArchitectures {
                 try require(all.count == selected.count, "Unexpected architecture in thin product \(binary.path)")
             }
-            for object in selected {
-                try require(
-                    object.platform == slice.machOPlatform,
-                    "\(binary.lastPathComponent)(\(object.member)): platform \(object.platform), expected \(slice.machOPlatform) for \(slice.id)"
-                )
-                try require(
-                    object.minimumOS
-                        .compare(
-                            slice.minimumOS + (slice.minimumOS.components(separatedBy: ".").count == 2 ? ".0" : ""),
-                            options: .numeric
-                        ) != .orderedDescending,
-                    "\(binary.lastPathComponent)(\(object.member)): requires \(object.minimumOS), above \(slice.minimumOS)"
-                )
-            }
+            try validateMetadata(selected, binary: binary, slice: slice)
             return selected
+        }
+    }
+
+    private static func validateMetadata(_ objects: [ObjectMetadata], binary: URL, slice: Slice) throws {
+        for object in objects {
+            try require(
+                object.platform == slice.machOPlatform,
+                "\(binary.lastPathComponent)(\(object.member)): platform \(object.platform), expected \(slice.machOPlatform) for \(slice.id)"
+            )
+            try require(
+                object.minimumOS
+                    .compare(
+                        slice.minimumOS + (slice.minimumOS.components(separatedBy: ".").count == 2 ? ".0" : ""),
+                        options: .numeric
+                    ) != .orderedDescending,
+                "\(binary.lastPathComponent)(\(object.member)): requires \(object.minimumOS), above \(slice.minimumOS)"
+            )
         }
     }
 }

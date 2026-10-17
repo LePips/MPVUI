@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -15,7 +16,9 @@ import UIKit
 /// background GPU permissions still require separate device validation.
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVNativeVideoOutputTests {
-    @MainActor @Test
+
+    @MainActor
+    @Test
     func `animated WebP reaches the Apple sample buffer output`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "keep-open": "yes"],
@@ -29,6 +32,7 @@ struct MPVNativeVideoOutputTests {
             fixture.player.position.seconds >= 0.75
                 && fixture.player.sampleBufferDisplayLayer.isReadyForDisplay
         }
+
         #expect(fixture.player.lastError == nil)
         #expect(fixture.player.sampleBufferDisplayLayer.sampleBufferRenderer.status != .failed)
     }
@@ -67,11 +71,13 @@ struct MPVNativeVideoOutputTests {
         // expose its pixels. Inspect allocation on macOS/device; verify the
         // native clock and transport in all runners.
         #if !targetEnvironment(simulator)
+
         let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
         #expect(CVPixelBufferGetWidth(buffer) > 0)
         #expect(CVPixelBufferGetHeight(buffer) > 0)
         #expect(CVPixelBufferGetIOSurface(buffer) != nil)
         #endif
+
         #expect(layer.sampleBufferRenderer.status != .failed)
         #expect(player.lastError == nil)
         #if !targetEnvironment(simulator)
@@ -79,6 +85,7 @@ struct MPVNativeVideoOutputTests {
             #expect(player.mediaInformation.hardwareDecoder == "videotoolbox")
         }
         #endif
+
         let timebase = try #require(layer.controlTimebase)
         #expect(abs(CMTimebaseGetTime(timebase).seconds - player.position.seconds) < 0.3)
         #expect(CMTimebaseGetRate(timebase) == 0)
@@ -92,12 +99,14 @@ struct MPVNativeVideoOutputTests {
                     + "position=\(player.position.seconds), rate=\(CMTimebaseGetRate(timebase)), "
                     + "state=\(player.state), ready=\(layer.isReadyForDisplay)"
             ) { abs(CMTimebaseGetTime(timebase).seconds - destination) < 0.15 }
+
             #expect(player.isPaused)
             #expect(CMTimebaseGetRate(timebase) == 0)
         }
 
         // Detach and reattach video without reloading the audio session.
         surface.detach()
+
         #expect(layer.superlayer == nil)
         let detachedPosition = player.position
         player.play()
@@ -111,8 +120,10 @@ struct MPVNativeVideoOutputTests {
         try await waitUntil("video resumes on the existing client") {
             player.mediaInformation.dimensions != nil && layer.isReadyForDisplay
         }
+
         #expect(player.sampleBufferDisplayLayer === layer)
         let after = await player.lifecycleDiagnostics()
+
         #expect(after.handlesCreated == lifecycle.handlesCreated)
         #expect(after.handlesDestroyed == lifecycle.handlesDestroyed)
         #expect(after.loadCommands == lifecycle.loadCommands)

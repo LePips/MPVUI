@@ -1,0 +1,28 @@
+skip:
+  mode: 'native'
+
+# Android 16 and Apple's OS 26 family are the 2025 platform baseline.
+# Override Skip's catalog so the app and generated modules share these SDKs.
+settings:
+  contents:
+    - block: 'dependencyResolutionManagement'
+      contents:
+        - block: 'versionCatalogs'
+          contents:
+            - block: 'create("libs")'
+              contents:
+                - 'version("android-sdk-min", "36")'
+                - 'version("android-sdk-compile", "36")'
+
+build:
+  contents:
+    - block: 'dependencies'
+      contents:
+        - 'implementation("io.github.lepips:mpvui:0.7.0")'
+    - block: 'fun buildAndroidSwiftPackageDebug(mode: String)'
+      contents:
+        - block: 'project.objects.newInstance<SkipBridgeExecOps>().execOps.exec'
+          contents:
+            - 'System.getenv("MPVUI_ANDROID_DEVELOPER_DIR")?.let { environment("DEVELOPER_DIR", it) }'
+            # Build each ABI with its matching native prefix and one AAR runtime set.
+            - 'commandLine("python3", "${swiftSourceFolder()}/Packages/android/Build/Android/example_swift.py", commandLine.last().toString())'

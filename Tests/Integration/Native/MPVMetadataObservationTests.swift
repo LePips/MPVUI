@@ -3,14 +3,54 @@ import AppKit
 import Darwin
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVMetadataObservationTests {
+
+    private struct NativePropertyEvent {
+
+        let id: UInt64
+        let format: mpv_format
+        let value: MPVNodeValue?
+    }
+
     private static let videoProperties = [
-        "video-params", "video-dec-params", "video-out-params", "video-target-params",
+        "video-params",
+        "video-dec-params",
+        "video-out-params",
+        "video-target-params",
     ]
+
+    @Test
+    @MainActor
+    func `GPU target metadata stays quiet during steady playback with diagnostics disabled`() async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            logLevel: .none,
+            videoOutput: .metal
+        ))
+        defer { fixture.close() }
+        try await fixture.loadPaused(at: .milliseconds(200))
+        let before = await fixture.player.lifecycleDiagnostics()
+        fixture.player.play()
+        try await eventually("steady playback advances") { fixture.player.position > .seconds(1) }
+        fixture.player.pause()
+        try await eventually("paused after steady playback") { fixture.player.isPaused }
+        let after = await fixture.player.lifecycleDiagnostics()
+        let targetEvents = after.engineActivity.propertyChangeEvents["video-target-params", default: 0]
+            - before.engineActivity.propertyChangeEvents["video-target-params", default: 0]
+        let timingEvents = after.engineActivity.propertyChangeEvents["time-pos", default: 0]
+            - before.engineActivity.propertyChangeEvents["time-pos", default: 0]
+        #expect(timingEvents > 5)
+        #expect(targetEvents <= 2)
+        #expect(after.engineActivity.diagnosticsSnapshots == 0)
+    }
 
     @Test
     func `typed video metadata observations suppress unchanged ticks and retain changes`() throws {
@@ -24,8 +64,13 @@ struct MPVMetadataObservationTests {
             }
         }
         for (name, value) in [
-            ("vo", "null"), ("ao", "null"), ("idle", "yes"),
-            ("pause", "yes"), ("keep-open", "yes"), ("hwdec", "no"), ("speed", "0.25"),
+            ("vo", "null"),
+            ("ao", "null"),
+            ("idle", "yes"),
+            ("pause", "yes"),
+            ("keep-open", "yes"),
+            ("hwdec", "no"),
+            ("speed", "0.25"),
         ] {
             try #require(mpv_set_option_string(handle, name, value) >= 0)
         }
@@ -45,6 +90,7 @@ struct MPVMetadataObservationTests {
                 initial[event.id] = event
             }
         }
+
         #expect(initial.values.allSatisfy { $0.format == MPV_FORMAT_NONE && $0.value == nil })
 
         try #require(runCommand(handle, ["loadfile", TestPaths.baselineMedia.path, "replace"]) >= 0)
@@ -69,6 +115,7 @@ struct MPVMetadataObservationTests {
             if event.id < 100 {
                 // Real value changes may occur during playback. An identical
                 // already-delivered value must not be repeated.
+
                 #expect(event.value != latest[event.id])
                 typedCounts[event.id, default: 0] += 1
                 latest[event.id] = event.value
@@ -82,6 +129,7 @@ struct MPVMetadataObservationTests {
 
         try #require(mpv_set_property_string(handle, "pause", "yes") >= 0)
         drain(handle, seconds: 0.1) { _ in }
+
         let originalWidth = try #require(latest[3]?.mapValue?["w"]?.integerValue)
         let originalHeight = try #require(latest[3]?.mapValue?["h"]?.integerValue)
         let width = originalWidth + 16
@@ -93,6 +141,7 @@ struct MPVMetadataObservationTests {
                 resized = event.value
             }
         }
+
         #expect(resized?.mapValue?["h"]?.integerValue == height)
 
         // Stopping retires the decoder and VO. Previously available maps must
@@ -113,7 +162,8 @@ struct MPVMetadataObservationTests {
         }
     }
 
-    @MainActor @Test
+    @MainActor
+    @Test
     func `paused player metadata follows filter formats and video track availability`() async throws {
         let player = MPVPlayer(configuration: .init(
             additionalOptions: ["ao": "null", "vf": "format=fmt=nv12"],
@@ -127,7 +177,9 @@ struct MPVMetadataObservationTests {
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
-            styleMask: [.titled], backing: .buffered, defer: false
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
         )
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
@@ -144,11 +196,13 @@ struct MPVMetadataObservationTests {
                 && player.mediaInformation.hdr.output.pixelFormat != nil
         }
         let original = player.mediaInformation
+
         let track = try #require(original.tracks.first { $0.type == .video && $0.isSelected })
         let lifecycle = await player.lifecycleDiagnostics()
 
         player.setProperty("vf", to: "format=fmt=p010")
         try await waitUntil { player.mediaInformation.hdr.videoOutputInput.pixelFormat == "p010" }
+
         #expect(player.mediaInformation.hdr.source == original.hdr.source)
         #expect(player.mediaInformation.hdr.decoded == original.hdr.decoded)
         #expect(player.mediaInformation.dimensions == original.dimensions)
@@ -157,6 +211,7 @@ struct MPVMetadataObservationTests {
 
         player.setProperty("vf", to: "format=fmt=nv12")
         try await waitUntil { player.mediaInformation.hdr.videoOutputInput.pixelFormat == "nv12" }
+
         #expect(player.mediaInformation.hdr.output == original.hdr.output)
 
         player.disableTrack(.video)
@@ -169,19 +224,15 @@ struct MPVMetadataObservationTests {
             player.mediaInformation.dimensions == original.dimensions
                 && player.mediaInformation.hdr.videoOutputInput.pixelFormat == "nv12"
         }
+
         #expect(player.mediaInformation.hdr.source == original.hdr.source)
         #expect(player.isPaused)
         #expect(player.lastError == nil)
         let finished = await player.lifecycleDiagnostics()
+
         #expect(finished.handlesCreated == lifecycle.handlesCreated)
         #expect(finished.handlesDestroyed == lifecycle.handlesDestroyed)
         #expect(finished.loadCommands == lifecycle.loadCommands)
-    }
-
-    private struct NativePropertyEvent {
-        let id: UInt64
-        let format: mpv_format
-        let value: MPVNodeValue?
     }
 
     private func readPropertyEvent(_ handle: OpaquePointer, timeout: Double) -> NativePropertyEvent? {
@@ -189,7 +240,8 @@ struct MPVMetadataObservationTests {
               event.event_id == MPV_EVENT_PROPERTY_CHANGE, let data = event.data else { return nil }
         let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
         return NativePropertyEvent(
-            id: event.reply_userdata, format: property.format,
+            id: event.reply_userdata,
+            format: property.format,
             value: MPVNodeValue(copying: property)
         )
     }

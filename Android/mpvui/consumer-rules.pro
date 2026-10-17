@@ -1,0 +1,2 @@
+-keep class mpvui.internal.NativeBridge { *; }
+-keep class mpvui.internal.CoreEvent { *; }

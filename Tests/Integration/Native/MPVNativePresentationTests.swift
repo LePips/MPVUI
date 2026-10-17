@@ -3,6 +3,7 @@ import AVFoundation
 import CoreMedia
 import CoreVideo
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -11,12 +12,29 @@ import Testing
 /// audible synchronization. Keep these calls out of performance measurements.
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVNativePresentationTests {
+
+    private struct Metrics {
+
+        let frames: Int
+        let dropped: Int
+        let corrupted: Int
+        let delay: Double
+    }
+
+    private enum PresentationEvidenceUnavailable: Error {
+
+        case pixels
+        case metrics
+    }
+
     @MainActor
     @Test(arguments: [0.5, 1.0, 1.5])
     func `framework frame metrics and displayed pixels follow transport`(rate: Double) async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sub-auto": "no", "sub-visibility": "no", "osd-level": "0"],
-            autoPlay: false, hardwareDecoding: .videoToolbox, videoOutput: .sampleBuffer
+            autoPlay: false,
+            hardwareDecoding: .videoToolbox,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         let player = fixture.player
@@ -31,9 +49,11 @@ struct MPVNativePresentationTests {
                 && CMTimebaseGetRate(clock) == 0
                 && abs(CMTimebaseGetTime(clock).seconds - 1) < 0.1
         }
+
         let clock = try #require(layer.controlTimebase)
         let reference = try displayedLuma(renderer)
         player.setPlaybackRate(rate)
+
         #expect(CMTimebaseGetRate(clock) == 0)
         player.play()
         try await eventually("native playback timebase at requested rate") {
@@ -60,6 +80,7 @@ struct MPVNativePresentationTests {
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         let progress = player.position.seconds - startPosition
         let after = try await metrics(renderer)
+
         #expect((0.8 ... 1.2).contains(progress / elapsed / rate))
         #expect(changedFrames >= 3, "Moving chart must yield multiple distinct displayed-buffer readbacks")
         #expect(after.frames > before.frames, "AVFoundation frame metrics must advance with the clock and pixels")
@@ -76,6 +97,7 @@ struct MPVNativePresentationTests {
         let pausedPosition = player.position.seconds
         let paused = try displayedLuma(renderer)
         try await Task.sleep(for: .milliseconds(300))
+
         #expect(try displayedLuma(renderer) == paused)
         #expect(abs(player.position.seconds - pausedPosition) < 0.1)
 
@@ -83,6 +105,7 @@ struct MPVNativePresentationTests {
         // image, not merely update public time-pos or increase a build counter.
         for target in [4.0, 1.0] {
             let prior = try displayedLuma(renderer)
+
             #expect(await player.seekForPictureInPicture(to: .seconds(target)))
             try await eventually("exact paused seek renders the destination image") {
                 guard let current = try? displayedLuma(renderer) else { return false }
@@ -92,17 +115,11 @@ struct MPVNativePresentationTests {
                     && current != prior && (target != 1 || current == reference)
             }
         }
+
         #expect(player.playbackDiagnostics.decoder.videoToolboxSessionUsesHardware == true)
         #expect(player.playbackDiagnostics.fallbackReasons.isEmpty)
         #expect(renderer.status != .failed)
         #expect(player.lastError == nil)
-    }
-
-    private struct Metrics {
-        let frames: Int
-        let dropped: Int
-        let corrupted: Int
-        let delay: Double
     }
 
     @MainActor
@@ -120,11 +137,10 @@ struct MPVNativePresentationTests {
         }
         // Physical metrics are mandatory for this test. Missing data must never
         // become zero drops or a silently passing progression assertion.
+
         Issue.record("AVFoundation video performance metrics unavailable on the physical device")
         throw PresentationEvidenceUnavailable.metrics
     }
-
-    private enum PresentationEvidenceUnavailable: Error { case pixels, metrics }
 
     @MainActor
     private func displayedLuma(_ renderer: AVSampleBufferVideoRenderer) throws -> Data {
@@ -138,6 +154,7 @@ struct MPVNativePresentationTests {
         let width = CVPixelBufferGetWidthOfPlane(buffer, 0)
         let height = CVPixelBufferGetHeightOfPlane(buffer, 0)
         let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+
         let base = try #require(CVPixelBufferGetBaseAddressOfPlane(buffer, 0))
         var bytes = Data(capacity: width * height)
         for row in 0 ..< height {

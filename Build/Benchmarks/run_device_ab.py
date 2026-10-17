@@ -49,7 +49,7 @@ def checkout_identity(checkout, derived):
         subprocess.check_output([sys.executable, "-c", code], cwd=checkout, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     )
     stamp = read(derived / "mpvui-benchmark-build.json")
-    app = derived / "Build/Products/Release-iphoneos/MPVUIExample.app/MPVUIExample"
+    app = derived / "Build/Products/Release-iphoneos/MPVUI.app/MPVUI"
     app_hash = digest(app)
     if stamp.get("source") != source["sourceSHA256"] or stamp.get("appSHA256") != app_hash:
         raise ValueError("Stale source/app build stamp: " + str(checkout))
@@ -218,7 +218,7 @@ def run(args):
             raise ValueError("Cohort Xcode differs from reference")
         for filename, sha in key["protocol"].items():
             path = Path(cohort["checkout"]) / (
-                "Build/Benchmarks/" + filename if filename.endswith(".py") else "Example/MPVUIExample/Shared/" + filename
+                "Build/Benchmarks/" + filename if filename.endswith(".py") else "Example/Sources/MPVUIExample/" + filename
             )
             if digest(path) != sha:
                 raise ValueError("Cohort protocol files differ")

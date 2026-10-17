@@ -2,6 +2,7 @@
 import AVKit
 import CoreMedia
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import SwiftUI
 import Testing
@@ -10,6 +11,7 @@ import UIKit
 @Suite(.tags(.integration, .pictureInPicture), .serialized)
 @MainActor
 struct MPVSampleBufferPictureInPictureControllerTests {
+
     @Test(arguments: [CGSize(width: 640, height: 360), CGSize(width: 390, height: 844)])
     func `PiP preserves inline text size and wrapping`(inlineSize: CGSize) async throws {
         let player = MPVPlayer(configuration: .init(
@@ -50,6 +52,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         try await waitForOverlayCondition("inline caption layout") {
             !measurements.values.isEmpty && (surface.videoOverlayHost?.layoutSize.width ?? 0) > 0
         }
+
         let inline = try #require(measurements.values.last)
         #expect(inline.canvas.width == inlineSize.width - 48)
         measurements.values.removeAll()
@@ -60,6 +63,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         try await waitForOverlayCondition("rasterized caption layout") {
             pip.isVideoOverlayActive && !measurements.values.isEmpty
         }
+
         #expect(
             measurements.values.allSatisfy { $0.canvas.width == inline.canvas.width && $0.text == inline.text },
             "PiP: \(measurements.values); inline: \(inline)"
@@ -81,6 +85,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
                 measurements.values.contains { $0.canvas.width > 0 && $0.canvas.height > 0 }
             }
             let rendered = measurements.values.filter { $0.canvas.width > 0 && $0.canvas.height > 0 }
+
             #expect(
                 rendered.allSatisfy { $0.canvas.width == inline.canvas.width && $0.text == inline.text },
                 "PiP at \(size): \(measurements.values); inline: \(inline)"
@@ -107,6 +112,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         var latestCaption = ""
         var observation: Task<Void, Never>?
         if intercepts {
+            player.setTextSubtitleInterceptionEnabled(true)
             let stream = player.textSubtitleStream()
             observation = Task { @MainActor in
                 for await snapshot in stream {
@@ -132,6 +138,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
                 && (!intercepts || latestCaption == "Intercepted caption")
         }
         pip.setNativeRendering(true)
+
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
         #expect(!pip.isVideoOverlayActive)
 
@@ -139,20 +146,25 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         // Exercise the same rendering callback on simulators that cannot open
         // real PiP. Native pixel fidelity is checked in the macOS VO tests.
         try await waitForOverlayCondition("accepted bitmap") { pip.isVideoOverlayActive }
+
         #expect(!intercepts || latestCaption == "Intercepted caption")
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
         #expect(surface.videoOverlayHost?.isHidden == true)
 
         surface.setVideoOverlay(MPVVideoOverlay(content: AnyView(Text("Badge"))))
+
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
         #expect(pip.isVideoOverlayActive)
         surface.setVideoOverlay(nil)
+
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
         #expect(!pip.isVideoOverlayActive)
         surface.setVideoOverlay(MPVVideoOverlay(content: AnyView(Text("Styled caption"))))
+
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
 
         pip.setNativeRendering(false)
+
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
         #expect(!pip.isVideoOverlayActive)
         #expect(surface.videoOverlayHost?.isHidden == false)
@@ -164,18 +176,9 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         pip.setNativeRendering(true)
         pip.setNativeRendering(false)
         try await Task.sleep(for: .milliseconds(100))
+
         #expect(!pip.isVideoOverlayActive)
         #expect(await player.textSubtitleInterceptionForTesting() == intercepts)
-    }
-
-    private func waitForOverlayCondition(_ operation: String, _ condition: () -> Bool) async throws {
-        for _ in 0 ..< 250 {
-            if condition() {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        try #require(condition(), "PiP overlay did not reach its expected state: \(operation)")
     }
 
     @Test
@@ -193,10 +196,12 @@ struct MPVSampleBufferPictureInPictureControllerTests {
 
         #expect(helper.snapshot.lastError == (helper.snapshot.isSupported
                 ? .pictureInPictureNotReady : .pictureInPictureUnsupported))
+
         #expect(!helper.snapshot.isStarting)
         #expect(!helper.snapshot.isActive)
         helper.invalidate()
         helper.invalidate()
+
         #expect(!helper.snapshot.isPossible)
     }
 
@@ -215,6 +220,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         defer { helper.invalidate() }
 
         helper.prepareToStartPictureInPicture()
+
         #expect(helper.snapshot.isStarting)
         helper.didFailToStartPictureInPicture(
             error: NSError(domain: "PiPTest", code: 1, userInfo: [NSLocalizedDescriptionKey: "Native startup failed"])
@@ -245,13 +251,16 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         for _ in 0 ..< 100 where restoration == nil {
             await Task.yield()
         }
+
         let pending = try #require(restoration)
         #expect(completions.isEmpty)
 
         helper.invalidate()
+
         #expect(completions == [false])
         pending.resume(returning: true)
         await Task.yield()
+
         #expect(completions == [false])
     }
 
@@ -304,8 +313,14 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         }
         try #require(
             player.isPaused && player.isSeekable && layer.isReadyForDisplay,
-            "Native PiP fixture failed: state=\(player.state), bounds=\(layer.bounds), renderer=\(layer.sampleBufferRenderer.status.rawValue), ready=\(layer.isReadyForDisplay), rate=\(layer.controlTimebase.map(CMTimebaseGetRate) ?? -1), appState=\(UIApplication.shared.applicationState.rawValue), error=\(String(describing: player.lastError))"
+            """
+            Native PiP fixture failed: state=\(player.state), bounds=\(layer.bounds), \
+            renderer=\(layer.sampleBufferRenderer.status.rawValue), ready=\(layer.isReadyForDisplay), \
+            rate=\(layer.controlTimebase.map(CMTimebaseGetRate) ?? -1), appState=\(UIApplication.shared.applicationState.rawValue), \
+            error=\(String(describing: player.lastError))
+            """
         )
+
         let timebase = try #require(layer.controlTimebase)
         let target = player.position.seconds + 0.75
         var completionCount = 0
@@ -316,10 +331,12 @@ struct MPVSampleBufferPictureInPictureControllerTests {
             displayedTimeAtCompletion = CMTimebaseGetTime(timebase).seconds
             displayRateAtCompletion = CMTimebaseGetRate(timebase)
         }
+
         #expect(completionCount == 0)
         for _ in 0 ..< 600 where completionCount == 0 {
             try await Task.sleep(for: .milliseconds(20))
         }
+
         #expect(completionCount == 1)
         #expect(helper.snapshot.lastError == nil)
         #expect(abs(displayedTimeAtCompletion - target) < 0.25)
@@ -333,6 +350,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         for _ in 0 ..< 600 where endpointCompletions == 0 {
             try await Task.sleep(for: .milliseconds(20))
         }
+
         #expect(endpointCompletions == 1)
         #expect(helper.snapshot.lastError == nil)
         #expect(player.state == .ended)
@@ -347,6 +365,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         for _ in 0 ..< 100 where forwardAtEndCompletions == 0 {
             try await Task.sleep(for: .milliseconds(20))
         }
+
         #expect(forwardAtEndCompletions == 1)
         #expect(helper.snapshot.lastError == nil)
         #expect(player.state == .ended)
@@ -365,6 +384,7 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         for _ in 0 ..< 600 where backwardCompletions == 0 {
             try await Task.sleep(for: .milliseconds(20))
         }
+
         #expect(backwardCompletions == 1)
         #expect(helper.snapshot.lastError == nil)
         #expect(abs(backwardDisplayTime - backwardTarget) < 0.25)
@@ -374,14 +394,27 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         for _ in 0 ..< 100 where player.state != .paused {
             try await Task.sleep(for: .milliseconds(20))
         }
+
         #expect(player.state == .paused)
         #expect(player.isPlaybackPausedForPictureInPicture)
+    }
+
+    private func waitForOverlayCondition(_ operation: String, _ condition: () -> Bool) async throws {
+        for _ in 0 ..< 250 {
+            if condition() {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(condition(), "PiP overlay did not reach its expected state: \(operation)")
     }
 }
 
 @MainActor
 private final class CaptionMeasurements {
+
     struct Measurement: Equatable {
+
         let canvas: CGSize
         let text: CGSize
     }
@@ -389,8 +422,12 @@ private final class CaptionMeasurements {
     var values: [Measurement] = []
 }
 
-private struct CaptionLayout: Layout {
+private struct CaptionLayout {
+
     let measurements: CaptionMeasurements
+}
+
+extension CaptionLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()

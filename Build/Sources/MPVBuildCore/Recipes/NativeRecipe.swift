@@ -22,6 +22,7 @@ func relativePath(from base: URL, to destination: URL) -> String {
 }
 
 struct RecipeContext: Sendable {
+
     let component: String
     let slice: Slice
     let arch: String
@@ -34,6 +35,7 @@ struct RecipeContext: Sendable {
     let runner: Runner
     let jobs: Int
     let version: String
+
     var flags: [String] {
         var flags = [
             "-arch",
@@ -94,7 +96,8 @@ struct RecipeContext: Sendable {
     }
 
     var environment: [String: String] {
-        let pc = dependencies.keys.sorted()
+        let pc = dependencies.keys
+            .sorted()
             .map { dependencies[$0]!.appendingPathComponent("lib/pkgconfig").path } +
             [root.appendingPathComponent("Build/Support/apple-system").path]
         let flags = flags.map(shellQuote).joined(separator: " ")
@@ -144,7 +147,9 @@ struct RecipeContext: Sendable {
 }
 
 enum FFmpegRecipe {
+
     static let libraries = ["avcodec", "avdevice", "avfilter", "avformat", "avutil", "swresample", "swscale"]
+
     static func build(_ context: RecipeContext) throws {
         let c = context
         try c.prepareDirectories()
@@ -175,11 +180,24 @@ enum FFmpegRecipe {
             "PKG_CONFIG_LIBDIR": pkgPaths.joined(separator: ":")
         ]) { _, new in new }
         var args = try FFmpegFlags.configureFlags + [
-            "--prefix=/usr/local", "--arch=\(c.arch == "x86_64" ? "x86_64" : "aarch64")", "--target-os=darwin",
-            "--cc=/usr/bin/clang", "--cxx=/usr/bin/clang++", "--disable-debug", "--enable-stripping", "--enable-gpl",
-            "--host-cc=/usr/bin/clang", "--host-cflags=@mpvbuild-hostflags.rsp", "--host-ldflags=@mpvbuild-hostflags.rsp",
-            "--disable-programs", "--disable-autodetect", "--disable-sdl2", "--disable-large-tests", "--ignore-tests=TESTS",
-            "--enable-audiotoolbox", "--enable-videotoolbox",
+            "--prefix=/usr/local",
+            "--arch=\(c.arch == "x86_64" ? "x86_64" : "aarch64")",
+            "--target-os=darwin",
+            "--cc=/usr/bin/clang",
+            "--cxx=/usr/bin/clang++",
+            "--disable-debug",
+            "--enable-stripping",
+            "--enable-gpl",
+            "--host-cc=/usr/bin/clang",
+            "--host-cflags=@mpvbuild-hostflags.rsp",
+            "--host-ldflags=@mpvbuild-hostflags.rsp",
+            "--disable-programs",
+            "--disable-autodetect",
+            "--disable-sdl2",
+            "--disable-large-tests",
+            "--ignore-tests=TESTS",
+            "--enable-audiotoolbox",
+            "--enable-videotoolbox",
             "--disable-securetransport",
             // FFmpeg 9 compiles Vulkan shaders ahead of time with a host tool.
             "--glslc=\(c.runner.executable("glslc").path)",
@@ -241,9 +259,18 @@ enum FFmpegRecipe {
             )
         }
         for component in [
-            "WEBP_DECODER", "WEBP_ANIM_DECODER", "IMAGE_WEBP_PIPE_DEMUXER", "WEBP_ANIM_DEMUXER",
-            "PRORES_RAW_DECODER", "PRORES_RAW_VIDEOTOOLBOX_HWACCEL", "AAC_DECODER",
-            "DOVI_SPLIT_BSF", "V360_FILTER"
+            "WEBP_DECODER",
+            "WEBP_ANIM_DECODER",
+            "IMAGE_WEBP_PIPE_DEMUXER",
+            "WEBP_ANIM_DEMUXER",
+            "PRORES_RAW_DECODER",
+            "PRORES_RAW_VIDEOTOOLBOX_HWACCEL",
+            "AAC_DECODER",
+            "DOVI_SPLIT_BSF",
+            "V360_FILTER",
+            "HLS_MUXER",
+            "H264_VIDEOTOOLBOX_ENCODER",
+            "AAC_ENCODER"
         ] {
             try require(components.contains("#define CONFIG_\(component) 1"), "FFmpeg lost required component \(component)")
         }
@@ -265,7 +292,8 @@ enum FFmpegRecipe {
                 .replacingOccurrences(
                     of: c.work.path,
                     with: "/mpvbuild/ffmpeg"
-                ).replacingOccurrences(of: c.root.path, with: "/mpvbuild/repository") : line
+                )
+                .replacingOccurrences(of: c.root.path, with: "/mpvbuild/repository") : line
         }
         text = lines.joined(separator: "\n")
         try put(text, config)

@@ -1,0 +1,444 @@
+diff --git a/libavcodec/mediacodecdec.c b/libavcodec/mediacodecdec.c
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -28,6 +28,7 @@
+ #include "libavutil/avassert.h"
+ #include "libavutil/common.h"
+ #include "libavutil/dovi_meta.h"
++#include "libavutil/hwcontext_mediacodec.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+ #include "libavutil/intreadwrite.h"
+@@ -38,6 +39,9 @@
+ #include "avcodec.h"
+ #include "codec_internal.h"
+ #include "decode.h"
++#include "dovi_rpu.h"
++#include "h2645_parse.h"
++#include "mediacodec.h"
+ #include "h264_parse.h"
+ #include "h264_ps.h"
+ #include "hevc/parse.h"
+@@ -69,6 +73,13 @@
+     int dovi_decoder;
+     int rejected_dovi;
+     int stalled;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    int gpu_dovi;
++    int gpu_packet_queued;
++    enum AVColorRange source_range;
++    DOVIContext gpu_dovi_ctx;
++    AVFrame *gpu_metadata[64];
++#endif
+ } MediaCodecH264DecContext;
+ 
+ 
+@@ -179,6 +190,169 @@
+ #endif
+ // MPVUI_P7_END
+ 
++// MPVUI_DOVI_GPU_BEGIN: exercised by the native metadata regression harness.
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++static AVMediaCodecDeviceContext *mediacodec_dovi_device(AVCodecContext *avctx)
++{
++    if (!avctx->hw_device_ctx)
++        return NULL;
++    AVHWDeviceContext *device = (void *)avctx->hw_device_ctx->data;
++    return device->type == AV_HWDEVICE_TYPE_MEDIACODEC ? device->hwctx : NULL;
++}
++
++static int mediacodec_dovi_surface_available(AVCodecContext *avctx)
++{
++    AVMediaCodecDeviceContext *device = mediacodec_dovi_device(avctx);
++    return device && device->dolby_vision_surface && device->dolby_vision_status &&
++           device->dolby_vision_status(device->dolby_vision_opaque) > 0;
++}
++
++static int mediacodec_gpu_dovi_allowed(const AVDOVIDecoderConfigurationRecord *dv)
++{
++    return dv->dv_profile == 5 &&
++           dv->rpu_present_flag && dv->bl_present_flag && !dv->el_present_flag &&
++           dv->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
++}
++
++static void mediacodec_gpu_dovi_clear(MediaCodecH264DecContext *s)
++{
++    for (unsigned i = 0; i < FF_ARRAY_ELEMS(s->gpu_metadata); i++)
++        av_frame_free(&s->gpu_metadata[i]);
++    ff_dovi_ctx_flush(&s->gpu_dovi_ctx);
++    s->gpu_packet_queued = 0;
++}
++
++/* Snapshot metadata on input, match it by presentation timestamp on output.
++ * A FIFO or a single current RPU assigns the wrong colors after B-frame reorder.
++ * Refuse ambiguous, malformed, dual-layer, or unbounded streams for SW fallback. */
++static int mediacodec_gpu_dovi_queue(AVCodecContext *avctx, MediaCodecH264DecContext *s,
++                                    const AVPacket *packet)
++{
++    H2645Packet split = {0};
++    AVFrame *metadata = NULL;
++    H2645NAL *rpu = NULL;
++    int ret, slot = -1, vcl = 0;
++    size_t conf_size = 0;
++    const uint8_t *conf = av_packet_get_side_data(packet, AV_PKT_DATA_DOVI_CONF, &conf_size);
++    if (conf) {
++        if (conf_size < sizeof(AVDOVIDecoderConfigurationRecord) ||
++            !mediacodec_gpu_dovi_allowed((const void *)conf))
++            return AVERROR_INVALIDDATA;
++        s->gpu_dovi_ctx.cfg = *(const AVDOVIDecoderConfigurationRecord *)conf;
++    }
++    ret = ff_h2645_packet_split(&split, packet->data, packet->size, avctx,
++                               0, AV_CODEC_ID_HEVC, 0);
++    if (ret < 0)
++        goto done;
++    for (int i = 0; i < split.nb_nals; i++) {
++        H2645NAL *nal = &split.nals[i];
++        if (nal->nuh_layer_id) {
++            ret = AVERROR(ENOSYS);
++            goto done;
++        }
++        vcl |= nal->type < 32;
++        if (nal->type == HEVC_NAL_UNSPEC62) {
++            if (rpu || nal->size <= 2 || nal->temporal_id) {
++                ret = AVERROR_INVALIDDATA;
++                goto done;
++            }
++            rpu = nal;
++        }
++    }
++    if (rpu) {
++        ret = ff_dovi_rpu_parse(&s->gpu_dovi_ctx, rpu->data + 2, rpu->size - 2,
++                               AV_EF_CRCCHECK | AV_EF_EXPLODE);
++        if (ret < 0)
++            goto done;
++        int profile = s->gpu_dovi_ctx.cfg.dv_profile;
++        if (!profile)
++            profile = ff_dovi_guess_profile_hevc(&s->gpu_dovi_ctx.header);
++        if (profile != 5 || !s->gpu_dovi_ctx.header.disable_residual_flag) {
++            ret = AVERROR(ENOSYS);
++            goto done;
++        }
++    }
++    if (!vcl || (!s->gpu_dovi_ctx.cfg.dv_profile && !s->gpu_dovi_ctx.mapping)) {
++        ret = 0;
++        goto done;
++    }
++    if (!s->gpu_dovi_ctx.mapping || !s->gpu_dovi_ctx.color || packet->pts == AV_NOPTS_VALUE) {
++        ret = AVERROR_INVALIDDATA;
++        goto done;
++    }
++    int64_t pts = packet->pts;
++    if (avctx->pkt_timebase.num && avctx->pkt_timebase.den) {
++        pts = av_rescale_q(pts, avctx->pkt_timebase, AV_TIME_BASE_Q);
++        pts = av_rescale_q(pts, AV_TIME_BASE_Q, avctx->pkt_timebase);
++    }
++    for (unsigned i = 0; i < FF_ARRAY_ELEMS(s->gpu_metadata); i++) {
++        if (!s->gpu_metadata[i])
++            slot = i;
++        else if (s->gpu_metadata[i]->pts == pts) {
++            ret = AVERROR_INVALIDDATA;
++            goto done;
++        }
++    }
++    if (slot < 0) {
++        ret = AVERROR(ENOBUFS);
++        goto done;
++    }
++    metadata = av_frame_alloc();
++    if (!metadata) {
++        ret = AVERROR(ENOMEM);
++        goto done;
++    }
++    metadata->pts = pts;
++    ret = ff_dovi_attach_side_data(&s->gpu_dovi_ctx, metadata);
++    if (ret < 0)
++        goto done;
++    if (rpu) {
++        AVFrameSideData *raw = av_frame_new_side_data(metadata, AV_FRAME_DATA_DOVI_RPU_BUFFER, rpu->raw_size - 2);
++        if (!raw) {
++            ret = AVERROR(ENOMEM);
++            goto done;
++        }
++        memcpy(raw->data, rpu->raw_data + 2, rpu->raw_size - 2);
++    }
++    s->gpu_metadata[slot] = metadata;
++    metadata = NULL;
++    ret = 0;
++done:
++    av_frame_free(&metadata);
++    ff_h2645_packet_uninit(&split);
++    return ret;
++}
++
++static int mediacodec_gpu_dovi_output(MediaCodecH264DecContext *s, AVFrame *frame)
++{
++    if (!s->gpu_dovi_ctx.cfg.dv_profile && !s->gpu_dovi_ctx.mapping)
++        return 0;
++    if (frame->format != AV_PIX_FMT_MEDIACODEC)
++        return AVERROR(ENOSYS);
++    for (unsigned i = 0; i < FF_ARRAY_ELEMS(s->gpu_metadata); i++) {
++        AVFrame *metadata = s->gpu_metadata[i];
++        if (!metadata || metadata->pts != frame->pts)
++            continue;
++        for (int n = 0; n < metadata->nb_side_data; n++) {
++            AVFrameSideData *sd = metadata->side_data[n];
++            AVBufferRef *ref = av_buffer_ref(sd->buf);
++            if (!ref)
++                return AVERROR(ENOMEM);
++            if (!av_frame_new_side_data_from_buf(frame, sd->type, ref)) {
++                av_buffer_unref(&ref);
++                return AVERROR(ENOMEM);
++            }
++        }
++        if (s->source_range != AVCOL_RANGE_UNSPECIFIED)
++            frame->color_range = s->source_range;
++        av_frame_free(&s->gpu_metadata[i]);
++        return 0;
++    }
++    return AVERROR_INVALIDDATA;
++}
++#endif
++// MPVUI_DOVI_GPU_END
++
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+ {
+     MediaCodecH264DecContext *s = avctx->priv_data;
+@@ -187,6 +361,10 @@
+     s->ctx = NULL;
+ 
+     av_packet_unref(&s->buffered_pkt);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    mediacodec_gpu_dovi_clear(s);
++    ff_dovi_ctx_unref(&s->gpu_dovi_ctx);
++#endif
+ 
+     return 0;
+ }
+@@ -330,6 +508,11 @@
+     int vps_data_size = 0;
+     int sps_data_size = 0;
+     int pps_data_size = 0;
++
++    // hev1/dvhe may carry all parameter sets in the first access unit.
++    // MediaCodec accepts those in-band; the MP4 BSF has already converted it.
++    if (!avctx->extradata_size)
++        return 0;
+ 
+     ret = ff_hevc_decode_extradata(avctx->extradata, avctx->extradata_size,
+                                    &ps, &sei, &is_nalff, &nal_length_size, 0, 1, avctx);
+@@ -547,13 +730,31 @@
+         av_assert0(0);
+     }
+ 
+-    // Opt in only for a native display Surface. Never decode Dolby Vision
+-    // through an ordinary HEVC decoder: Profile 5 has no HDR10 base layer.
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    s->gpu_dovi_ctx.logctx = avctx;
++    s->source_range = avctx->color_range;
++#endif
++
++    // A GPU consumer must explicitly support unmodified 10-bit YUV and RPU.
++    // Ordinary RGB Surfaces cannot correctly display Profile 5 base layers.
+     if (avctx->codec_id == AV_CODEC_ID_HEVC) {
+         const AVPacketSideData *sd = av_packet_side_data_get(avctx->coded_side_data,
+             avctx->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
+         if (sd && sd->size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
+             const AVDOVIDecoderConfigurationRecord *dv = (const void *)sd->data;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++            if (!s->native_dovi && mediacodec_dovi_surface_available(avctx) &&
++                mediacodec_gpu_dovi_allowed(dv) &&
++                (avctx->profile == AV_PROFILE_UNKNOWN || avctx->profile == AV_PROFILE_HEVC_MAIN_10)) {
++                // Profile 5 is HEVC Main 10 even when dvhe keeps SPS in-band.
++                avctx->profile = AV_PROFILE_HEVC_MAIN_10;
++                s->gpu_dovi = 1;
++                ff_AMediaFormat_setInt32(format, "color-format", 54);
++                s->gpu_dovi_ctx.cfg = *dv;
++                av_log(avctx, AV_LOG_INFO, "Exporting Dolby Vision metadata to a 10-bit YUV GPU Surface\n");
++                goto dovi_configured;
++            }
++#endif
+             if (!s->native_dovi) {
+                 av_log(avctx, AV_LOG_INFO, "MPVUI: software decoding preserves Dolby Vision RPU for GPU mapping\n");
+                 ret = AVERROR(ENOSYS);
+@@ -589,6 +790,7 @@
+             av_log(avctx, AV_LOG_INFO, "MPVUI: requesting native Dolby Vision profile %d\n", dv->dv_profile);
+         }
+     }
++dovi_configured:
+     ff_AMediaFormat_setString(format, "mime", codec_mime);
+ 
+     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+@@ -608,6 +810,9 @@
+         goto done;
+     }
+ 
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    s->ctx->gpu_dovi = s->gpu_dovi;
++#endif
+     s->ctx->delay_flush = s->delay_flush;
+     s->ctx->use_ndk_codec = s->use_ndk_codec;
+ 
+@@ -646,6 +851,23 @@
+     return ret;
+ }
+ 
++static int mediacodec_receive_with_dovi(AVCodecContext *avctx, MediaCodecH264DecContext *s,
++                                        AVFrame *frame, bool wait)
++{
++    int ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, wait);
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    if (ret == 0 && s->gpu_dovi) {
++        ret = mediacodec_gpu_dovi_output(s, frame);
++        if (ret < 0) {
++            av_log(avctx, AV_LOG_ERROR, "Cannot match Dolby Vision metadata to 10-bit output; using software fallback\n");
++            av_frame_unref(frame);
++            s->rejected_dovi = 1;
++        }
++    }
++#endif
++    return ret;
++}
++
+ static int mediacodec_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+ {
+     MediaCodecH264DecContext *s = avctx->priv_data;
+@@ -655,6 +877,12 @@
+ 
+     if (s->stalled || s->rejected_dovi)
+         return AVERROR_EXTERNAL;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    if (s->gpu_dovi && !mediacodec_dovi_surface_available(avctx)) {
++        s->rejected_dovi = 1;
++        return AVERROR_EXTERNAL;
++    }
++#endif
+ 
+     /* In delay_flush mode, wait until the user has released or rendered
+        all retained frames. */
+@@ -665,7 +893,7 @@
+     }
+ 
+     /* poll for new frame */
+-    ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, false);
++    ret = mediacodec_receive_with_dovi(avctx, s, frame, false);
+     if (ret != AVERROR(EAGAIN))
+         return ret;
+ 
+@@ -676,7 +904,7 @@
+             index = ff_AMediaCodec_dequeueInputBuffer(s->ctx->codec, 0);
+             if (index < 0) {
+                 /* no space, block for an output frame to appear */
+-                ret = ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++                ret = mediacodec_receive_with_dovi(avctx, s, frame, true);
+                 /* Try again if both input port and output port return EAGAIN.
+                  * If no data is consumed and no frame in output, it can make
+                  * both avcodec_send_packet() and avcodec_receive_frame()
+@@ -710,7 +938,16 @@
+             // Raw HEVC and transport streams may carry RPU without container
+             // configuration. The decoder's Annex B BSF preserves those NALs.
+             // Refuse ordinary HEVC decoding before submitting an RPU packet.
+-            if (avctx->codec_id == AV_CODEC_ID_HEVC && !s->dovi_decoder) {
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++            if (s->gpu_dovi && !s->gpu_packet_queued) {
++                ret = mediacodec_gpu_dovi_queue(avctx, s, &s->buffered_pkt);
++                if (ret < 0) {
++                    s->rejected_dovi = 1;
++                    return ret;
++                }
++                s->gpu_packet_queued = 1;
++            }
++            if (avctx->codec_id == AV_CODEC_ID_HEVC && !s->dovi_decoder && !s->gpu_dovi) {
+                 const uint8_t *data = s->buffered_pkt.data;
+                 for (int i = 0; i + 4 < s->buffered_pkt.size; i++) {
+                     if (!data[i] && !data[i + 1] && data[i + 2] == 1 &&
+@@ -722,6 +959,7 @@
+                     }
+                 }
+             }
++#endif
+ #if CONFIG_LIBDOVI && CONFIG_HEVC_MEDIACODEC_DECODER
+             if (s->converting_dovi_p7 && !s->converted_packet) {
+                 ret = mediacodec_dovi_convert_packet(avctx, &s->buffered_pkt, &s->source_dovi);
+@@ -757,6 +995,9 @@
+         }
+ 
+         s->converted_packet = 0;
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++        s->gpu_packet_queued = 0;
++#endif
+         /* fetch new packet or eof */
+         ret = ff_decode_get_packet(avctx, &s->buffered_pkt);
+         if (ret == AVERROR_EOF) {
+@@ -764,9 +1005,9 @@
+             ret = ff_mediacodec_dec_send(avctx, s->ctx, &null_pkt, true);
+             if (ret < 0)
+                 return ret;
+-            return ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++            return mediacodec_receive_with_dovi(avctx, s, frame, true);
+         } else if (ret == AVERROR(EAGAIN) && s->ctx->current_input_buffer < 0) {
+-            return ff_mediacodec_dec_receive(avctx, s->ctx, frame, true);
++            return mediacodec_receive_with_dovi(avctx, s, frame, true);
+         } else if (ret < 0) {
+             return ret;
+         }
+@@ -781,6 +1022,9 @@
+ 
+     av_packet_unref(&s->buffered_pkt);
+ 
++#if CONFIG_HEVC_MEDIACODEC_DECODER
++    mediacodec_gpu_dovi_clear(s);
++#endif
+     ff_mediacodec_dec_flush(avctx, s->ctx);
+ }
+ 
+diff --git a/libavcodec/mediacodecdec_common.c b/libavcodec/mediacodecdec_common.c
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -760,7 +760,9 @@
+             if (device_ctx->type == AV_HWDEVICE_TYPE_MEDIACODEC) {
+                 if (device_ctx->hwctx) {
+                     AVMediaCodecDeviceContext *mediacodec_ctx = (AVMediaCodecDeviceContext *)device_ctx->hwctx;
+-                    s->surface = ff_mediacodec_surface_ref(mediacodec_ctx->surface, mediacodec_ctx->native_window, avctx);
++                    s->surface = ff_mediacodec_surface_ref(
++                        s->gpu_dovi ? mediacodec_ctx->dolby_vision_surface : mediacodec_ctx->surface,
++                        s->gpu_dovi ? NULL : mediacodec_ctx->native_window, avctx);
+                     av_log(avctx, AV_LOG_INFO, "Using surface %p\n", s->surface);
+                 }
+             }
+diff --git a/libavcodec/mediacodecdec_common.h b/libavcodec/mediacodecdec_common.h
+--- a/libavcodec/mediacodecdec_common.h
++++ b/libavcodec/mediacodecdec_common.h
+@@ -46,6 +46,7 @@
+     FFAMediaFormat *format;
+ 
+     void *surface;
++    bool gpu_dovi;
+ 
+     int started;
+     int draining;
+diff --git a/libavutil/hwcontext_mediacodec.h b/libavutil/hwcontext_mediacodec.h
+--- a/libavutil/hwcontext_mediacodec.h
++++ b/libavutil/hwcontext_mediacodec.h
+@@ -56,6 +56,22 @@
+      *   -init_hw_device mediacodec=mediacodec,create_window=1
+      */
+     int create_window;
++
++    /**
++     * Optional dedicated Surface for unmodified 10-bit YUV sampling by a GPU
++     * consumer that applies AV_FRAME_DATA_DOVI_METADATA. NULL disables export.
++     * This must not be an ordinary RGB or display Surface.
++     */
++    void *dolby_vision_surface;
++
++    /**
++     * Thread-safe capability/status callback for dolby_vision_surface.
++     * Return positive while the consumer supports raw YUV and Dolby metadata,
++     * or nonpositive to reject decoding and allow software fallback. The
++     * callback and opaque data must remain valid for this device's lifetime.
++     */
++    int (*dolby_vision_status)(void *opaque);
++    void *dolby_vision_opaque;
+ } AVMediaCodecDeviceContext;
+ 
+ #endif /* AVUTIL_HWCONTEXT_MEDIACODEC_H */

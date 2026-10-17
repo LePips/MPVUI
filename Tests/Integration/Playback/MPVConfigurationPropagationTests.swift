@@ -1,37 +1,50 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVConfigurationPropagationTests {
+
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `typed quality reaches the renderer or reports native limitations`(
         output: MPVPlayerConfiguration.VideoOutput
     ) async throws {
         let quality = MPVRenderingQuality(
-            antiringing: 0.25, chromaScaling: .bicubic, debanding: false,
-            dithering: .ordered, gamutMapping: .relative, peakDetection: .disabled,
-            preset: .battery, scaling: .lanczos, toneMapping: .reinhard
+            antiringing: 0.25,
+            chromaScaling: .bicubic,
+            debanding: false,
+            dithering: .ordered,
+            gamutMapping: .relative,
+            peakDetection: .disabled,
+            preset: .battery,
+            scaling: .lanczos,
+            toneMapping: .reinhard
         )
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no", "scale": "bilinear", "deband": "yes"],
-            autoPlay: false, renderingQuality: quality, videoOutput: output
+            autoPlay: false,
+            renderingQuality: quality,
+            videoOutput: output
         ))
         defer { fixture.close() }
+        fixture.player.setDiagnosticsEnabled(true)
         try await fixture.loadPaused(TestPaths.testMedia("color-hdr10.mkv"))
         let player = fixture.player
         try await eventually("accepted rendering quality diagnostics") {
             player.playbackDiagnostics.renderingQuality.requested == quality
         }
         let status = player.playbackDiagnostics.renderingQuality
+
         #expect(status.resolvedPreset == .battery)
-        #expect(status.backend == output)
+        #expect(status.backend == output.coreValue)
         if output == .sampleBuffer {
             #expect(status.effectiveOptions.isEmpty)
             #expect(!status.unsupportedFeatures.isEmpty)
         } else {
             let options = status.effectiveOptions
+
             #expect(options["scale"] == "lanczos")
             #expect(options["cscale"] == "bicubic")
             #expect(options["scale-antiring"].flatMap(Double.init) == 0.25)
@@ -51,9 +64,16 @@ struct MPVConfigurationPropagationTests {
     ) async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: [
-                "ao": "null", "sid": "no", "cache-secs": "7", "audio-spdif": "",
-                "ao-avfoundation-spatial-audio": "multichannel", "sub-font": "sans-serif",
-                "vo": "invalid-output", "volume": "99", "speed": "2", "target-contrast": "invalid-contrast",
+                "ao": "null",
+                "sid": "no",
+                "cache-secs": "7",
+                "audio-spdif": "",
+                "ao-avfoundation-spatial-audio": "multichannel",
+                "sub-font": "sans-serif",
+                "vo": "invalid-output",
+                "volume": "99",
+                "speed": "2",
+                "target-contrast": "invalid-contrast",
             ],
             audio: .init(audioSession: .hostManaged, spatialization: .disabled),
             autoPlay: false,
@@ -74,12 +94,22 @@ struct MPVConfigurationPropagationTests {
             player.state == .paused && abs(player.position.seconds - 0.4) < 0.1
         }
         let expectedOutput = output
+
         #expect(player.videoOutput == expectedOutput)
 
         let properties = [
-            "vo", "hwdec", "cache-secs", "cache-pause-wait", "cache-pause-initial",
-            "loop-file", "speed", "volume", "audio-spdif", "ao-avfoundation-spatial-audio",
-            "ao-avfoundation-manage-audio-session", "sub-font",
+            "vo",
+            "hwdec",
+            "cache-secs",
+            "cache-pause-wait",
+            "cache-pause-initial",
+            "loop-file",
+            "speed",
+            "volume",
+            "audio-spdif",
+            "ao-avfoundation-spatial-audio",
+            "ao-avfoundation-manage-audio-session",
+            "sub-font",
         ]
         var observed: [String: String] = [:]
         player.logHandler = { message in
@@ -108,6 +138,7 @@ struct MPVConfigurationPropagationTests {
             let query = "CONFIG_AUDIT|" + properties.map { "\($0)=${=options/\($0)}" }.joined(separator: "|")
             player.command("expand-properties", arguments: ["print-text", query])
             try await eventually("real mpv option readback") { observed.count == properties.count }
+
             #expect(observed["vo"] == (expectedOutput == .metal ? "gpu-next" : "avfoundation"))
             #expect(observed["hwdec"] == "no")
             #expect(observed["cache-secs"].flatMap(Double.init) == 7)

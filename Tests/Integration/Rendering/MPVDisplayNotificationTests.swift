@@ -1,4 +1,5 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 #if os(macOS)
@@ -10,6 +11,7 @@ import UIKit
 @Suite(.tags(.integration, .hdr), .serialized)
 @MainActor
 struct MPVDisplayNotificationTests {
+
     @Test
     func `display notifications coalesce into one live color update`() async throws {
         let center = NotificationCenter()
@@ -37,6 +39,7 @@ struct MPVDisplayNotificationTests {
             await fixture.player.lifecycleDiagnostics().liveColorUpdates > before.liveColorUpdates
         }
         let after = await fixture.player.lifecycleDiagnostics()
+
         #expect(after.liveColorUpdates == before.liveColorUpdates + 1)
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.loadCommands == before.loadCommands)
@@ -59,9 +62,11 @@ struct MPVDisplayNotificationTests {
         center.post(name: start, object: fixture.window)
         fixture.surface.setFrameSize(CGSize(width: 500, height: 280))
         fixture.surface.layoutSubtreeIfNeeded()
+
         #expect(fixture.surface.resizeDiagnosticSnapshot.geometryChangeKind == .animatedTransition)
         #expect(fixture.surface.resizeDiagnosticSnapshot.hasAnimatedFallback)
         center.post(name: end, object: NSObject())
+
         #expect(fixture.surface.resizeDiagnosticSnapshot.hasAnimatedFallback)
         center.post(name: end, object: fixture.window)
         try await eventually("fullscreen completion commits exact drawable geometry") {
@@ -70,6 +75,7 @@ struct MPVDisplayNotificationTests {
                 && snapshot.committedDrawableSize == fixture.surface.metalLayer.drawableSize
         }
         center.post(name: NSWindow.didChangeScreenNotification, object: fixture.window)
+
         #expect(fixture.surface.isActiveRenderingSurface)
         #expect(fixture.player.lastError == nil)
     }

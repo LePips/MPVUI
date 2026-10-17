@@ -1,30 +1,40 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .hdr))
 struct MPVHDRSurfacePolicyTests {
+
     @Test(arguments: [false, true])
     func `legacy render targets carry an explicit contrast contract`(hdr: Bool) {
         let target = MPVRenderTarget(
-            layerAddress: 0, layerOwner: NSObject(), drawableWidth: 640, drawableHeight: 360,
-            usesExtendedDynamicRange: hdr, displaySupportsExtendedDynamicRange: true, outputHeadroom: 4
+            layerAddress: 0,
+            layerOwner: NSObject(),
+            drawableWidth: 640,
+            drawableHeight: 360,
+            usesExtendedDynamicRange: hdr,
+            displaySupportsExtendedDynamicRange: true,
+            outputHeadroom: 4
         )
-        let options = Dictionary(uniqueKeysWithValues: MPVEngine.colorTargetOptions(for: target))
+        let options = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(for: target))
+
         #expect(options["target-contrast"] == (hdr ? "inf" : "auto"))
     }
 
     @Test(arguments: [(Double(2), "406"), (0, "203"), (.nan, "203"), (.infinity, "203"), (.greatestFiniteMagnitude, "203"), (100, "10000")])
     func `legacy color targets bound peak luminance and retain explicit SDR defaults`(headroom: Double, peak: String) {
-        let hdr = Dictionary(uniqueKeysWithValues: MPVEngine.colorTargetOptions(usesExtendedDynamicRange: true, outputHeadroom: headroom))
+        let hdr = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(usesExtendedDynamicRange: true, outputHeadroom: headroom))
+
         #expect(hdr == ["target-prim": "display-p3", "target-trc": "linear", "target-peak": peak])
-        let sdr = Dictionary(uniqueKeysWithValues: MPVEngine.colorTargetOptions(usesExtendedDynamicRange: false, outputHeadroom: headroom))
+        let sdr = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(usesExtendedDynamicRange: false, outputHeadroom: headroom))
+
         #expect(sdr == ["target-prim": "bt.709", "target-trc": "srgb", "target-peak": "auto"])
     }
 
     @Test
     func `optional subtitle luminance fallback remains visible without a stronger policy failure`() {
-        #expect(MPVEngine
+        #expect(MPVSession
             .resolvedPresentationFallback(backend: .unsupportedSubtitleLuminance, policy: nil, liveFailure: nil) ==
             .unsupportedSubtitleLuminance)
     }
@@ -37,6 +47,7 @@ struct MPVHDRSurfacePolicyTests {
         case .automatic: sourceHDR ? .displayDoesNotSupportHDR : nil
         case .always, .constrained: .displayDoesNotSupportHDR
         }
+
         #expect(result.fallbackReason == expected)
         #expect(!result.usesExtendedDynamicRange)
     }
@@ -44,6 +55,7 @@ struct MPVHDRSurfacePolicyTests {
     @Test
     func `native automatic remains OS managed rather than reporting SDR`() {
         let result = resolve(.automatic, native: true, layerPolicy: false)
+
         #expect(result.dynamicRange == .automatic)
         #expect(result.fallbackReason == nil)
     }
@@ -51,6 +63,7 @@ struct MPVHDRSurfacePolicyTests {
     @Test(arguments: [MPVPlayerConfiguration.HDRPolicy.disabled, .always, .constrained])
     func `older native layers report unsupported explicit requests`(_ policy: MPVPlayerConfiguration.HDRPolicy) {
         let result = resolve(policy, native: true, layerPolicy: false)
+
         #expect(result.dynamicRange == .automatic)
         #expect(result.fallbackReason == .unsupportedPolicy)
     }
@@ -65,10 +78,12 @@ struct MPVHDRSurfacePolicyTests {
     @Test
     func `tvOS Metal only configures HDR when platform supports it`() {
         let unavailable = resolve(.always, metalHDR: false)
+
         #expect(!unavailable.usesExtendedDynamicRange)
         #expect(unavailable.dynamicRange == .sdr)
         #expect(unavailable.fallbackReason == .unsupportedPolicy)
         let available = resolve(.always)
+
         #expect(available.usesExtendedDynamicRange)
         #expect(available.dynamicRange == .hdr)
     }
@@ -84,6 +99,7 @@ struct MPVHDRSurfacePolicyTests {
     @Test
     func `constrained HDR cannot silently claim enforcement on old systems`() {
         let result = resolve(.constrained, layerPolicy: false)
+
         #expect(result.dynamicRange == .hdr)
         #expect(result.fallbackReason == .unsupportedPolicy)
     }

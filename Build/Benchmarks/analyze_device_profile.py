@@ -79,8 +79,8 @@ def symbolicate(records, binaries, products, symbols):
                 addresses[f["uuid"]].add(f["addr"])
     names, validation = {}, {}
     for uid, b in binaries.items():
-        if b["name"] == "MPVUIExample":
-            path = products / "MPVUIExample.app.dSYM/Contents/Resources/DWARF/MPVUIExample"
+        if b["name"] == "MPVUI":
+            path = products / "MPVUI.app.dSYM/Contents/Resources/DWARF/MPVUI"
         elif b["name"] == "Libmpv":
             path = products / "Libmpv.framework/Libmpv"
         else:

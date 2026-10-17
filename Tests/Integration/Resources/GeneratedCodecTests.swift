@@ -1,11 +1,14 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration))
 @MainActor
 struct GeneratedCodecTests {
+
     struct Clip: Sendable {
+
         let name: String
         let codec: String
         var fps: Double = 24
@@ -20,10 +23,12 @@ struct GeneratedCodecTests {
         Clip(name: "color-hlg", codec: "hevc", duration: 10),
         Clip(name: "video-h264-120fps", codec: "h264", fps: 120),
     ])
+
     func `generated codecs decode and advance at the encoded frame rate`(clip: Clip) async throws {
         let session = try NativePlaybackSession(options: ["sub-auto": "no"])
         defer { session.close() }
         try await session.load(TestPaths.testMedia(clip.name + ".mkv"))
+
         #expect(session.property("video-out-params/w")?.integerValue == 320)
         #expect(session.property("video-out-params/h")?.integerValue == 180)
         #expect(abs((session.property("duration")?.doubleValue ?? 0) - clip.duration) < 0.1)
@@ -35,6 +40,7 @@ struct GeneratedCodecTests {
         try await eventually("next decoded frame from \(clip.name)") {
             (session.property("time-pos")?.doubleValue ?? previous) > previous
         }
+
         let next = try #require(session.property("time-pos")?.doubleValue)
         #expect(abs(next - previous - 1 / clip.fps) < 0.002)
     }

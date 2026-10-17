@@ -1,6 +1,7 @@
 import Foundation
 
 enum MPVRecipe {
+
     static func options(_ c: RecipeContext) -> [String] {
         let vision = c.slice.platform == "xros"
         let desktop = c.slice.id == "macos"
@@ -111,8 +112,10 @@ enum MPVRecipe {
         let configurationFile = build.appendingPathComponent("config.h")
         let reported = (["-Dwrap_mode=nodownload"] + options + ["--cross-file=/mpvbuild/mpv/cross.meson"]).joined(separator: " ")
         let literal = try String(decoding: canonical(reported), as: UTF8.self)
-        let configuration = try String(contentsOf: configurationFile, encoding: .utf8).components(separatedBy: "\n")
-            .map { $0.hasPrefix("#define CONFIGURATION ") ? "#define CONFIGURATION " + literal : $0 }.joined(separator: "\n")
+        let configuration = try String(contentsOf: configurationFile, encoding: .utf8)
+            .components(separatedBy: "\n")
+            .map { $0.hasPrefix("#define CONFIGURATION ") ? "#define CONFIGURATION " + literal : $0 }
+            .joined(separator: "\n")
         try put(configuration, configurationFile)
         try c.runner.run("meson", ["compile", "-C", build.path, "-j", String(c.jobs)], cwd: c.work, env: c.environment)
         let install = c.work.appendingPathComponent("install")
@@ -130,6 +133,28 @@ enum MPVRecipe {
             )
         }
         try require(exists(c.prefix.appendingPathComponent("lib/libmpv.a")), "mpv install did not produce libmpv.a")
+        // Compile the packager into Libmpv so Swift can use it without exposing FFmpeg types or symbols.
+        let media = c.root.appendingPathComponent("Build/Support/media")
+        let object = c.work.appendingPathComponent("media.o")
+        try c.runner.run("/usr/bin/clang", c.flags + [
+            "-std=c11",
+            "-O2",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-fvisibility=hidden",
+            "-I" + c.prefix.appendingPathComponent("include/mpv").path,
+            "-c",
+            media.appendingPathComponent("mpvui_hls.c").path,
+            "-o",
+            object.path
+        ])
+        let archive = c.prefix.appendingPathComponent("lib/libmpv.a")
+        let combined = c.work.appendingPathComponent("libmpv-media.a")
+        try c.runner.run("/usr/bin/libtool", ["-static", "-D", "-o", combined.path, archive.path, object.path])
+        try remove(archive)
+        try fm.moveItem(at: combined, to: archive)
+        try fm.copyItem(at: media.appendingPathComponent("mpvui_hls.h"), to: c.prefix.appendingPathComponent("include/mpv/mpvui_hls.h"))
         try c.normalizePkgConfig()
         for file in try files(c.prefix) where file.pathExtension == "pc" {
             let text = try String(contentsOf: file, encoding: .utf8).replacingOccurrences(

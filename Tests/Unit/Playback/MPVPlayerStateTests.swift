@@ -1,5 +1,6 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Observation
 import Testing
@@ -10,6 +11,7 @@ import UIKit
 
 @Suite(.tags(.unit), .serialized)
 struct MPVPlayerStateTests {
+
     @MainActor
     @Test
     func `player state uses observation`() async {
@@ -62,6 +64,7 @@ struct MPVPlayerStateTests {
         #expect((player.bufferStatus) == .empty)
 
         player.load(url, startTime: .seconds(-5))
+
         #expect((player.position) == .zero)
     }
 
@@ -72,6 +75,7 @@ struct MPVPlayerStateTests {
 
         player.setProperty("sub-scale", to: "1.2")
         await Task.yield()
+
         #expect((player.lastError) == nil)
 
         player.setProperty(" volume ", to: "0")
@@ -108,12 +112,14 @@ struct MPVPlayerStateTests {
             Issue.record("Expected a command error, got \(error)")
             return
         }
+
         #expect(context == "seek")
         #expect(code == MPV_ERROR_UNINITIALIZED.rawValue)
         #expect(message == String(cString: mpv_error_string(code)))
         #expect(player.state == .idle)
 
         player.clearLastError()
+
         #expect(player.lastError == nil)
     }
 
@@ -126,16 +132,20 @@ struct MPVPlayerStateTests {
 
         #expect(!(player.hasActiveRenderSurface))
         player.activateRenderSurface(token: first)
+
         #expect(player.hasActiveRenderSurface)
         #expect(player.isRenderSurfaceActive(token: first))
 
         player.activateRenderSurface(token: second)
+
         #expect(!(player.isRenderSurfaceActive(token: first)))
         #expect(player.isRenderSurfaceActive(token: second))
 
         player.detachRenderTarget(token: first, layerAddress: 1)
+
         #expect(player.hasActiveRenderSurface)
         player.detachRenderTarget(token: second, layerAddress: 2)
+
         #expect(!(player.hasActiveRenderSurface))
     }
 }

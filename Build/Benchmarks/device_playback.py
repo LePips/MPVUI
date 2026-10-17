@@ -19,7 +19,7 @@ import time
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
-BUNDLE = "com.lepips.MPVUIExample"
+BUNDLE = "io.github.mpvui.example"
 
 
 def add_arguments(commands, *, label, bounded_int, finite_range):
@@ -54,10 +54,14 @@ def source_identity():
 
     result = identity(ROOT)
     files = dict(result["files"])
-    for directory in (ROOT / "Example/MPVUIExample", ROOT / "Build/Benchmarks"):
+    for directory in (ROOT / "Example/Sources", ROOT / "Example/Darwin", ROOT / "Build/Benchmarks"):
         for path in directory.rglob("*"):
             if path.is_file() and path.suffix in (".swift", ".py", ".pbxproj", ".plist", ".xcscheme", ".resolved"):
                 files[str(path.relative_to(ROOT))] = digest(path)
+    for name in ("Package.swift", "Package.resolved", "Skip.env"):
+        path = ROOT / "Example" / name
+        if path.is_file():
+            files[str(path.relative_to(ROOT))] = digest(path)
     result["files"] = files
     # Local selection paths can stay constant while their binary changes.
     import re
@@ -316,7 +320,7 @@ def aggregate(raw_runs, *, source, media, args, device, xcode, app_hash):
             workload["metrics"].setdefault(key, {"unit": metric_unit(key), "direction": "lower", "samples": []})["samples"].append(value)
         workload["observations"].append(raw)
         environment_keys.append(raw["environment"])
-    protocol = {p.name: digest(p) for p in (Path(__file__), ROOT / "Example/MPVUIExample/Shared/PlaybackBenchmark.swift")}
+    protocol = {p.name: digest(p) for p in (Path(__file__), ROOT / "Example/Sources/MPVUIExample/PlaybackBenchmark.swift")}
     return {
         "label": args.label,
         "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -386,14 +390,14 @@ def run(args):
         before = source_identity()
         derived = args.derived_data.resolve()
         build_stamp = derived / "mpvui-benchmark-build.json"
-        app = derived / "Build/Products/Release-iphoneos/MPVUIExample.app"
+        app = derived / "Build/Products/Release-iphoneos/MPVUI.app"
         build_identity = {"source": before["sourceSHA256"], "xcode": xcode}
         if args.skip_build:
             saved = json.loads(build_stamp.read_text()) if build_stamp.exists() else {}
             if (
                 any(saved.get(key) != value for key, value in build_identity.items())
                 or not app.exists()
-                or saved.get("appSHA256") != digest(app / "MPVUIExample")
+                or saved.get("appSHA256") != digest(app / "MPVUI")
             ):
                 raise ValueError("Stale or missing device build; omit --skip-build")
         else:
@@ -402,9 +406,9 @@ def run(args):
                 [
                     "xcodebuild",
                     "-project",
-                    ROOT / "Example/MPVUIExample/MPVUIExample.xcodeproj",
+                    ROOT / "Example/Darwin/MPVUIExample.xcodeproj",
                     "-scheme",
-                    "iOS",
+                    "MPVUI App",
                     "-configuration",
                     "Release",
                     "-derivedDataPath",
@@ -421,9 +425,9 @@ def run(args):
                 raise ValueError(f"Build produced no app: {app}")
             if source_identity()["sourceSHA256"] != before["sourceSHA256"]:
                 raise ValueError("Source changed while building; rerun with a stable checkout")
-            build_stamp.write_text(json.dumps(dict(build_identity, appSHA256=digest(app / "MPVUIExample"))))
+            build_stamp.write_text(json.dumps(dict(build_identity, appSHA256=digest(app / "MPVUI"))))
         device_command(devicectl, ["install", "app", "--device", args.device, str(app)], logs / "install.json")
-        app_hash = digest(app / "MPVUIExample")
+        app_hash = digest(app / "MPVUI")
         if not url:
             command(
                 [
@@ -461,14 +465,14 @@ def run(args):
                         "--device",
                         args.device,
                         "--search",
-                        "MPVUIExample",
+                        "MPVUI",
                         "--json-output",
                         process_list,
                     ],
                     log=logs / (name + ".processes.log"),
                 )
                 for process in json.loads(process_list.read_text())["result"]["runningProcesses"]:
-                    if process.get("executable", "").endswith("/MPVUIExample.app/MPVUIExample"):
+                    if process.get("executable", "").endswith("/MPVUI.app/MPVUI"):
                         device_command(
                             devicectl,
                             ["process", "terminate", "--device", args.device, "--pid", str(process["processIdentifier"])],

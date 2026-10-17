@@ -1,35 +1,17 @@
 import CoreGraphics
 import Foundation
 import Metal
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .hdr))
 struct MPVRenderColorConfigurationTests {
-    private func resolve(
-        _ configuration: MPVPlayerConfiguration = .init(),
-        wide: Bool = true,
-        hdr: Bool = false,
-        native: Bool = false,
-        mac: Bool = true,
-        display: CGColorSpace? = CGColorSpace(name: CGColorSpace.displayP3)
-    ) -> MPVRenderColorConfiguration {
-        .resolve(
-            configuration: configuration,
-            native: native,
-            usesExtendedDynamicRange: hdr,
-            outputHeadroom: 2,
-            supportsWideGamut: wide,
-            systemDisplayProfile: display,
-            displayProfileName: "Test display",
-            calibratedProfile: MPVCalibratedDisplayProfile(policy: configuration.colorManagement.displayProfile),
-            supportsCalibratedICC: mac
-        )
-    }
 
     @Test
     func `p 3 SDR does not require HDR`() {
         let color = resolve(.init(hdrPolicy: .disabled))
+
         #expect(color.status.targetPrimaries == "display-p3")
         #expect(color.status.targetTransfer == "linear")
         #expect(color.pixelFormat == .rgba16Float)
@@ -37,6 +19,7 @@ struct MPVRenderColorConfigurationTests {
         #expect(color.outputHeadroom == 1)
         #expect(color.layerColorSpace.name == CGColorSpace.extendedLinearDisplayP3)
         let options = Dictionary(uniqueKeysWithValues: color.options)
+
         #expect(options["icc-profile-auto"] == "no")
         #expect(options["icc-profile"] == "")
         #expect(options["treat-srgb-as-power22"] == "no")
@@ -45,10 +28,12 @@ struct MPVRenderColorConfigurationTests {
     @Test
     func `compatibility and precision are explicit`() {
         let compatibility = resolve(.init(sdrOutput: .compatibility8Bit))
+
         #expect(compatibility.pixelFormat == .bgra8Unorm)
         #expect(compatibility.status.targetPrimaries == "bt.709")
         #expect(Dictionary(uniqueKeysWithValues: compatibility.options)["dither-depth"] == "8")
         let preciseNarrow = resolve(.init(sdrOutput: .highPrecision), wide: false)
+
         #expect(preciseNarrow.pixelFormat == .rgba16Float)
         #expect(preciseNarrow.layerColorSpace.name == CGColorSpace.extendedLinearSRGB)
         #expect(resolve(wide: false).pixelFormat == .bgra8Unorm)
@@ -60,8 +45,10 @@ struct MPVRenderColorConfigurationTests {
             colorManagement: .init(sdrViewing: .legacyDisplay),
             sdrOutput: .compatibility8Bit
         ))
+
         #expect(Dictionary(uniqueKeysWithValues: legacy.options)["sdr-adjust-gamma"] == "no")
         let reference = resolve(.init(colorManagement: .init(referenceWhite: 100)), hdr: true)
+
         #expect(Dictionary(uniqueKeysWithValues: reference.options)["target-peak"] == "200")
         #expect(MPVColorManagement(referenceWhite: .nan).referenceWhite == 203)
         #expect(MPVColorManagement(referenceWhite: 0).referenceWhite == 10)
@@ -74,6 +61,7 @@ struct MPVRenderColorConfigurationTests {
         let config = MPVPlayerConfiguration(colorManagement: .init(
             displayProfile: .calibratedICC(URL(fileURLWithPath: "/missing/profile.icc"))
         ))
+
         #expect(resolve(config).status.fallbackReason == .invalidRGBDisplayProfile)
         #expect(resolve(config, hdr: true).status.fallbackReason == .calibratedICCRequiresSDRMetal)
         #expect(resolve(config, mac: false).status.fallbackReason == .calibratedICCRequiresMacOS)
@@ -90,26 +78,32 @@ struct MPVRenderColorConfigurationTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let config = MPVPlayerConfiguration(colorManagement: .init(displayProfile: .calibratedICC(url)))
         let result = resolve(config)
+
         #expect(result.status.conversionOwner == .libplaceboCalibratedICC)
         #expect(result.status.calibratedProfileURL == url)
         #expect(CFEqual(result.layerColorSpace, profile))
         let options = Dictionary(uniqueKeysWithValues: result.options)
+
         #expect(options["icc-profile"] == url.path)
         #expect(options["icc-profile-auto"] == "no")
         #expect(options["target-colorspace-hint"] == "no")
         #expect(resolve(config, display: nil).status.fallbackReason == .currentDisplayProfileUnavailable)
     }
 
-    @MainActor @Test
+    @MainActor
+    @Test
     func `native swapchain cannot replace host profile`() throws {
         let layer = MPVMetalLayer()
+
         let profile = try #require(CGColorSpace(name: CGColorSpace.displayP3))
         layer.configureHostColorSpace(profile, pixelFormat: .rgba16Float)
         layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         layer.pixelFormat = .bgra8Unorm
+
         #expect(layer.pixelFormat == .rgba16Float)
         #expect(CFEqual(layer.colorspace, profile))
         try layer.configureHostColorSpace(#require(CGColorSpace(name: CGColorSpace.sRGB)), pixelFormat: .bgra8Unorm)
+
         #expect(layer.pixelFormat == .bgra8Unorm)
     }
 
@@ -134,8 +128,10 @@ struct MPVRenderColorConfigurationTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let config = MPVPlayerConfiguration(colorManagement: .init(displayProfile: .calibratedLUT(url)))
         let color = resolve(config)
+
         #expect(color.status.conversionOwner == .libplaceboCalibratedLUT)
         let options = Dictionary(uniqueKeysWithValues: color.options)
+
         #expect(options["target-lut"] == url.path)
         #expect(options["target-trc"] == "gamma2.4")
         #expect(options["icc-profile"] == "")
@@ -153,7 +149,29 @@ struct MPVRenderColorConfigurationTests {
         ]
         for invalid in invalidCubes {
             try invalid.write(to: url, atomically: true, encoding: .utf8)
+
             #expect(resolve(config).status.fallbackReason == .invalidCalibrationLUT)
         }
+    }
+
+    private func resolve(
+        _ configuration: MPVPlayerConfiguration = .init(),
+        wide: Bool = true,
+        hdr: Bool = false,
+        native: Bool = false,
+        mac: Bool = true,
+        display: CGColorSpace? = CGColorSpace(name: CGColorSpace.displayP3)
+    ) -> MPVRenderColorConfiguration {
+        .resolve(
+            configuration: configuration,
+            native: native,
+            usesExtendedDynamicRange: hdr,
+            outputHeadroom: 2,
+            supportsWideGamut: wide,
+            systemDisplayProfile: display,
+            displayProfileName: "Test display",
+            calibratedProfile: MPVCalibratedDisplayProfile(policy: configuration.colorManagement.displayProfile),
+            supportsCalibratedICC: mac
+        )
     }
 }

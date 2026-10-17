@@ -1,0 +1,51 @@
+/// The encoded and display dimensions of a video stream.
+public struct MPVVideoDimensions: Equatable, Hashable, Sendable {
+
+    /// Video dimensions with no reported size.
+    public static let empty = Self(width: 0, height: 0)
+    /// Encoded width in pixels.
+    public let width: Int
+
+    /// Encoded height in pixels.
+    public let height: Int
+
+    /// Display width after applying pixel-aspect correction, when reported.
+    public let displayWidth: Int?
+
+    /// Display height after applying pixel-aspect correction, when reported.
+    public let displayHeight: Int?
+
+    /// Width used for presentation, falling back to the encoded width.
+    public var effectiveWidth: Int {
+        displayWidth ?? width
+    }
+
+    /// Height used for presentation, falling back to the encoded height.
+    public var effectiveHeight: Int {
+        displayHeight ?? height
+    }
+
+    /// The presentation aspect ratio, or `nil` when it cannot be determined.
+    public var aspectRatio: Double? {
+        guard effectiveWidth > 0, effectiveHeight > 0 else { return nil }
+        return Double(effectiveWidth) / Double(effectiveHeight)
+    }
+
+    /// Whether either encoded dimension is unavailable.
+    public var isEmpty: Bool {
+        width == 0 || height == 0
+    }
+
+    /// Clamps negative encoded dimensions to zero and discards negative display dimensions.
+    package init(
+        width: Int,
+        height: Int,
+        displayWidth: Int? = nil,
+        displayHeight: Int? = nil
+    ) {
+        self.width = max(0, width)
+        self.height = max(0, height)
+        self.displayWidth = displayWidth.flatMap { $0 >= 0 ? $0 : nil }
+        self.displayHeight = displayHeight.flatMap { $0 >= 0 ? $0 : nil }
+    }
+}

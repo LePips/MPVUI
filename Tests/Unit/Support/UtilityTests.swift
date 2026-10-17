@@ -1,15 +1,18 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 private final class WeakBoxValue {}
 
 private final class RegistrySurface {
+
     var isAttachedToWindow = true
     var activationCount = 0
 }
 
 @Suite(.tags(.unit))
 struct UtilityTests {
+
     @Test
     func `clamp constrains comparable values`() {
         #expect(clamp(-1, to: 0 ... 10) == 0)
@@ -23,6 +26,7 @@ struct UtilityTests {
         let box: WeakBox<WeakBoxValue> = {
             let value = WeakBoxValue()
             let box = WeakBox(value)
+
             #expect(box.value === value)
             return box
         }()
@@ -57,6 +61,7 @@ struct UtilityTests {
         )
 
         registry.activateMostRecentSurface(for: player)
+
         #expect(first.activationCount == 0)
         #expect(second.activationCount == 1)
 
@@ -67,10 +72,12 @@ struct UtilityTests {
             shouldRestorePreviousSurface: false
         )
         registry.activateMostRecentSurface(for: player)
+
         #expect(first.activationCount == 1)
 
         first.isAttachedToWindow = false
         registry.activateMostRecentSurface(for: player)
+
         #expect(first.activationCount == 1)
         #expect(second.activationCount == 2)
     }

@@ -4,12 +4,42 @@ import Libmpv
 /// Delays a demuxer's seek without relying on disk or network timing.
 /// Keep alive until the registered native session has closed.
 final class SeekGatedMediaStream: @unchecked Sendable {
+
+    static let open: mpv_stream_cb_open_ro_fn = { context, _, info in
+        guard let context, let info else { return -1 }
+        info.pointee.cookie = context
+        info.pointee.read_fn = { context, buffer, count in
+            guard let context, let buffer else { return -1 }
+            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().read(into: buffer, count: count)
+        }
+        info.pointee.seek_fn = { context, offset in
+            guard let context else { return -1 }
+            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().seek(to: offset)
+        }
+        info.pointee.size_fn = { context in
+            guard let context else { return -1 }
+            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().size
+        }
+        info.pointee.close_fn = { _ in }
+        info.pointee.cancel_fn = { context in
+            guard let context else { return }
+            Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().cancel()
+        }
+        return 0
+    }
+
     private let file: FileHandle
     private let size: Int64
     private let condition = NSCondition()
     private var gateNextSeek = false
     private var blocked = false
     private var cancelled = false
+
+    var isBlocked: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return blocked
+    }
 
     init(_ url: URL) throws {
         file = try FileHandle(forReadingFrom: url)
@@ -18,12 +48,6 @@ final class SeekGatedMediaStream: @unchecked Sendable {
     }
 
     deinit { try? file.close() }
-
-    var isBlocked: Bool {
-        condition.lock()
-        defer { condition.unlock() }
-        return blocked
-    }
 
     func arm() {
         condition.lock()
@@ -76,28 +100,5 @@ final class SeekGatedMediaStream: @unchecked Sendable {
             data.copyBytes(to: UnsafeMutableRawBufferPointer(start: buffer, count: data.count))
             return Int64(data.count)
         } catch { return -1 }
-    }
-
-    static let open: mpv_stream_cb_open_ro_fn = { context, _, info in
-        guard let context, let info else { return -1 }
-        info.pointee.cookie = context
-        info.pointee.read_fn = { context, buffer, count in
-            guard let context, let buffer else { return -1 }
-            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().read(into: buffer, count: count)
-        }
-        info.pointee.seek_fn = { context, offset in
-            guard let context else { return -1 }
-            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().seek(to: offset)
-        }
-        info.pointee.size_fn = { context in
-            guard let context else { return -1 }
-            return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().size
-        }
-        info.pointee.close_fn = { _ in }
-        info.pointee.cancel_fn = { context in
-            guard let context else { return }
-            Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().cancel()
-        }
-        return 0
     }
 }

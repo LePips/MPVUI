@@ -1,27 +1,39 @@
 import CoreMedia
 import CoreVideo
 import Foundation
+import MPVCore
 
 /// Content characteristics used as a display-mode hint, never as a decoder format.
 /// Unknown color properties remain absent. An enforced SDR conversion replaces
 /// the source HDR description so it cannot request an HDR HDMI mode accidentally.
-struct MPVDisplayMatchingContent: Equatable {
-    let width: Int32
-    let height: Int32
-    let refreshRate: Float
-    let codec: CMVideoCodecType
-    let signal: MPVVideoSignal
-    let convertsHDRToSDR: Bool
-    let dolbyVision: DolbyVision?
+struct MPVDisplayMatchingContent {
 
     /// A display hint for the validated, single-layer native output. This is
     /// never passed to a decoder. The decoder owns the actual HEVC parameter
     /// sets and per-frame RPU. In particular, a source Profile 7 declaration
     /// cannot advertise the converted Profile 8.1 output without evidence.
     struct DolbyVision: Equatable {
+
         let profile: Int
         let level: Int
         let compatibilityID: Int
+
+        var atomName: String {
+            profile > 7 ? "dvvC" : "dvcC"
+        }
+
+        var configurationRecord: Data {
+            // Dolby Vision configuration record v1.0, in network byte order.
+            // Validated native output has an RPU and base layer, with no EL.
+            let flags = UInt16(profile << 9 | level << 3 | 0b101)
+            return Data([
+                1,
+                0,
+                UInt8(flags >> 8),
+                UInt8(flags & 0xFF),
+                UInt8(compatibilityID << 4),
+            ] + Array(repeating: UInt8(0), count: 19))
+        }
 
         init?(status: MPVDolbyVisionStatus, level: Int?) {
             guard status.nativeValidation == .validated,
@@ -35,41 +47,15 @@ struct MPVDisplayMatchingContent: Equatable {
             self.level = level
             self.compatibilityID = compatibilityID
         }
-
-        var atomName: String {
-            profile > 7 ? "dvvC" : "dvcC"
-        }
-
-        var configurationRecord: Data {
-            // Dolby Vision configuration record v1.0, in network byte order.
-            // Validated native output has an RPU and base layer, with no EL.
-            let flags = UInt16(profile << 9 | level << 3 | 0b101)
-            return Data([
-                1, 0, UInt8(flags >> 8), UInt8(flags & 0xFF),
-                UInt8(compatibilityID << 4),
-            ] + Array(repeating: UInt8(0), count: 19))
-        }
     }
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        guard lhs.width == rhs.width, lhs.height == rhs.height,
-              lhs.refreshRate == rhs.refreshRate, lhs.codec == rhs.codec,
-              lhs.convertsHDRToSDR == rhs.convertsHDRToSDR,
-              lhs.dolbyVision == rhs.dolbyVision
-        else { return false }
-        if lhs.convertsHDRToSDR {
-            return true
-        }
-        // Dynamic scene metadata and signal-peak changes do not select a new
-        // HDMI mode. Compare only fields represented by this display hint.
-        return lhs.signal.primaries == rhs.signal.primaries
-            && lhs.signal.transferFunction == rhs.signal.transferFunction
-            && lhs.signal.matrix == rhs.signal.matrix
-            && lhs.signal.range == rhs.signal.range
-            && lhs.signal.bitDepth == rhs.signal.bitDepth
-            && lhs.signal.maxContentLightLevel == rhs.signal.maxContentLightLevel
-            && lhs.signal.maxFrameAverageLightLevel == rhs.signal.maxFrameAverageLightLevel
-    }
+    let width: Int32
+    let height: Int32
+    let refreshRate: Float
+    let codec: CMVideoCodecType
+    let signal: MPVVideoSignal
+    let convertsHDRToSDR: Bool
+    let dolbyVision: DolbyVision?
 
     init?(
         media: MPVMediaInformation,
@@ -107,12 +93,67 @@ struct MPVDisplayMatchingContent: Equatable {
               value > 0, value <= 240
         else { return nil }
         let standardRates = [
-            24000.0 / 1001, 24, 25, 30000.0 / 1001, 30,
-            48000.0 / 1001, 48, 50, 60000.0 / 1001, 60,
-            100, 120_000.0 / 1001, 120,
+            24000.0 / 1001,
+            24,
+            25,
+            30000.0 / 1001,
+            30,
+            48000.0 / 1001,
+            48,
+            50,
+            60000.0 / 1001,
+            60,
+            100,
+            120_000.0 / 1001,
+            120,
         ]
         let rate = standardRates.first { abs($0 - value) < 0.001 } ?? value
         return Float(rate)
+    }
+
+    private static func codecType(for value: String?) -> CMVideoCodecType? {
+        switch value?.lowercased() {
+        case "h264", "avc1": kCMVideoCodecType_H264
+        case "hevc", "h265", "hev1", "hvc1", "dvh1", "dvhe": kCMVideoCodecType_HEVC
+        case "av1", "av01": kCMVideoCodecType_AV1
+        case "vp9", "vp09": kCMVideoCodecType_VP9
+        case "mpeg4": kCMVideoCodecType_MPEG4Video
+        case "mpeg2video": kCMVideoCodecType_MPEG2Video
+        default: nil
+        }
+    }
+
+    private static func colorPrimaries(_ value: String?) -> CFString? {
+        switch value?.lowercased() {
+        case "bt.709", "bt709": kCMFormatDescriptionColorPrimaries_ITU_R_709_2
+        case "bt.601-525", "smpte170m", "smpte-c": kCMFormatDescriptionColorPrimaries_SMPTE_C
+        case "bt.601-625", "bt470bg": kCMFormatDescriptionColorPrimaries_EBU_3213
+        case "bt.2020", "bt2020": kCMFormatDescriptionColorPrimaries_ITU_R_2020
+        case "display-p3", "p3-d65": kCMFormatDescriptionColorPrimaries_P3_D65
+        case "dci-p3", "p3-dci": kCMFormatDescriptionColorPrimaries_DCI_P3
+        default: nil
+        }
+    }
+
+    private static func colorMatrix(_ value: String?) -> CFString? {
+        switch value?.lowercased() {
+        case "bt.709", "bt709": kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2
+        case "bt.601", "bt601", "smpte170m", "bt470bg": kCMFormatDescriptionYCbCrMatrix_ITU_R_601_4
+        case "bt.2020-ncl", "bt.2020-cl", "bt2020nc", "bt2020c": kCMFormatDescriptionYCbCrMatrix_ITU_R_2020
+        case "smpte-240m", "smpte240m": kCMFormatDescriptionYCbCrMatrix_SMPTE_240M_1995
+        default: nil
+        }
+    }
+
+    private static func transferFunction(_ value: MPVTransferFunction) -> CFString? {
+        switch value {
+        case .bt709, .bt1886: kCMFormatDescriptionTransferFunction_ITU_R_709_2
+        case .sRGB: kCMFormatDescriptionTransferFunction_sRGB
+        case .linear: kCMFormatDescriptionTransferFunction_Linear
+        case .pq: kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ
+        case .hlg: kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG
+        default: nil
+        }
     }
 
     func makeFormatDescription() -> CMVideoFormatDescription? {
@@ -160,8 +201,10 @@ struct MPVDisplayMatchingContent: Equatable {
                 let cll = UInt16(maxCLL.rounded())
                 let fall = UInt16(maxFALL.rounded())
                 extensions[kCMFormatDescriptionExtension_ContentLightLevelInfo as String] = Data([
-                    UInt8(cll >> 8), UInt8(cll & 0xFF),
-                    UInt8(fall >> 8), UInt8(fall & 0xFF),
+                    UInt8(cll >> 8),
+                    UInt8(cll & 0xFF),
+                    UInt8(fall >> 8),
+                    UInt8(fall & 0xFF),
                 ])
             }
         }
@@ -177,49 +220,27 @@ struct MPVDisplayMatchingContent: Equatable {
         )
         return status == noErr ? description : nil
     }
+}
 
-    private static func codecType(for value: String?) -> CMVideoCodecType? {
-        switch value?.lowercased() {
-        case "h264", "avc1": kCMVideoCodecType_H264
-        case "hevc", "h265", "hev1", "hvc1", "dvh1", "dvhe": kCMVideoCodecType_HEVC
-        case "av1", "av01": kCMVideoCodecType_AV1
-        case "vp9", "vp09": kCMVideoCodecType_VP9
-        case "mpeg4": kCMVideoCodecType_MPEG4Video
-        case "mpeg2video": kCMVideoCodecType_MPEG2Video
-        default: nil
-        }
-    }
+extension MPVDisplayMatchingContent: Equatable {
 
-    private static func colorPrimaries(_ value: String?) -> CFString? {
-        switch value?.lowercased() {
-        case "bt.709", "bt709": kCMFormatDescriptionColorPrimaries_ITU_R_709_2
-        case "bt.601-525", "smpte170m", "smpte-c": kCMFormatDescriptionColorPrimaries_SMPTE_C
-        case "bt.601-625", "bt470bg": kCMFormatDescriptionColorPrimaries_EBU_3213
-        case "bt.2020", "bt2020": kCMFormatDescriptionColorPrimaries_ITU_R_2020
-        case "display-p3", "p3-d65": kCMFormatDescriptionColorPrimaries_P3_D65
-        case "dci-p3", "p3-dci": kCMFormatDescriptionColorPrimaries_DCI_P3
-        default: nil
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.width == rhs.width, lhs.height == rhs.height,
+              lhs.refreshRate == rhs.refreshRate, lhs.codec == rhs.codec,
+              lhs.convertsHDRToSDR == rhs.convertsHDRToSDR,
+              lhs.dolbyVision == rhs.dolbyVision
+        else { return false }
+        if lhs.convertsHDRToSDR {
+            return true
         }
-    }
-
-    private static func colorMatrix(_ value: String?) -> CFString? {
-        switch value?.lowercased() {
-        case "bt.709", "bt709": kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2
-        case "bt.601", "bt601", "smpte170m", "bt470bg": kCMFormatDescriptionYCbCrMatrix_ITU_R_601_4
-        case "bt.2020-ncl", "bt.2020-cl", "bt2020nc", "bt2020c": kCMFormatDescriptionYCbCrMatrix_ITU_R_2020
-        case "smpte-240m", "smpte240m": kCMFormatDescriptionYCbCrMatrix_SMPTE_240M_1995
-        default: nil
-        }
-    }
-
-    private static func transferFunction(_ value: MPVTransferFunction) -> CFString? {
-        switch value {
-        case .bt709, .bt1886: kCMFormatDescriptionTransferFunction_ITU_R_709_2
-        case .sRGB: kCMFormatDescriptionTransferFunction_sRGB
-        case .linear: kCMFormatDescriptionTransferFunction_Linear
-        case .pq: kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ
-        case .hlg: kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG
-        default: nil
-        }
+        // Dynamic scene metadata and signal-peak changes do not select a new
+        // HDMI mode. Compare only fields represented by this display hint.
+        return lhs.signal.primaries == rhs.signal.primaries
+            && lhs.signal.transferFunction == rhs.signal.transferFunction
+            && lhs.signal.matrix == rhs.signal.matrix
+            && lhs.signal.range == rhs.signal.range
+            && lhs.signal.bitDepth == rhs.signal.bitDepth
+            && lhs.signal.maxContentLightLevel == rhs.signal.maxContentLightLevel
+            && lhs.signal.maxFrameAverageLightLevel == rhs.signal.maxFrameAverageLightLevel
     }
 }

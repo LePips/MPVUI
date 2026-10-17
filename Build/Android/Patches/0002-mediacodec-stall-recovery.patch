@@ -1,0 +1,65 @@
+From: MPVUI contributors
+Subject: [PATCH] Bound MediaCodec input/output stalls and yield between retries
+
+Independently reproduced with c2.goldfish.h264.decoder on API 34.
+A bounded fatal decode error lets mpv replay buffered packets in software.
+Related upstream report (Tim Blechmann):
+https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24634
+https://www.mail-archive.com/ffmpeg-devel@ffmpeg.org/msg190732.html
+
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -33,6 +33,7 @@
+ #include "libavutil/intreadwrite.h"
+ #include "libavutil/pixfmt.h"
+ #include "libavutil/internal.h"
++#include "libavutil/time.h"
+ 
+ #include "avcodec.h"
+ #include "codec_internal.h"
+@@ -61,6 +62,7 @@
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
+     int native_dovi;
++    int stalled;
+ } MediaCodecH264DecContext;
+ 
+ static av_cold int mediacodec_decode_close(AVCodecContext *avctx)
+@@ -520,6 +522,10 @@
+     MediaCodecH264DecContext *s = avctx->priv_data;
+     int ret;
+     ssize_t index;
++    int64_t stalled_since = 0;
++
++    if (s->stalled)
++        return AVERROR_EXTERNAL;
+ 
+     /* In delay_flush mode, wait until the user has released or rendered
+        all retained frames. */
+@@ -548,10 +554,25 @@
+                  * return EAGAIN, which violate the design.
+                  */
+                 if (ff_AMediaCodec_infoTryAgainLater(s->ctx->codec, index) &&
+-                    ret == AVERROR(EAGAIN))
++                    ret == AVERROR(EAGAIN)) {
++                    // Some Android codecs accept input but never deliver the
++                    // first frame. Bound that stall so callers can fall back;
++                    // returning EAGAIN here would violate the send/receive API.
++                    int64_t now = av_gettime_relative();
++                    if (!stalled_since)
++                        stalled_since = now;
++                    if (now - stalled_since >= 5000000) {
++                        av_log(avctx, AV_LOG_ERROR,
++                               "MediaCodec made no input/output progress for 5s\n");
++                        s->stalled = 1;
++                        return AVERROR_EXTERNAL;
++                    }
++                    av_usleep(1000);
+                     continue;
++                }
+                 return ret;
+             }
++            stalled_since = 0;
+             s->ctx->current_input_buffer = index;
+         }
+ 

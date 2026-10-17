@@ -1,10 +1,12 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVNativeFailureRecoveryTests {
+
     @Test
     func `invalid native options report initialization failure without retrying on layout`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
@@ -14,15 +16,18 @@ struct MPVNativeFailureRecoveryTests {
         ))
         defer { fixture.close() }
         try await eventually("invalid option is reported") { fixture.player.lastError != nil }
+
         let failure = try #require(fixture.player.lastError)
         guard case let .initializationFailed(context, _, _) = failure else {
             Issue.record("Expected initialization failure, received \(failure)")
             return
         }
+
         #expect(context == "Set option mpvui-invalid-option")
         #expect(fixture.player.state == .failed(failure))
         fixture.surface.updateRenderingConfiguration()
         let diagnostics = await fixture.player.lifecycleDiagnostics()
+
         #expect(diagnostics.handlesCreated == 0)
         #expect(await fixture.player.renderedScreenshotForTesting() == nil)
         #expect(await !fixture.player.seekForPictureInPicture(to: .seconds(1)))
@@ -47,6 +52,7 @@ struct MPVNativeFailureRecoveryTests {
         fixture.surface.detach()
         fixture.surface.activateRenderingSurface()
         try await fixture.loadPaused(at: .seconds(2))
+
         #expect(fixture.player.lastError == nil)
         #expect(await fixture.player.lifecycleDiagnostics().handlesCreated == before.handlesCreated + 1)
     }

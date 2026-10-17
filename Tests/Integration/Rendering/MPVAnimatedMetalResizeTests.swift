@@ -1,4 +1,5 @@
 import CoreGraphics
+@testable import MPVCore
 @testable import MPVUI
 import QuartzCore
 import Testing
@@ -10,13 +11,17 @@ import SwiftUI
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVAnimatedMetalResizeTests {
+
     #if os(macOS)
     @Test
     func `SwiftUI sidebar animation updates the intermediate video viewport`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false,
-            hardwareDecoding: .disabled, hdrPolicy: .disabled,
-            sdrOutput: .compatibility8Bit, videoOutput: .metal
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            sdrOutput: .compatibility8Bit,
+            videoOutput: .metal
         ))
         defer { fixture.close() }
         fixture.surface.detach()
@@ -24,7 +29,9 @@ struct MPVAnimatedMetalResizeTests {
         let hosting = NSHostingView(rootView: GeometryReader { geometry in
             HStack(spacing: 0) {
                 MPVVideoPlayer(player: fixture.player)
-                Color.gray.frame(width: geometry.size.width * model.fraction)
+
+                Color.gray
+                    .frame(width: geometry.size.width * model.fraction)
             }
         })
         fixture.window.contentView = hosting
@@ -37,6 +44,7 @@ struct MPVAnimatedMetalResizeTests {
             return view.subviews.lazy.compactMap(findSurface).first
         }
         try await eventually("SwiftUI player is attached") { findSurface(hosting) != nil }
+
         let surface = try #require(findSurface(hosting))
         surface.activateRenderingSurface()
         try await fixture.loadPaused()
@@ -55,10 +63,12 @@ struct MPVAnimatedMetalResizeTests {
             var viewportWidths: Set<Int> = []
             for _ in 0 ..< 12 {
                 try await Task.sleep(for: .milliseconds(40))
+
                 #expect(layer.drawableSize == initialDrawable)
                 try viewWidths.insert(Int(#require(layer.presentation()).bounds.width))
                 try viewportWidths.insert(Int(#require(surface.resizeDiagnosticSnapshot.committedDrawableSize).width))
             }
+
             #expect(viewWidths.count > 5)
             #expect(viewportWidths.count > 5, "The rendered aspect ratio must follow SwiftUI's sidebar animation")
             try await eventually("sidebar animation finishes at full resolution") {
@@ -67,6 +77,7 @@ struct MPVAnimatedMetalResizeTests {
                     && !((layer as? MPVMetalLayer)?.hasGeometryAnimation ?? false)
             }
         }
+
         #expect(fixture.player.isPaused)
         #expect(fixture.player.lastError == nil)
     }
@@ -75,9 +86,12 @@ struct MPVAnimatedMetalResizeTests {
     @Test
     func `animated layout renders intermediate aspect ratios without replacing buffers`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false,
-            hardwareDecoding: .disabled, hdrPolicy: .disabled,
-            sdrOutput: .compatibility8Bit, videoOutput: .metal
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            sdrOutput: .compatibility8Bit,
+            videoOutput: .metal
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()
@@ -103,18 +117,22 @@ struct MPVAnimatedMetalResizeTests {
         var intermediateWidths: Set<Int> = []
         for _ in 0 ..< 12 {
             try await Task.sleep(for: .milliseconds(40))
+
             #expect(host.drawableSize == initialDrawable)
             let size = try #require(fixture.surface.resizeDiagnosticSnapshot.committedDrawableSize)
             intermediateWidths.insert(Int(size.width))
         }
+
         #expect(intermediateWidths.count > 5, "mpv must render the changing presentation aspect ratio")
         let finalSize = MPVRenderSurfaceConfiguration.drawableSize(
-            for: fixture.surface.bounds.size, scale: host.contentsScale
+            for: fixture.surface.bounds.size,
+            scale: host.contentsScale
         )
         try await eventually("full resolution restored after animation") {
             host.drawableSize == finalSize && !fixture.surface.resizeDiagnosticSnapshot.finalCommitRequired
         }
         let after = await fixture.player.lifecycleDiagnostics()
+
         #expect(after.surfaceResizeCommands > before.surfaceResizeCommands + 5)
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.loadCommands == before.loadCommands)
@@ -127,6 +145,7 @@ struct MPVAnimatedMetalResizeTests {
 @Observable
 @MainActor
 private final class ResizeSidebarModel {
+
     var fraction = 0.0
 }
 #endif

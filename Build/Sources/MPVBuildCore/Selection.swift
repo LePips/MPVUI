@@ -1,7 +1,9 @@
 import Foundation
 
 struct PackageSelection {
+
     let graph: BuildGraph
+
     func local(_ artifact: URL) throws {
         let index = try read(ArtifactIndex.self, artifact.appendingPathComponent("Artifacts.lock.json"))
         try Generator.validate(index, native: graph.native, release: false)
@@ -35,8 +37,6 @@ struct PackageSelection {
         try put(stageManifest, stage.appendingPathComponent("Package.swift"))
         try graph.runner.run("/usr/bin/swift", ["package", "--package-path", stage.path, "resolve"])
         try transaction.commit(["Package.swift": Data(manifest.utf8)])
-        print(
-            "Selected \(paths == nil ? "remote" : "local") binary targets; fresh SwiftPM resolution passed. Refresh package resolution in an already-open Xcode workspace."
-        )
+        print("Selected \(paths == nil ? "remote" : "local") binary targets. Fresh SwiftPM resolution passed.")
     }
 }

@@ -1,34 +1,31 @@
 import CoreMedia
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVDisplayMatchingCoordinatorTests {
-    private func media(
-        fps: Double = 24,
-        source: MPVVideoSignal = .init(primaries: "bt.2020", transferFunction: .pq),
-        decoded: MPVVideoSignal = .unknown
-    ) -> MPVMediaInformation {
-        MPVMediaInformation(
-            videoCodec: "hevc",
-            dimensions: .init(width: 3840, height: 2160),
-            framesPerSecond: fps,
-            hdr: .init(source: source, decoded: decoded)
-        )
-    }
 
     @Test(arguments: [(Double, Double)]([
-        (23.976, 24000.0 / 1001), (24, 24),
-        (29.97, 30000.0 / 1001), (30, 30),
-        (50, 50), (59.94, 60000.0 / 1001), (60, 60),
+        (23.976, 24000.0 / 1001),
+        (24, 24),
+        (29.97, 30000.0 / 1001),
+        (30, 30),
+        (50, 50),
+        (59.94, 60000.0 / 1001),
+        (60, 60),
     ]))
+
     func `content refresh rates preserve fractional and integer HDMI families`(
-        input: Double, expected: Double
+        input: Double,
+        expected: Double
     ) throws {
         let content = try #require(MPVDisplayMatchingContent(
-            media: media(fps: input), outputUsesHDR: true
+            media: media(fps: input),
+            outputUsesHDR: true
         ))
+
         #expect(content.refreshRate == Float(expected))
     }
 
@@ -49,6 +46,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             framesPerSecond: 24,
             tracks: [.init(id: 1, type: .video, codec: "h264", isSelected: true)]
         )
+
         let content = try #require(MPVDisplayMatchingContent(media: information, outputUsesHDR: false))
         #expect(content.codec == kCMVideoCodecType_H264)
     }
@@ -57,10 +55,14 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `Dolby codec aliases retain frame rate matching without implying validation`(codec: String) throws {
         let content = try #require(MPVDisplayMatchingContent(
             media: .init(
-                videoCodec: codec, dimensions: .init(width: 3840, height: 2160),
+                videoCodec: codec,
+                dimensions: .init(width: 3840, height: 2160),
                 framesPerSecond: 23.976
-            ), outputUsesHDR: true, videoOutput: .sampleBuffer
+            ),
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer
         ))
+
         #expect(content.refreshRate == Float(24000.0 / 1001))
         #expect(content.codec == kCMVideoCodecType_HEVC)
         #expect(content.dolbyVision == nil)
@@ -70,17 +72,25 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `changing HDR scene metadata does not restart HDMI matching`() throws {
         let first = try #require(MPVDisplayMatchingContent(
             media: media(source: .init(
-                primaries: "bt.2020", transferFunction: .pq,
-                signalPeak: 10, hdr10PlusMetadata: ["scene-max": 1000]
-            )), outputUsesHDR: true
+                primaries: "bt.2020",
+                transferFunction: .pq,
+                signalPeak: 10,
+                hdr10PlusMetadata: ["scene-max": 1000]
+            )),
+            outputUsesHDR: true
         ))
+
         let next = try #require(MPVDisplayMatchingContent(
             media: media(source: .init(
-                primaries: "bt.2020", transferFunction: .pq,
-                signalPeak: 4, hdr10PlusMetadata: ["scene-max": 400]
-            )), outputUsesHDR: true
+                primaries: "bt.2020",
+                transferFunction: .pq,
+                signalPeak: 4,
+                hdr10PlusMetadata: ["scene-max": 400]
+            )),
+            outputUsesHDR: true
         ))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, first) == .apply(first))
         #expect(update(&state, next) == .keep)
     }
@@ -88,12 +98,18 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `format description carries content geometry and corrected HDR signal`() throws {
         let decoded = MPVVideoSignal(
-            primaries: "bt.2020", transferFunction: .hlg,
-            matrix: "bt.2020-ncl", range: "limited", bitDepth: 10
+            primaries: "bt.2020",
+            transferFunction: .hlg,
+            matrix: "bt.2020-ncl",
+            range: "limited",
+            bitDepth: 10
         )
+
         let content = try #require(MPVDisplayMatchingContent(
-            media: media(decoded: decoded), outputUsesHDR: true
+            media: media(decoded: decoded),
+            outputUsesHDR: true
         ))
+
         let format = try #require(content.makeFormatDescription())
         #expect(CMVideoFormatDescriptionGetDimensions(format).width == 3840)
         #expect(CMVideoFormatDescriptionGetDimensions(format).height == 2160)
@@ -101,8 +117,10 @@ struct MPVDisplayMatchingCoordinatorTests {
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] as? String
             == kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
+
         #expect(extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String
             == kCMFormatDescriptionColorPrimaries_ITU_R_2020 as String)
+
         #expect(extensions[kCMFormatDescriptionExtension_BitsPerComponent as String] as? Int == 10)
         #expect(extensions[kCMFormatDescriptionExtension_FullRangeVideo as String] as? Bool == false)
     }
@@ -110,18 +128,25 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `SDR conversion drops HDR mode hints and content light metadata`() throws {
         let source = MPVVideoSignal(
-            primaries: "bt.2020", transferFunction: .pq,
-            maxContentLightLevel: 1000, maxFrameAverageLightLevel: 400
+            primaries: "bt.2020",
+            transferFunction: .pq,
+            maxContentLightLevel: 1000,
+            maxFrameAverageLightLevel: 400
         )
+
         let content = try #require(MPVDisplayMatchingContent(
-            media: media(source: source), outputUsesHDR: false
+            media: media(source: source),
+            outputUsesHDR: false
         ))
+
         let format = try #require(content.makeFormatDescription())
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] as? String
             == kCMFormatDescriptionTransferFunction_sRGB as String)
+
         #expect(extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String
             == kCMFormatDescriptionColorPrimaries_ITU_R_709_2 as String)
+
         #expect(extensions[kCMFormatDescriptionExtension_ContentLightLevelInfo as String] == nil)
         #expect(extensions[kCMFormatDescriptionExtension_MasteringDisplayColorVolume as String] == nil)
     }
@@ -129,8 +154,10 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `unknown color metadata stays absent`() throws {
         let content = try #require(MPVDisplayMatchingContent(
-            media: media(source: .unknown), outputUsesHDR: true
+            media: media(source: .unknown),
+            outputUsesHDR: true
         ))
+
         let format = try #require(content.makeFormatDescription())
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] == nil)
@@ -140,20 +167,27 @@ struct MPVDisplayMatchingCoordinatorTests {
 
     @Test(arguments: [(5, 0, "dvcC"), (8, 1, "dvvC"), (8, 4, "dvvC")])
     func `validated native Dolby Vision advertises its effective configuration`(
-        profile: Int, compatibility: Int, atom: String
+        profile: Int,
+        compatibility: Int,
+        atom: String
     ) throws {
         let content = try #require(MPVDisplayMatchingContent(
             media: media(fps: 24000.0 / 1001, source: .init(
-                primaries: "bt.2020", transferFunction: compatibility == 4 ? .hlg : .pq,
-                dolbyVisionProfile: profile, dolbyVisionLevel: 6,
+                primaries: "bt.2020",
+                transferFunction: compatibility == 4 ? .hlg : .pq,
+                dolbyVisionProfile: profile,
+                dolbyVisionLevel: 6,
                 dolbyVisionBaseLayerCompatibilityID: compatibility
             )),
-            outputUsesHDR: true, videoOutput: .sampleBuffer,
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer,
             dolbyVisionStatus: .init(
-                effectiveProfile: profile, effectiveBaseLayerCompatibilityID: compatibility,
+                effectiveProfile: profile,
+                effectiveBaseLayerCompatibilityID: compatibility,
                 nativeValidation: .validated
             )
         ))
+
         let format = try #require(content.makeFormatDescription())
         #expect(content.refreshRate == Float(24000.0 / 1001))
         #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_DolbyVisionHEVC)
@@ -170,15 +204,24 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `Profile 7 conversion advertises validated Profile 8 point 1`() throws {
         let content = try #require(MPVDisplayMatchingContent(
             media: media(source: .init(
-                transferFunction: .pq, dolbyVisionProfile: 7, dolbyVisionLevel: 6,
+                transferFunction: .pq,
+                dolbyVisionProfile: 7,
+                dolbyVisionLevel: 6,
                 dolbyVisionBaseLayerCompatibilityID: 6
-            )), outputUsesHDR: true, videoOutput: .sampleBuffer,
+            )),
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer,
             dolbyVisionStatus: .init(
-                requestedPolicy: .profile7Compatibility, sourceProfile: 7,
-                effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1,
-                nativeValidation: .validated, conversion: .converted, enhancementLayer: .discarded
+                requestedPolicy: .profile7Compatibility,
+                sourceProfile: 7,
+                effectiveProfile: 8,
+                effectiveBaseLayerCompatibilityID: 1,
+                nativeValidation: .validated,
+                conversion: .converted,
+                enhancementLayer: .discarded
             )
         ))
+
         #expect(content.dolbyVision?.profile == 8)
         #expect(content.dolbyVision?.compatibilityID == 1)
         #expect(content.dolbyVision?.configurationRecord[3] == 53, "EL-present must remain clear.")
@@ -187,7 +230,9 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `source tags and conversion intent cannot advertise native Dolby Vision`() throws {
         let source = MPVVideoSignal(
-            transferFunction: .pq, dolbyVisionProfile: 8, dolbyVisionLevel: 6,
+            transferFunction: .pq,
+            dolbyVisionProfile: 8,
+            dolbyVisionLevel: 6,
             dolbyVisionBaseLayerCompatibilityID: 1
         )
         for status: MPVDolbyVisionStatus in [
@@ -199,9 +244,12 @@ struct MPVDisplayMatchingCoordinatorTests {
             .init(effectiveProfile: 8, nativeValidation: .validated),
         ] {
             let content = try #require(MPVDisplayMatchingContent(
-                media: media(source: source), outputUsesHDR: true,
-                videoOutput: .sampleBuffer, dolbyVisionStatus: status
+                media: media(source: source),
+                outputUsesHDR: true,
+                videoOutput: .sampleBuffer,
+                dolbyVisionStatus: status
             ))
+
             #expect(content.dolbyVision == nil)
             #expect(content.codec == kCMVideoCodecType_HEVC)
         }
@@ -210,7 +258,8 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test(arguments: [nil, 0, -1, 16])
     func `missing or invalid Dolby level does not invent a configuration record`(level: Int?) {
         #expect(MPVDisplayMatchingContent.DolbyVision(status: .init(
-            effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1,
+            effectiveProfile: 8,
+            effectiveBaseLayerCompatibilityID: 1,
             nativeValidation: .validated
         ), level: level) == nil)
     }
@@ -218,29 +267,46 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `Dolby validation and backend fallback each update the display criteria`() throws {
         let information = media(source: .init(
-            primaries: "bt.2020", transferFunction: .pq,
-            dolbyVisionProfile: 8, dolbyVisionLevel: 6,
+            primaries: "bt.2020",
+            transferFunction: .pq,
+            dolbyVisionProfile: 8,
+            dolbyVisionLevel: 6,
             dolbyVisionBaseLayerCompatibilityID: 1
         ))
         let validated = MPVDolbyVisionStatus(
-            effectiveProfile: 8, effectiveBaseLayerCompatibilityID: 1, nativeValidation: .validated
+            effectiveProfile: 8,
+            effectiveBaseLayerCompatibilityID: 1,
+            nativeValidation: .validated
         )
+
         let pending = try #require(MPVDisplayMatchingContent(
-            media: information, outputUsesHDR: true, videoOutput: .sampleBuffer
+            media: information,
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer
         ))
+
         let native = try #require(MPVDisplayMatchingContent(
-            media: information, outputUsesHDR: true, videoOutput: .sampleBuffer,
+            media: information,
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer,
             dolbyVisionStatus: validated
         ))
+
         let metal = try #require(MPVDisplayMatchingContent(
-            media: information, outputUsesHDR: true, videoOutput: .metal,
+            media: information,
+            outputUsesHDR: true,
+            videoOutput: .metal,
             dolbyVisionStatus: validated
         ))
+
         let sdr = try #require(MPVDisplayMatchingContent(
-            media: information, outputUsesHDR: false, videoOutput: .sampleBuffer,
+            media: information,
+            outputUsesHDR: false,
+            videoOutput: .sampleBuffer,
             dolbyVisionStatus: validated
         ))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, pending) == .apply(pending))
         #expect(update(&state, native) == .apply(native))
         #expect(update(&state, native) == .keep)
@@ -257,6 +323,7 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `user disabling Match Content releases criteria and reenabling restores them`() throws {
         let content = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, content, enabled: false) == .keep)
         #expect(update(&state, content) == .apply(content))
         #expect(update(&state, content, enabled: false) == .clear)
@@ -269,6 +336,7 @@ struct MPVDisplayMatchingCoordinatorTests {
         let first = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         let next = try #require(MPVDisplayMatchingContent(media: media(fps: 60), outputUsesHDR: true))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, first) == .apply(first))
         #expect(update(&state, nil, playback: .seeking) == .keep)
         #expect(update(&state, next, playback: .buffering) == .keep)
@@ -281,6 +349,7 @@ struct MPVDisplayMatchingCoordinatorTests {
         let first = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         let next = try #require(MPVDisplayMatchingContent(media: media(fps: 60), outputUsesHDR: true))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, first) == .apply(first))
         #expect(update(&state, nil, generation: 2, playback: .loading) == .keep)
         #expect(update(&state, next, generation: 2, switching: true) == .keep)
@@ -293,6 +362,7 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `same URL next item generation with no video releases previous mode`() throws {
         let content = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, content) == .apply(content))
         #expect(update(&state, nil, generation: 2, playback: .loading) == .keep)
         #expect(update(&state, nil, generation: 2, playback: .ready) == .clear)
@@ -302,15 +372,19 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `completion stop failure and inactive surfaces release criteria`() throws {
         let content = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         for playback: MPVPlaybackState in [
-            .idle, .ended, .stopped,
+            .idle,
+            .ended,
+            .stopped,
             .failed(.playbackFailed(code: -1, message: "Test failure")),
         ] {
             var state = MPVDisplayMatchingState()
+
             #expect(update(&state, content) == .apply(content))
             #expect(update(&state, content, playback: playback) == .clear)
             #expect(update(&state, content, playback: playback) == .keep)
         }
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, content) == .apply(content))
         #expect(update(&state, content, active: false, switching: true) == .clear)
     }
@@ -319,12 +393,28 @@ struct MPVDisplayMatchingCoordinatorTests {
     func `handoff preserves matching content but invalidates player-local generation`() throws {
         let content = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
         var state = MPVDisplayMatchingState()
+
         #expect(update(&state, content) == .apply(content))
         state.ownershipDidChange()
+
         #expect(state.content == content)
         #expect(update(&state, content) == .keep)
         state.ownershipDidChange()
+
         #expect(update(&state, nil) == .clear)
+    }
+
+    private func media(
+        fps: Double = 24,
+        source: MPVVideoSignal = .init(primaries: "bt.2020", transferFunction: .pq),
+        decoded: MPVVideoSignal = .unknown
+    ) -> MPVMediaInformation {
+        MPVMediaInformation(
+            videoCodec: "hevc",
+            dimensions: .init(width: 3840, height: 2160),
+            framesPerSecond: fps,
+            hdr: .init(source: source, decoded: decoded)
+        )
     }
 
     private func update(
@@ -337,9 +427,12 @@ struct MPVDisplayMatchingCoordinatorTests {
         switching: Bool = false
     ) -> MPVDisplayMatchingState.Action {
         state.update(
-            candidate: candidate, mediaGeneration: generation,
-            playbackState: playback, matchingEnabled: enabled,
-            isActive: active, modeSwitchInProgress: switching
+            candidate: candidate,
+            mediaGeneration: generation,
+            playbackState: playback,
+            matchingEnabled: enabled,
+            isActive: active,
+            modeSwitchInProgress: switching
         )
     }
 }

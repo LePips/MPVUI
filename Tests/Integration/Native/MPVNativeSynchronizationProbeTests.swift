@@ -4,6 +4,7 @@ import CoreVideo
 import CryptoKit
 import Darwin
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 import UIKit
@@ -13,25 +14,243 @@ import UIKit
 /// production polling interval or the benchmark protocol.
 @Suite(.tags(.integration, .nativePatch), .serialized)
 struct MPVNativeSynchronizationProbeTests {
-    private static var configurationURL: URL? {
-        Bundle.module.url(forResource: "native-sync-configuration", withExtension: "json")
-    }
 
     private struct Configuration: Decodable {
+
+        struct HostVerification: Decodable {
+
+            let hlsIdentity: MediaIdentity
+        }
+
+        struct MediaIdentity: Decodable {
+
+            let files: [String: String]
+        }
+
         let directFilename: String
         let hlsURL: URL
         let directMediaSHA256: String
         let directFileSHA256: String
         let hlsMediaSHA256: String
         let hostVerification: HostVerification
+    }
 
-        struct HostVerification: Decodable {
-            let hlsIdentity: MediaIdentity
+    private struct FrameworkSample {
+
+        let frames: Int
+        let dropped: Int
+        let corrupted: Int
+        let delay: Double
+        let width: Int
+        let height: Int
+    }
+
+    private struct NativeSample: Sendable {
+
+        let begin: Double
+        let end: Double
+        let avsync: Double?
+        let correction: Double?
+        let position: Double?
+        let duration: Double?
+        let paused: Bool?
+        let seeking: Bool?
+        let cachePaused: Bool?
+        let playing: Bool
+        let hardware: Bool?
+        let hardwareDecoder: String?
+        let audioOutput: String?
+        let decoderDrops: Int64?
+        let outputDrops: Int64?
+        let failed: Bool
+        let fallback: Bool
+
+        func json(phase: String, origin: Double, requested: Double) -> [String: Any] {
+            func value(_ x: (some Any)?) -> Any {
+                x.map { $0 as Any } ?? NSNull()
+            }
+            return [
+                "phase": phase,
+                "requestElapsedSeconds": requested - origin,
+                "queryBeginElapsedSeconds": begin - origin,
+                "queryEndElapsedSeconds": end - origin,
+                "queueWaitSeconds": begin - requested,
+                "queryWallSeconds": end - begin,
+                "avsyncSeconds": value(avsync),
+                "totalAudioVideoCorrectionSeconds": value(correction),
+                "positionSeconds": value(position),
+                "durationSeconds": value(duration),
+                "paused": value(paused),
+                "seeking": value(seeking),
+                "pausedForCache": value(cachePaused),
+                "playing": playing,
+                "actualVideoToolboxHardware": value(hardware),
+                "hardwareDecoder": value(hardwareDecoder),
+                "audioOutput": value(audioOutput),
+                "decoderDrops": value(decoderDrops),
+                "outputDrops": value(outputDrops),
+                "failed": failed,
+                "rendererFallback": fallback
+            ]
+        }
+    }
+
+    @MainActor
+    private final class ProbeFixture {
+
+        let engine: MPVSession
+        let layer = AVSampleBufferDisplayLayer()
+        let window: UIWindow
+        private weak var previousKeyWindow: UIWindow?
+        private let recorder: EventRecorder
+
+        var events: [(Double, String)] {
+            recorder.values
         }
 
-        struct MediaIdentity: Decodable {
-            let files: [String: String]
+        var logs: [[String: Any]] {
+            recorder.logs
         }
+
+        var logsDiscarded: Int {
+            recorder.logsDiscarded
+        }
+
+        init() throws {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+
+            let scene = try #require(
+                scenes.first { $0.activationState == .foregroundActive },
+                "A foreground physical-device scene is required"
+            )
+            previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+            window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            let host = UIViewController()
+            host.view.backgroundColor = .black
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.layoutIfNeeded()
+            layer.frame = host.view.bounds
+            host.view.layer.addSublayer(layer)
+            recorder = EventRecorder()
+            let recorder = recorder
+            engine = MPVSession(configuration: .init(
+                additionalOptions: ["sub-auto": "no", "sub-visibility": "no", "osd-level": "0"],
+                audio: .init(audioSession: .hostManaged),
+                autoPlay: true,
+                hardwareDecoding: .videoToolbox,
+                logLevel: .warning,
+                videoOutput: .sampleBuffer
+            )) { emission in
+                switch emission.update {
+                case let .state(state): recorder.add("state:\(state)")
+                case let .error(error, fatal): recorder.add("error:\(error), fatal:\(fatal)")
+                case let .log(log): recorder.addLog(log)
+                default: break
+                }
+            }
+            let scale = scene.screen.scale
+            engine.attach(to: MPVRenderTarget(
+                layerAddress: Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque())),
+                layerOwner: layer,
+                drawableWidth: Int(layer.bounds.width * scale),
+                drawableHeight: Int(layer.bounds.height * scale),
+                usesExtendedDynamicRange: false,
+                displaySupportsExtendedDynamicRange: false,
+                outputHeadroom: 1
+            ))
+        }
+
+        func mark(_ label: String) {
+            recorder.add(label)
+        }
+
+        func close() {
+            engine.shutdownSynchronously()
+            layer.removeFromSuperlayer()
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+
+        func snapshot() async -> NativeSample {
+            let engine = engine
+            return await withCheckedContinuation { continuation in
+                engine.queue.async {
+                    let begin = ProcessInfo.processInfo.systemUptime
+                    let avsync = engine.getDouble("avsync")
+                    let correction = engine.getDouble("total-avsync-change")
+                    let position = engine.getDouble("time-pos")
+                    let duration = engine.getDouble("duration")
+                    let paused = engine.getFlag("pause")
+                    let seeking = engine.getFlag("seeking")
+                    let cachePaused = engine.getFlag("paused-for-cache")
+                    let hwdec = engine.getString("hwdec-current")
+                    let ao = engine.getString("current-ao")
+                    let decoderDrops = engine.getInt64("decoder-frame-drop-count")
+                    let outputDrops = engine.getInt64("frame-drop-count")
+                    continuation.resume(returning: NativeSample(
+                        begin: begin,
+                        end: ProcessInfo.processInfo.systemUptime,
+                        avsync: avsync,
+                        correction: correction,
+                        position: position,
+                        duration: duration,
+                        paused: paused,
+                        seeking: seeking,
+                        cachePaused: cachePaused,
+                        playing: engine.isFileLoaded && engine.hasPlaybackStarted && !engine.isPaused && !engine.isSeeking && !engine
+                            .isPausedForCache,
+                        hardware: engine.videoToolboxSessionUsesHardware,
+                        hardwareDecoder: hwdec,
+                        audioOutput: ao,
+                        decoderDrops: decoderDrops,
+                        outputDrops: outputDrops,
+                        failed: engine.fatalPlaybackError != nil,
+                        fallback: engine.didRejectNativeOutput || engine.videoOutput != .sampleBuffer
+                    ))
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private final class EventRecorder {
+
+        var values: [(Double, String)] = []
+        var logs: [[String: Any]] = []
+        var logsDiscarded = 0
+
+        func add(_ value: String) {
+            values.append((ProcessInfo.processInfo.systemUptime, value))
+        }
+
+        func addLog(_ value: MPVLogMessage) {
+            if logs.count == 32 {
+                logs.removeFirst()
+                logsDiscarded += 1
+            }
+            logs.append([
+                "deliverySystemUptimeSeconds": ProcessInfo.processInfo.systemUptime,
+                "prefix": value.prefix,
+                "level": value.level.rawValue,
+                "message": String(value.message.prefix(4096)),
+                "messageTruncated": value.message.count > 4096
+            ])
+        }
+    }
+
+    private static var configurationURL: URL? {
+        let url = TestPaths.generatedMediaDirectory.appendingPathComponent("native-sync-configuration.json")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private static func processCPU() -> Double? {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return nil }
+        return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
+            + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
     }
 
     @MainActor
@@ -40,6 +259,7 @@ struct MPVNativeSynchronizationProbeTests {
         arguments: ["direct", "hls"],
         [50, 500]
     )
+
     func `native synchronization phases with polling controls`(workload: String, intervalMilliseconds: Int) async throws {
         let configurationData = try Data(contentsOf: #require(Self.configurationURL))
         let configurationSHA256 = SHA256.hash(data: configurationData).map { String(format: "%02x", $0) }.joined()
@@ -66,18 +286,25 @@ struct MPVNativeSynchronizationProbeTests {
             .appendingPathComponent("native-sync-\(workload)-\(intervalMilliseconds)ms-\(UUID().uuidString).json")
         defer {
             let report: [String: Any] = [
-                "schemaVersion": 1, "status": status, "purpose": "separate diagnostic synchronization probe",
-                "workload": workload, "mediaSHA256": mediaSHA256, "queryIntervalMilliseconds": intervalMilliseconds,
+                "schemaVersion": 1,
+                "status": status,
+                "purpose": "separate diagnostic synchronization probe",
+                "workload": workload,
+                "mediaSHA256": mediaSHA256,
+                "queryIntervalMilliseconds": intervalMilliseconds,
                 "configurationSHA256": configurationSHA256,
                 "directBytesVerifiedOnDevice": directBytesVerified,
-                "setupStage": setupStage, "setupFailure": setupFailure,
+                "setupStage": setupStage,
+                "setupFailure": setupFailure,
                 "readinessObservations": readinessObservations,
                 "hlsIdentityScope": "host manifest verification; HLS responses are not independently hashed on device",
                 "audioRoute": audioObservation["route"] ?? NSNull(),
                 "audioSampleRate": audioObservation["sampleRate"] ?? NSNull(),
                 "audioOutputChannels": audioObservation["outputChannels"] ?? NSNull(),
                 "systemOutputVolume": audioObservation["volume"] ?? NSNull(),
-                "samples": samples, "phases": phases, "frameworkSamples": frameworkSamples,
+                "samples": samples,
+                "phases": phases,
+                "frameworkSamples": frameworkSamples,
                 "networkPreflight": networkPreflight,
                 "nativeLogs": createdFixture?.logs ?? [],
                 "nativeLogsDiscarded": createdFixture?.logsDiscarded ?? 0,
@@ -89,10 +316,19 @@ struct MPVNativeSynchronizationProbeTests {
                     "State event timestamps describe main-actor delivery, not the native event instant.",
                     "50/500 ms controls include extra observer work and are not benchmark protocol4 performance runs.",
                     "HLS manifest network preflight and hashing run before all playback phases; playback is not retried after a failure.",
-                    "Native warning/error messages are retained with a bounded test-only log buffer; normal info logs are not published to this probe.",
+                    """
+                    Native warning/error messages are retained with a bounded test-only log buffer; normal info logs are not \
+                    published to this probe.
+                    """,
                     "Process CPU includes all test activity; query wall time includes native serialization and waiting.",
-                    "Framework metrics/readback bracket the settled window outside the native query loop; their timestamps bound a slightly wider interval.",
-                    "Displayed-buffer availability/dimensions and framework counters do not establish full pixel progression or physical panel scanout.",
+                    """
+                    Framework metrics/readback bracket the settled window outside the native query loop; their timestamps bound a \
+                    slightly wider interval.
+                    """,
+                    """
+                    Displayed-buffer availability/dimensions and framework counters do not establish full pixel progression or \
+                    physical panel scanout.
+                    """,
                     "avsync is mpv audio/video timing, not panel scanout or audible synchronization."
                 ]
             ]
@@ -128,9 +364,12 @@ struct MPVNativeSynchronizationProbeTests {
                 ]
             }
             readinessObservations.append([
-                "boundary": boundary, "elapsedSeconds": ProcessInfo.processInfo.systemUptime - origin,
-                "applicationState": applicationState, "protectedDataAvailable": application.isProtectedDataAvailable,
-                "sceneCount": scenes.count, "scenes": scenes
+                "boundary": boundary,
+                "elapsedSeconds": ProcessInfo.processInfo.systemUptime - origin,
+                "applicationState": applicationState,
+                "protectedDataAvailable": application.isProtectedDataAvailable,
+                "sceneCount": scenes.count,
+                "scenes": scenes
             ])
         }
         func requireForeground(_ stage: String) async throws {
@@ -166,7 +405,9 @@ struct MPVNativeSynchronizationProbeTests {
         // must retain application/scene evidence even without a player or audio.
         try await requireForeground("beforeAudioAndRenderer")
         setupStage = "audioActivation"
-        let priorCategory = audio.category, priorMode = audio.mode, priorOptions = audio.categoryOptions
+        let priorCategory = audio.category
+        let priorMode = audio.mode
+        let priorOptions = audio.categoryOptions
         defer {
             audioObservation = [
                 "route": audio.currentRoute.outputs.map(\.portType.rawValue),
@@ -195,7 +436,8 @@ struct MPVNativeSynchronizationProbeTests {
             duration: Double? = nil,
             until predicate: ((NativeSample) -> Bool)? = nil
         ) async throws -> NativeSample {
-            let begin = ProcessInfo.processInfo.systemUptime, cpuBegin = processCPU()
+            let begin = ProcessInfo.processInfo.systemUptime
+            let cpuBegin = processCPU()
             var count = 0
             var sample = await observe(name)
             count += 1
@@ -228,7 +470,8 @@ struct MPVNativeSynchronizationProbeTests {
             let metricsEnd = ProcessInfo.processInfo.systemUptime
             let buffer = renderer.displayedPixelBuffer()
             let readbackEnd = ProcessInfo.processInfo.systemUptime
-            let width = buffer.map(CVPixelBufferGetWidth), height = buffer.map(CVPixelBufferGetHeight)
+            let width = buffer.map(CVPixelBufferGetWidth)
+            let height = buffer.map(CVPixelBufferGetHeight)
             let delay = value?.totalAccumulatedFrameDelay
             func nullable(_ value: (some Any)?) -> Any {
                 value.map { $0 as Any } ?? NSNull()
@@ -236,7 +479,8 @@ struct MPVNativeSynchronizationProbeTests {
             // Record unavailable evidence before requiring it, so a failed
             // probe retains nulls instead of silently substituting zero drops.
             frameworkSamples.append([
-                "boundary": boundary, "queryBeginElapsedSeconds": begin - origin,
+                "boundary": boundary,
+                "queryBeginElapsedSeconds": begin - origin,
                 "metricsEndElapsedSeconds": metricsEnd - origin,
                 "readbackEndElapsedSeconds": readbackEnd - origin,
                 "totalNumberOfFrames": nullable(value?.totalNumberOfFrames),
@@ -244,10 +488,13 @@ struct MPVNativeSynchronizationProbeTests {
                 "numberOfCorruptedFrames": nullable(value?.numberOfCorruptedFrames),
                 "totalAccumulatedFrameDelaySeconds": nullable(delay.flatMap { $0.isFinite ? $0 : nil }),
                 "displayedPixelBufferAvailable": buffer != nil,
-                "displayedWidth": nullable(width), "displayedHeight": nullable(height)
+                "displayedWidth": nullable(width),
+                "displayedHeight": nullable(height)
             ])
+
             let metrics = try #require(value, "AVFoundation performance metrics are required on the physical device")
-            let displayedWidth = try #require(width), displayedHeight = try #require(height)
+            let displayedWidth = try #require(width)
+            let displayedHeight = try #require(height)
             try #require(displayedWidth > 0 && displayedHeight > 0, "Displayed native buffer must have valid dimensions")
             try #require(metrics.totalNumberOfFrames > 0 && metrics.numberOfDroppedFrames >= 0 && metrics.numberOfCorruptedFrames >= 0)
             try #require(metrics.totalAccumulatedFrameDelay.isFinite && metrics.totalAccumulatedFrameDelay >= 0)
@@ -289,6 +536,7 @@ struct MPVNativeSynchronizationProbeTests {
                 networkPreflight["bytes"] = data.count
                 networkPreflight["manifestSHA256"] = observed
                 networkPreflight["endElapsedSeconds"] = ProcessInfo.processInfo.systemUptime - origin
+
                 let expected = try #require(
                     config.hostVerification.hlsIdentity.files[source.lastPathComponent],
                     "The host-verified HLS manifest hash is required"
@@ -339,7 +587,9 @@ struct MPVNativeSynchronizationProbeTests {
         try #require(before.audioOutput == "avfoundation" && after.audioOutput == "avfoundation")
         try #require(before.decoderDrops != nil && before.outputDrops != nil)
         try #require(before.decoderDrops == after.decoderDrops && before.outputDrops == after.outputDrops)
-        let first = try #require(before.position), last = try #require(after.position)
+
+        let first = try #require(before.position)
+        let last = try #require(after.position)
         try #require((0.8 ... 1.2).contains((last - first) / (after.end - before.end)))
         fixture.mark("exactSeekRequested:20")
         fixture.engine.seek(to: .seconds(20))
@@ -354,13 +604,6 @@ struct MPVNativeSynchronizationProbeTests {
         status = "passed"
     }
 
-    private static func processCPU() -> Double? {
-        var usage = rusage()
-        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return nil }
-        return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
-            + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
-    }
-
     private func processCPU() -> Double? {
         Self.processCPU()
     }
@@ -368,169 +611,6 @@ struct MPVNativeSynchronizationProbeTests {
     private func nullableDifference(_ last: Double?, _ first: Double?) -> Any {
         guard let last, let first else { return NSNull() }
         return last - first
-    }
-
-    private struct FrameworkSample {
-        let frames: Int, dropped: Int, corrupted: Int
-        let delay: Double
-        let width: Int, height: Int
-    }
-
-    private struct NativeSample: Sendable {
-        let begin: Double, end: Double
-        let avsync: Double?, correction: Double?, position: Double?, duration: Double?
-        let paused: Bool?, seeking: Bool?, cachePaused: Bool?
-        let playing: Bool, hardware: Bool?, hardwareDecoder: String?, audioOutput: String?
-        let decoderDrops: Int64?, outputDrops: Int64?
-        let failed: Bool, fallback: Bool
-        func json(phase: String, origin: Double, requested: Double) -> [String: Any] {
-            func value(_ x: (some Any)?) -> Any {
-                x.map { $0 as Any } ?? NSNull()
-            }
-            return [
-                "phase": phase,
-                "requestElapsedSeconds": requested - origin,
-                "queryBeginElapsedSeconds": begin - origin,
-                "queryEndElapsedSeconds": end - origin,
-                "queueWaitSeconds": begin - requested,
-                "queryWallSeconds": end - begin,
-                "avsyncSeconds": value(avsync),
-                "totalAudioVideoCorrectionSeconds": value(correction),
-                "positionSeconds": value(position),
-                "durationSeconds": value(duration),
-                "paused": value(paused),
-                "seeking": value(seeking),
-                "pausedForCache": value(cachePaused),
-                "playing": playing,
-                "actualVideoToolboxHardware": value(hardware),
-                "hardwareDecoder": value(hardwareDecoder),
-                "audioOutput": value(audioOutput),
-                "decoderDrops": value(decoderDrops),
-                "outputDrops": value(outputDrops),
-                "failed": failed,
-                "rendererFallback": fallback
-            ]
-        }
-    }
-
-    @MainActor
-    private final class ProbeFixture {
-        let engine: MPVEngine
-        let layer = AVSampleBufferDisplayLayer()
-        let window: UIWindow
-        private weak var previousKeyWindow: UIWindow?
-        private let recorder: EventRecorder
-        var events: [(Double, String)] {
-            recorder.values
-        }
-
-        var logs: [[String: Any]] {
-            recorder.logs
-        }
-
-        var logsDiscarded: Int {
-            recorder.logsDiscarded
-        }
-
-        init() throws {
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            let scene = try #require(
-                scenes.first { $0.activationState == .foregroundActive },
-                "A foreground physical-device scene is required"
-            )
-            previousKeyWindow = scene.windows.first { $0.isKeyWindow }
-            window = UIWindow(windowScene: scene)
-            window.frame = scene.coordinateSpace.bounds
-            let host = UIViewController()
-            host.view.backgroundColor = .black
-            window.rootViewController = host
-            window.makeKeyAndVisible()
-            host.view.layoutIfNeeded()
-            layer.frame = host.view.bounds
-            host.view.layer.addSublayer(layer)
-            recorder = EventRecorder()
-            let recorder = recorder
-            engine = MPVEngine(configuration: .init(
-                additionalOptions: ["sub-auto": "no", "sub-visibility": "no", "osd-level": "0"],
-                audio: .init(audioSession: .hostManaged), autoPlay: true,
-                hardwareDecoding: .videoToolbox, logLevel: .warning, videoOutput: .sampleBuffer
-            )) { emission in
-                switch emission.update {
-                case let .state(state): recorder.add("state:\(state)")
-                case let .error(error, fatal): recorder.add("error:\(error), fatal:\(fatal)")
-                case let .log(log): recorder.addLog(log)
-                default: break
-                }
-            }
-            let scale = scene.screen.scale
-            engine.attach(to: MPVRenderTarget(
-                layerAddress: Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque())), layerOwner: layer,
-                drawableWidth: Int(layer.bounds.width * scale), drawableHeight: Int(layer.bounds.height * scale),
-                usesExtendedDynamicRange: false, displaySupportsExtendedDynamicRange: false, outputHeadroom: 1
-            ))
-        }
-
-        func mark(_ label: String) {
-            recorder.add(label)
-        }
-
-        func close() {
-            engine.shutdownSynchronously()
-            layer.removeFromSuperlayer()
-            window.isHidden = true
-            window.rootViewController = nil
-            previousKeyWindow?.makeKey()
-        }
-
-        func snapshot() async -> NativeSample {
-            let engine = engine
-            return await withCheckedContinuation { continuation in
-                engine.queue.async {
-                    let begin = ProcessInfo.processInfo.systemUptime
-                    let avsync = engine.getDouble("avsync"), correction = engine.getDouble("total-avsync-change")
-                    let position = engine.getDouble("time-pos"), duration = engine.getDouble("duration")
-                    let paused = engine.getFlag("pause"), seeking = engine.getFlag("seeking"),
-                        cachePaused = engine.getFlag("paused-for-cache")
-                    let hwdec = engine.getString("hwdec-current"), ao = engine.getString("current-ao")
-                    let decoderDrops = engine.getInt64("decoder-frame-drop-count"), outputDrops = engine.getInt64("frame-drop-count")
-                    continuation.resume(returning: NativeSample(
-                        begin: begin, end: ProcessInfo.processInfo.systemUptime,
-                        avsync: avsync, correction: correction, position: position, duration: duration,
-                        paused: paused, seeking: seeking, cachePaused: cachePaused,
-                        playing: engine.isFileLoaded && engine.hasPlaybackStarted && !engine.isPaused && !engine.isSeeking && !engine
-                            .isPausedForCache,
-                        hardware: engine.videoToolboxSessionUsesHardware, hardwareDecoder: hwdec, audioOutput: ao,
-                        decoderDrops: decoderDrops, outputDrops: outputDrops,
-                        failed: engine.fatalPlaybackError != nil,
-                        fallback: engine.didRejectNativeOutput || engine.videoOutput != .sampleBuffer
-                    ))
-                }
-            }
-        }
-    }
-
-    @MainActor
-    private final class EventRecorder {
-        var values: [(Double, String)] = []
-        var logs: [[String: Any]] = []
-        var logsDiscarded = 0
-        func add(_ value: String) {
-            values.append((ProcessInfo.processInfo.systemUptime, value))
-        }
-
-        func addLog(_ value: MPVLogMessage) {
-            if logs.count == 32 {
-                logs.removeFirst()
-                logsDiscarded += 1
-            }
-            logs.append([
-                "deliverySystemUptimeSeconds": ProcessInfo.processInfo.systemUptime,
-                "prefix": value.prefix,
-                "level": value.level.rawValue,
-                "message": String(value.message.prefix(4096)),
-                "messageTruncated": value.message.count > 4096
-            ])
-        }
     }
 }
 #endif

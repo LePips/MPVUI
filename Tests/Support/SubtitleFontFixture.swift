@@ -5,7 +5,9 @@ import Testing
 /// Supplies local font files without checking fonts into the repository or
 /// downloading them. The owning TemporaryTestDirectory removes these copies.
 struct SubtitleFontFixture {
+
     struct Font {
+
         let family: String
         let postScriptName: String
     }
@@ -24,6 +26,7 @@ struct SubtitleFontFixture {
 
     private static func copyInstalledFont(_ name: String, to directory: URL) throws -> Font {
         let font = CTFontCreateWithName(name as CFString, 24, nil)
+
         let source = try #require(CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
         let destination = directory.appendingPathComponent(name).appendingPathExtension(source.pathExtension)
         try FileManager.default.copyItem(at: source, to: destination)

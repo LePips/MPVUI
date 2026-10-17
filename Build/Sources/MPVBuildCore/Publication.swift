@@ -2,11 +2,13 @@ import Foundation
 
 /// The upload state machine is independent of candidate validation, so interruptions can be tested without a release service.
 struct ArtifactPublication {
+
     let release: () throws -> [String: Any]?
     let create: () throws -> Void
     let upload: (URL) throws -> Void
     let download: ([String: Any], URL) throws -> Void
     let publish: () throws -> Void
+
     func run(bundle: URL, expected: [String], marker: String, verification: URL) throws {
         if try release() == nil {
             try create()
@@ -48,6 +50,7 @@ struct ArtifactPublication {
 }
 
 struct ReleaseRecord: Codable {
+
     let nativeInputFingerprint: String
     let sourceCommit: String
     let sourceRepository: String?
@@ -60,13 +63,33 @@ struct ReleaseRecord: Codable {
 }
 
 struct ReleaseManager {
+
     let graph: BuildGraph
+
     var repository: String {
-        graph.native.publication.repository
+        graph.native.apple.publication.repository
+    }
+
+    var credentials: [String: String] {
+        var result: [String: String] = [:]
+        for name in ["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR"] {
+            if let value = ProcessInfo.processInfo.environment[name] {
+                result[name] = value
+            }
+        }
+        return result
     }
 
     static func publishedFiles(_ index: ArtifactIndex) -> [String] {
         index.products.map(\.archive) + ["Artifacts.lock.json", "Inputs.lock.json"]
+    }
+
+    static func validateCandidate(_ index: ArtifactIndex, native: NativeLock, fingerprint: String, tag: String?) throws {
+        try Generator.validate(index, native: native, release: true)
+        try require(index.nativeInputFingerprint == fingerprint, "Candidate build inputs differ from current inputs")
+        if let tag {
+            try require(index.releaseID == tag, "Candidate release tag differs from --tag")
+        }
     }
 
     static func githubRepository(_ remote: String) throws -> String {
@@ -84,18 +107,37 @@ struct ReleaseManager {
         return name
     }
 
-    func sourceRepository() throws -> String {
-        try Self.githubRepository(graph.runner.run("git", ["remote", "get-url", "origin"], cwd: graph.root))
+    static func findRelease(_ tag: String, repository: String, request: ([String]) throws -> String) throws -> [String: Any]? {
+        try require(tag.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil, "Invalid release ID")
+        do {
+            let json = try request(["api", "repos/\(repository)/releases/tags/\(tag)"])
+            guard let value = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+            else { throw BuildError("Invalid GitHub release response") }
+            return value
+        } catch {
+            guard String(describing: error).contains("HTTP 404") else { throw error }
+        }
+        // The tag endpoint only finds published releases. Authenticated listing also
+        // includes drafts, including a new draft whose Git tag does not yet exist.
+        let json = try request(["api", "--paginate", "--slurp", "repos/\(repository)/releases?per_page=100"])
+        guard let pages = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[[String: Any]]]
+        else { throw BuildError("Invalid GitHub release listing") }
+        let matches = pages.flatMap(\.self).filter { $0["tag_name"] as? String == tag }
+        try require(matches.count <= 1, "Multiple releases have the requested tag")
+        return matches.first
     }
 
-    var credentials: [String: String] {
-        var result: [String: String] = [:]
-        for name in ["GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR"] {
-            if let value = ProcessInfo.processInfo.environment[name] {
-                result[name] = value
-            }
-        }
-        return result
+    func validateCandidate(_ candidate: URL, tag: String?) throws {
+        let index = try read(ArtifactIndex.self, candidate.appendingPathComponent("Artifacts.lock.json"))
+        try Self.validateCandidate(index, native: graph.native, fingerprint: Packager(graph: graph).nativeFingerprint(), tag: tag)
+        try require(
+            fingerprint(read(NativeLock.self, candidate.appendingPathComponent("Inputs.lock.json"))) == fingerprint(graph.native),
+            "Candidate input lock differs from current inputs"
+        )
+    }
+
+    func sourceRepository() throws -> String {
+        try Self.githubRepository(graph.runner.run("git", ["remote", "get-url", "origin"], cwd: graph.root))
     }
 
     @discardableResult
@@ -117,7 +159,7 @@ struct ReleaseManager {
 
     func sourceNotices() throws -> Data {
         var notices = "MPVUI source notices\n\nBuild inputs, dependency artifacts and ordered patches are identified in Inputs.lock.json.\n"
-        for source in graph.native.sources {
+        for source in graph.native.sources(for: .apple) {
             let prepared = try graph.inputs.prepare(source)
             notices += "\n\(source.id) — \(source.commit)\n"
             let names = source.id == "mpv" ? ["Copyright", "LICENSE.GPL", "LICENSE.LGPL"] : [
@@ -153,7 +195,7 @@ struct ReleaseManager {
             sourceRepository: sourceRepository(),
             sourceWasDirty: dirty,
             hostArchitecture: graph.runner.run("/usr/bin/uname", ["-m"]),
-            toolchain: graph.runner.doctor(graph.native.toolchain),
+            toolchain: graph.runner.doctor(graph.native.apple.toolchain),
             artifacts: artifacts,
             tests: tests,
             createdAt: ISO8601DateFormatter().string(from: Date())
@@ -161,6 +203,7 @@ struct ReleaseManager {
         let notices = try sourceNotices()
         let key = try fingerprint([
             "native": index.nativeInputFingerprint,
+            "lock": fingerprint(graph.native),
             "tests": tests.key,
             "artifacts": fingerprint(artifacts),
             "commit": sourceCommit,
@@ -188,26 +231,6 @@ struct ReleaseManager {
 
     func release(_ tag: String, repository selectedRepository: String? = nil) throws -> [String: Any]? {
         try Self.findRelease(tag, repository: selectedRepository ?? repository) { try gh($0) }
-    }
-
-    static func findRelease(_ tag: String, repository: String, request: ([String]) throws -> String) throws -> [String: Any]? {
-        try require(tag.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil, "Invalid release ID")
-        do {
-            let json = try request(["api", "repos/\(repository)/releases/tags/\(tag)"])
-            guard let value = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
-            else { throw BuildError("Invalid GitHub release response") }
-            return value
-        } catch {
-            guard String(describing: error).contains("HTTP 404") else { throw error }
-        }
-        // The tag endpoint only finds published releases. Authenticated listing also
-        // includes drafts, including a new draft whose Git tag does not yet exist.
-        let json = try request(["api", "--paginate", "--slurp", "repos/\(repository)/releases?per_page=100"])
-        guard let pages = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[[String: Any]]]
-        else { throw BuildError("Invalid GitHub release listing") }
-        let matches = pages.flatMap(\.self).filter { $0["tag_name"] as? String == tag }
-        try require(matches.count <= 1, "Multiple releases have the requested tag")
-        return matches.first
     }
 
     func assets(_ release: [String: Any]) throws -> [String: [String: Any]] {
@@ -352,7 +375,7 @@ struct ReleaseManager {
             try Packager(graph: graph).verify(
                 extracted.appendingPathComponent(artifact.framework + ".xcframework"),
                 product: ProductDefinition.all.first { $0.target == artifact.target }!,
-                slices: graph.native.slices
+                slices: graph.native.apple.slices
             )
             try verifyEmbeddedBuildRecord(extracted, index: index)
         }
@@ -389,7 +412,10 @@ struct ReleaseManager {
             for arch in slice.architectures {
                 let key = slice.id + "/" + arch
                 guard let components = buildRecord.combinedInputs[key] else { throw BuildError("Missing combined library input inventory") }
-                let names = ["mpv"] + FFmpegRecipe.libraries + graph.native.dependencies.filter { $0.slices.contains(slice.id) }
+                let names = ["mpv"] + FFmpegRecipe.libraries + graph.native
+                    .apple
+                    .dependencies
+                    .filter { $0.slices.contains(slice.id) }
                     .flatMap { $0.runtime.map(\.target) }
                 try require(Set(components.keys) == Set(names), "Combined library omits library dependencies")
                 for sha in components.values {

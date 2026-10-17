@@ -1,8 +1,10 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVModelTests {
+
     @Test
     func `timing configuration keeps negative durations out of native options`() {
         let configuration = MPVPlayerConfiguration(
@@ -10,6 +12,7 @@ struct MPVModelTests {
             networkCacheSeconds: .seconds(-10),
             startTime: .seconds(-1)
         )
+
         #expect(configuration.startTime == .zero)
         #expect(configuration.networkCacheSeconds == .zero)
         #expect(configuration.initialBufferSeconds == .zero)
@@ -18,6 +21,7 @@ struct MPVModelTests {
             networkCacheSeconds: .seconds(30),
             startTime: nil
         )
+
         #expect(positive.startTime == nil)
         #expect(positive.networkCacheSeconds == .seconds(30))
         #expect(positive.initialBufferSeconds == .seconds(3))
@@ -26,6 +30,7 @@ struct MPVModelTests {
     @Test
     func `latched decoder and rendering options tell callers that reload is required`() {
         let dolbyVision = MPVDolbyVisionStatus.unknown
+
         #expect(dolbyVision.policyChangesRequireReload)
         #expect(dolbyVision.reloadReason == "The native Dolby Vision policy is latched when the decoder is created.")
         #expect(MPVRenderingQualityStatus().requiresReload)
@@ -46,6 +51,7 @@ struct MPVModelTests {
 
         let error = MPVPlayerError.loadFailed(code: -13, message: "Could not open media")
         let failed = MPVPlaybackState.failed(error)
+
         #expect(failed.isTerminal)
         #expect(failed.error == error)
         #expect(error.localizedDescription == "Load media: Could not open media")

@@ -7,11 +7,16 @@
 #include <time.h>
 
 #define MPMIN(a, b) ((a) < (b) ? (a) : (b))
+#define MPMAX(a, b) ((a) > (b) ? (a) : (b))
 #define MP_TIME_MS_TO_NS(ms) ((int64_t)(ms) * 1000000)
 
+struct options {
+    int queue_lead_ms;
+};
 struct priv {
     bool playback_paused, presentation_host;
-    int64_t next_present_host_ns;
+    int64_t next_present_host_ns, pool_frame_duration_ns;
+    struct options *opts;
 };
 struct vo {
     struct priv *priv;
@@ -36,7 +41,8 @@ int main(void) {
             (id)kCVPixelBufferIOSurfacePropertiesKey : @{},
         };
         assert(CVPixelBufferPoolCreate(NULL, NULL, (__bridge CFDictionaryRef)attributes, &pool) == kCVReturnSuccess);
-        struct priv p = {0};
+        struct options opts = {.queue_lead_ms = 128};
+        struct priv p = {.opts = &opts};
         struct vo vo = {.priv = &p};
         CVPixelBufferRef held[8] = {0};
         for (int i = 0; i < 7; i++)
@@ -110,10 +116,31 @@ int main(void) {
             CVPixelBufferRelease(held[i]);
         assert(avf_pool_get_buffer(pool, &extra) == kCVReturnSuccess);
         CVPixelBufferRelease(extra);
+
+        // At 120 fps the default lead can queue sixteen samples. Keep room for
+        // those samples, renderer retention and the next upload, without using
+        // the paused replacement reserve or allowing unbounded allocation.
+        p.playback_paused = false;
+        p.pool_frame_duration_ns = MP_TIME_MS_TO_NS(1000) / 120;
+        p.next_present_host_ns = mp_time_ns();
+        CVPixelBufferRef high_rate[AVF_POOL_MAX_BUFFERS] = {0};
+        int regular = avf_presentation_pool_limit(opts.queue_lead_ms, p.pool_frame_duration_ns, false);
+        assert(regular >= 16 + 3 && regular < AVF_POOL_MAX_BUFFERS);
+        for (int i = 0; i < regular; i++)
+            assert(avf_pool_get_buffer_for_frame(&vo, pool, &reserve_pool, &high_rate[i]) == kCVReturnSuccess);
+        assert(avf_pool_get_buffer_for_frame(&vo, pool, &reserve_pool, &extra) == kCVReturnWouldExceedAllocationThreshold);
+        p.playback_paused = true;
+        assert(avf_pool_get_buffer_for_frame(&vo, pool, &reserve_pool, &high_rate[regular]) == kCVReturnSuccess);
+        assert(avf_pool_get_buffer_for_frame(&vo, pool, &reserve_pool, &extra) == kCVReturnWouldExceedAllocationThreshold);
+        for (int i = 0; i <= regular; i++)
+            CVPixelBufferRelease(high_rate[i]);
+        assert(avf_presentation_pool_limit(1000, 1, false) == AVF_POOL_MAX_BUFFERS - 1);
+        assert(avf_presentation_pool_limit(1000, 1, true) == AVF_POOL_MAX_BUFFERS);
+        assert(avf_presentation_pool_limit(0, p.pool_frame_duration_ns, false) == 7);
         dispatch_release(released);
         CVPixelBufferPoolRelease(reserve_pool);
         CVPixelBufferPoolRelease(pool);
-        puts("Pixel-buffer pool: bounded retry, repeated pause reserve, deadlines and teardown passed");
+        puts("Pixel-buffer pool: high-rate capacity, bounded retry, pause reserve, deadlines and teardown passed");
     }
     return 0;
 }

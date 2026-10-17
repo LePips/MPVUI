@@ -3,26 +3,41 @@
 
 # Swift Package Manager
 .build/
-__pycache__/
-.ruff_cache/
 .build-*/
 .swiftpm/
+__pycache__/
+.ruff_cache/
 
 # Xcode
-build/
-!Build/
 DerivedData/
 xcuserdata/
 *.xcarchive
 *.xcresult
 *.dSYM
 
+# Build output
+build/
+!/Build/
+
+# Android and Gradle
+.gradle/
+.kotlin/
+.cxx/
+.skip/
+.idea/
+local.properties
+
+# Local signing credentials
+keystore.properties
+*.keystore
+*.jks
+
 # MPVUI - Sandbox
 sandbox/
 
-# MPVUI - Example media
-Example/MPVUIExample/Shared/Resources/Media/*
-!Example/MPVUIExample/Shared/Resources/Media/README.md
+# Local example media
+/Example/Sources/MPVUIExample/Resources/Media/*
+!/Example/Sources/MPVUIExample/Resources/Media/README.md
 
 # Other
 .vale.ini

@@ -1,17 +1,23 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .hdr))
 struct MPVHDRModelTests {
+
     @Test(arguments: [(1, 0, 0, 0), (64, 10, 15, 15)])
     func `signal metadata preserves valid boundary values`(depth: Int, profile: Int, level: Int, compatibility: Int) {
         let signal = MPVVideoSignal(
-            bitDepth: depth, minimumLuminance: 0, maximumLuminance: 1000,
+            bitDepth: depth,
+            minimumLuminance: 0,
+            maximumLuminance: 1000,
             masteringDisplayPrimaries: ["prim-red-x": 0, "prim-white-y": 1],
             hdr10PlusMetadata: ["scene-avg": 0],
-            dolbyVisionProfile: profile, dolbyVisionLevel: level,
+            dolbyVisionProfile: profile,
+            dolbyVisionLevel: level,
             dolbyVisionBaseLayerCompatibilityID: compatibility
         )
+
         #expect(signal.bitDepth == depth)
         #expect(signal.minimumLuminance == 0 && signal.maximumLuminance == 1000)
         #expect(signal.masteringDisplayPrimaries == ["prim-red-x": 0, "prim-white-y": 1])
@@ -30,14 +36,19 @@ struct MPVHDRModelTests {
         compatibility: Int
     ) {
         let signal = MPVVideoSignal(
-            transferFunction: .pq, bitDepth: depth,
-            minimumLuminance: .nan, maximumLuminance: .infinity,
-            maxContentLightLevel: -1, maxFrameAverageLightLevel: 400,
+            transferFunction: .pq,
+            bitDepth: depth,
+            minimumLuminance: .nan,
+            maximumLuminance: .infinity,
+            maxContentLightLevel: -1,
+            maxFrameAverageLightLevel: 400,
             masteringDisplayPrimaries: ["prim-red-x": .nan, "prim-red-y": -0.1, "prim-white-y": 0.33],
             hdr10PlusMetadata: ["scene-max-r": .infinity, "scene-max-g": -1, "scene-avg": 100],
-            dolbyVisionProfile: profile, dolbyVisionLevel: level,
+            dolbyVisionProfile: profile,
+            dolbyVisionLevel: level,
             dolbyVisionBaseLayerCompatibilityID: compatibility
         )
+
         #expect(signal.bitDepth == nil)
         #expect(signal.minimumLuminance == nil && signal.maximumLuminance == nil)
         #expect(signal.maxContentLightLevel == nil && signal.maxFrameAverageLightLevel == 400)
@@ -58,11 +69,12 @@ struct MPVHDRModelTests {
                     currentEDRHeadroom: 4
                 ),
                 presentation: MPVPresentationStatus(
-                    requestedPolicy: .hdrWhenAvailable,
-                    backend: backend,
+                    requestedPolicy: .always,
+                    backend: backend.coreValue,
                     configuredDynamicRange: .hdr
                 )
             )
+
             #expect(status.isHDRContent)
             #expect(status.isDisplayHDRCapable)
             #expect(!status.isHDRActive)
@@ -77,6 +89,7 @@ struct MPVHDRModelTests {
             currentEDRHeadroom: 2.0001,
             potentialEDRHeadroom: .infinity
         )
+
         #expect(capability.currentEDRHeadroom == 2)
         #expect(capability.potentialEDRHeadroom == nil)
         #expect(MPVDisplayCapabilities(currentEDRHeadroom: 0.5).currentEDRHeadroom == nil)
@@ -84,12 +97,10 @@ struct MPVHDRModelTests {
     }
 
     @Test
-    func `native subtitle luminance is normalized and desired policies keep compatibility`() {
+    func `native subtitle luminance is normalized`() {
         #expect(MPVPlayerConfiguration(subtitleLuminance: .nan).subtitleLuminance == 203)
         #expect(MPVPlayerConfiguration(subtitleLuminance: 1500).subtitleLuminance == 1000)
         #expect(MPVPlayerConfiguration(subtitleLuminance: -1).subtitleLuminance == 1)
-        #expect(MPVPlayerConfiguration.HDRPolicy.sdr == .disabled)
-        #expect(MPVPlayerConfiguration.HDRPolicy.hdrWhenAvailable == .always)
     }
 
     @Test
@@ -98,6 +109,7 @@ struct MPVHDRModelTests {
             primaries: "bt.2020",
             transferFunction: .bt709
         )
+
         #expect(!wideGamutSDR.isHDRContent)
 
         #expect(MPVHDRStatus(transferFunction: .pq).isHDRContent)

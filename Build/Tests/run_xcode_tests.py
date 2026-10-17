@@ -9,6 +9,8 @@ import subprocess
 import sys
 import uuid
 
+from prepare_test_media import prepare
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from validation import publish_evidence
 
@@ -41,6 +43,10 @@ def test_command(*, project, derived_data, platform, device_id, result_bundle, o
     ]
     if platform == "device":
         command.append("-allowProvisioningUpdates")
+    else:
+        # A test run targets one simulator; local native candidates may contain
+        # only that simulator's architecture.
+        command.append("ONLY_ACTIVE_ARCH=YES")
     if only_testing:
         command.append("-only-testing:" + only_testing)
     return command + ["test"]
@@ -75,6 +81,7 @@ def main(argv=None):
         parser.error("The identifier must match --platform")
     if not args.project.is_dir():
         parser.error(f"Generate the device test project first: {args.project}")
+    prepare(args.project.resolve().parent / "GeneratedMedia")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     bundle = ROOT / ".build/device-tests/Results" / (stamp + ".xcresult")
     bundle.parent.mkdir(parents=True, exist_ok=True)

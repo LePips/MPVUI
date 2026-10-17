@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name="mpvui.PlaybackTestActivity" android:theme="@android:style/Theme.Material.NoActionBar" android:exported="false" />
+        <provider android:name="mpvui.PlaybackTestProvider" android:authorities="${applicationId}.mpvui-fixtures" android:exported="false" />
+    </application>
+</manifest>

@@ -1,9 +1,12 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .hdr))
 struct MPVTransferFunctionTests {
+
     struct Signal: Sendable {
+
         let aliases: [String]
         let transfer: MPVTransferFunction
         let canonical: String
@@ -29,6 +32,7 @@ struct MPVTransferFunctionTests {
     func `mpv aliases normalize case and whitespace without changing dynamic range`(signal: Signal) {
         for alias in signal.aliases {
             let parsed = MPVTransferFunction(mpvValue: " \t\(alias.uppercased())\n")
+
             #expect(parsed == signal.transfer)
             #expect(parsed.mpvValue == signal.canonical)
             #expect(parsed.isHDR == signal.hdr)
@@ -38,6 +42,7 @@ struct MPVTransferFunctionTests {
     @Test(arguments: [nil, "", " \n\t"] as [String?])
     func `missing transfer metadata remains unknown`(raw: String?) {
         let transfer = MPVTransferFunction(mpvValue: raw)
+
         #expect(transfer == .unknown)
         #expect(transfer.mpvValue == nil)
         #expect(!transfer.isHDR)
@@ -46,6 +51,7 @@ struct MPVTransferFunctionTests {
     @Test
     func `future transfer names preserve spelling without claiming HDR`() {
         let transfer = MPVTransferFunction(mpvValue: " FutureHDRCurve \n")
+
         #expect(transfer == .other("FutureHDRCurve"))
         #expect(transfer.mpvValue == "FutureHDRCurve")
         #expect(!transfer.isHDR)

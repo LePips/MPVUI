@@ -1,3 +1,4 @@
+import MPVCore
 import SwiftUI
 
 #if os(macOS) && !targetEnvironment(macCatalyst)
@@ -6,6 +7,7 @@ import AppKit
 /// Owned by the render surface, preserving identity and state across reparenting.
 @MainActor
 final class MPVVideoOverlayHostingView: NSHostingView<AnyView> {
+
     init(content: AnyView) {
         super.init(rootView: content)
         sizingOptions = []
@@ -30,8 +32,9 @@ import UIKit
 
 @MainActor
 final class MPVVideoOverlayHostingView: UIView {
-    private let controller: UIHostingController<AnyView>
+
     private(set) var layoutSize: CGSize = .zero
+    private let controller: UIHostingController<AnyView>
 
     init(content: AnyView) {
         controller = UIHostingController(rootView: content)
@@ -49,14 +52,6 @@ final class MPVVideoOverlayHostingView: UIView {
         fatalError()
     }
 
-    func setContent(_ content: AnyView) {
-        controller.rootView = AnyView(content.onGeometryChange(for: CGSize.self) { geometry in
-            geometry.size
-        } action: { [weak self] size in
-            self?.layoutSize = size
-        })
-    }
-
     override func didMoveToWindow() {
         super.didMoveToWindow()
         var ancestor: UIResponder? = superview
@@ -71,6 +66,14 @@ final class MPVVideoOverlayHostingView: UIView {
             parent.addChild(controller)
             controller.didMove(toParent: parent)
         }
+    }
+
+    func setContent(_ content: AnyView) {
+        controller.rootView = AnyView(content.onGeometryChange(for: CGSize.self) { geometry in
+            geometry.size
+        } action: { [weak self] size in
+            self?.layoutSize = size
+        })
     }
 }
 #endif

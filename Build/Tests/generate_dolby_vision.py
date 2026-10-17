@@ -294,11 +294,13 @@ def generate(output):
         p5 = dolby_vision_mp4(work, "dolby-vision-p5", "5", IPT)
         p81 = dolby_vision_mp4(work, "dolby-vision-p81", "8.1", HDR10)
         p84 = dolby_vision_mp4(work, "dolby-vision-p84", "8.4", HLG, FILM_RATE)
+        p5_hls = dolby_vision_mp4(work, "dolby-vision-p5-hls", "5", IPT, FILM_RATE)
+        p81_hls = dolby_vision_mp4(work, "dolby-vision-p81-hls", "8.1", HDR10, FILM_RATE)
         declared = work / "dolby-vision-p81-declared-extended.ts"
         extended = work / "dolby-vision-p81-extended.ts"
         transport_stream(p81, declared, "none", compatibility=1)
         transport_stream(p81, extended, "extended", compatibility=1)
-        for path in (p5, p81, p84, declared, extended):
+        for path in (p5, p81, p84, p5_hls, p81_hls, declared, extended):
             shutil.move(path, output / path.name)
         for path in (p5, p81):
             first_rpu(work, path.stem, output / f"{path.stem}.rpu")

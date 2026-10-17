@@ -1,4 +1,5 @@
 import CoreGraphics
+import MPVCore
 import Observation
 
 /// Picture-in-picture controls accessed through ``MPVPlayer/pictureInPicture``.
@@ -18,6 +19,7 @@ import Observation
 @MainActor
 @Observable
 public final class MPVPictureInPictureController {
+
     /// Whether the platform and video output support picture in picture.
     public private(set) var isSupported = false
     /// Whether picture in picture can start for the current video.
@@ -45,7 +47,8 @@ public final class MPVPictureInPictureController {
     public var allowsAutomaticStartFromInline = false {
         didSet {
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            sampleBufferController?.allowsAutomaticStartFromInline = allowsAutomaticStartFromInline
+            sampleBufferController?.allowsAutomaticStartFromInline = allowsAutomaticStartFromInline && player?
+                .isUsingExternalPlayback != true
             #endif
         }
     }
@@ -92,29 +95,13 @@ public final class MPVPictureInPictureController {
         invalidate()
     }
 
-    /// Retire AVKit/AppKit before the player tears down its native output,
-    /// including when an app separately retains this facade.
-    func invalidate() {
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        sampleBufferController?.invalidate()
-        setNativeRendering(false)
-        #elseif os(macOS)
-        macController?.invalidate()
-        #endif
-        player = nil
-        surface = nil
-        isSupported = false
-        isPossible = false
-        isActive = false
-        isTransitioning = false
-        isSuspended = false
-        renderSize = .zero
-        isVideoOverlayActive = false
-    }
-
     /// Requests picture in picture. Call after ``isPossible`` becomes `true`.
     /// Failures update ``lastError``.
     public func start() {
+        guard player?.isUsingExternalPlayback != true else {
+            lastError = .pictureInPictureNotReady
+            return
+        }
         guard isSupported else {
             lastError = .pictureInPictureUnsupported
             return
@@ -153,6 +140,26 @@ public final class MPVPictureInPictureController {
         #endif
     }
 
+    /// Retire AVKit/AppKit before the player tears down its native output,
+    /// including when an app separately retains this controller.
+    func invalidate() {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        sampleBufferController?.invalidate()
+        setNativeRendering(false)
+        #elseif os(macOS)
+        macController?.invalidate()
+        #endif
+        player = nil
+        surface = nil
+        isSupported = false
+        isPossible = false
+        isActive = false
+        isTransitioning = false
+        isSuspended = false
+        renderSize = .zero
+        isVideoOverlayActive = false
+    }
+
     func attach(to surface: MPVPlatformVideoPlayer) {
         self.surface = surface
         #if os(macOS)
@@ -173,6 +180,7 @@ public final class MPVPictureInPictureController {
 
     func refreshPlaybackState() {
         #if os(iOS) && !targetEnvironment(macCatalyst)
+        sampleBufferController?.allowsAutomaticStartFromInline = allowsAutomaticStartFromInline && player?.isUsingExternalPlayback != true
         sampleBufferController?.refreshPlaybackState()
         refreshNativeOverlayGeometry()
         #elseif os(macOS)
@@ -223,7 +231,7 @@ public final class MPVPictureInPictureController {
                 self?.setNativeRendering(enabled)
             }
         )
-        controller.allowsAutomaticStartFromInline = allowsAutomaticStartFromInline
+        controller.allowsAutomaticStartFromInline = allowsAutomaticStartFromInline && player.isUsingExternalPlayback != true
         sampleBufferController = controller
     }
 

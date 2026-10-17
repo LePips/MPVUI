@@ -1,11 +1,13 @@
 import Foundation
 
 struct Reproducibility {
-    let graph: BuildGraph
+
     struct Resources: Codable {
+
         let userCPUSeconds: Double
         let systemCPUSeconds: Double
         let maximumResidentBytes: UInt64
+
         static func parse(_ output: String) throws -> Self {
             let lines = output.components(separatedBy: "\n").map { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
             guard let user = lines.last(where: { $0.first == "user" && $0.count == 2 }).flatMap({ Double($0[1]) }),
@@ -20,6 +22,7 @@ struct Reproducibility {
     }
 
     struct Result: Codable {
+
         let label: String
         let seconds: Double
         let candidate: String
@@ -31,13 +34,37 @@ struct Reproducibility {
         let downloadedBytes: Int
     }
 
+    let graph: BuildGraph
+
+    static func copyImmutableCache(_ source: URL, to destination: URL) throws {
+        try require(!exists(destination), "Immutable cache destination must be new")
+        try mkdir(destination)
+        for file in try files(source) {
+            let relative = String(file.path.dropFirst(source.path.count + 1))
+            let output = destination.appendingPathComponent(relative)
+            let values = try file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey])
+            if values.isSymbolicLink == true {
+                try fm.createSymbolicLink(
+                    atPath: output.path,
+                    withDestinationPath: fm.destinationOfSymbolicLink(atPath: file.path)
+                )
+            } else if values.isDirectory == true {
+                try mkdir(output)
+            } else if values.isRegularFile == true {
+                try fm.linkItem(at: file, to: output)
+            } else {
+                throw BuildError("Unexpected immutable cache file type")
+            }
+        }
+    }
+
     func run(profile: String, slices: [Slice], jobs: Int) throws -> URL {
         try graph.inputs.preflight(graph.native, slices: slices)
         // Populate immutable inputs once; fresh audits retain downloads but never reuse compiled products.
-        for source in graph.native.sources {
+        for source in graph.native.sources(for: .apple) {
             _ = try graph.inputs.prepare(source)
         }
-        for dependency in graph.native.dependencies where !Set(dependency.slices).isDisjoint(with: slices.map(\.id)) {
+        for dependency in graph.native.apple.dependencies where !Set(dependency.slices).isDisjoint(with: slices.map(\.id)) {
             _ = try graph.inputs.extracted(url: dependency.url, sha: dependency.sha256)
             for asset in dependency.runtime {
                 _ = try graph.inputs.extracted(url: asset.url, sha: asset.sha256)
@@ -130,9 +157,12 @@ struct Reproducibility {
         for name in [
             "Build/mpvbuild",
             "Build/Package.swift",
+            "Build/native_inputs.py",
+            "Build/update_dependencies.py",
             "Build/Sources",
             "Build/Tests",
             "Build/Patches",
+            "Build/Android/Patches",
             "Build/Support",
             "Build/RECIPE_LICENSE",
             "Sources",
@@ -149,28 +179,6 @@ struct Reproducibility {
         try remove(copiedCore)
         try fm.copyItem(at: graph.codeRoot, to: copiedCore)
         try write(graph.native, root.appendingPathComponent("Build/Inputs.lock.json"))
-    }
-
-    static func copyImmutableCache(_ source: URL, to destination: URL) throws {
-        try require(!exists(destination), "Immutable cache destination must be new")
-        try mkdir(destination)
-        for file in try files(source) {
-            let relative = String(file.path.dropFirst(source.path.count + 1))
-            let output = destination.appendingPathComponent(relative)
-            let values = try file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey])
-            if values.isSymbolicLink == true {
-                try fm.createSymbolicLink(
-                    atPath: output.path,
-                    withDestinationPath: fm.destinationOfSymbolicLink(atPath: file.path)
-                )
-            } else if values.isDirectory == true {
-                try mkdir(output)
-            } else if values.isRegularFile == true {
-                try fm.linkItem(at: file, to: output)
-            } else {
-                throw BuildError("Unexpected immutable cache file type")
-            }
-        }
     }
 
     func build(

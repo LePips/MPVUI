@@ -1,4 +1,5 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -7,8 +8,10 @@ import Testing
 @Suite(.tags(.unit), .serialized)
 @MainActor
 struct MPVDisplayMatchingLifecycleTests {
+
     @MainActor
-    private final class Endpoint {
+    fileprivate final class Endpoint {
+
         var enabled = true
         var switching = false
         var rejectsContent = false
@@ -22,51 +25,13 @@ struct MPVDisplayMatchingLifecycleTests {
         }
     }
 
-    private final class Target: MPVDisplayMatchingTarget {
+    fileprivate final class Target {
+
         let endpoint: Endpoint
+
         init(_ endpoint: Endpoint) {
             self.endpoint = endpoint
         }
-
-        var identity: ObjectIdentifier {
-            ObjectIdentifier(endpoint)
-        }
-
-        var isMatchingEnabled: Bool {
-            endpoint.enabled
-        }
-
-        var isModeSwitchInProgress: Bool {
-            endpoint.switching
-        }
-
-        func apply(_ content: MPVDisplayMatchingContent?) -> Bool {
-            endpoint.requests.append(content)
-            return content == nil || !endpoint.rejectsContent
-        }
-
-        func observeChanges(_ onChange: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
-            let id = UUID()
-            endpoint.observers[id] = onChange
-            return { [weak endpoint] in endpoint?.observers.removeValue(forKey: id) }
-        }
-    }
-
-    private func update(
-        _ coordinator: MPVDisplayMatchingCoordinator,
-        endpoint: Endpoint?,
-        fps: Double = 23.976,
-        state: MPVPlaybackState = .playing
-    ) {
-        coordinator.update(
-            target: endpoint.map(Target.init),
-            media: .init(
-                videoCodec: "hevc", dimensions: .init(width: 3840, height: 2160),
-                framesPerSecond: fps,
-                hdr: .init(source: .init(primaries: "bt.2020", transferFunction: .pq))
-            ), mediaGeneration: 1, state: state, isActive: true,
-            outputUsesHDR: true, videoOutput: .sampleBuffer, dolbyVisionStatus: .unknown
-        )
     }
 
     @Test
@@ -77,6 +42,7 @@ struct MPVDisplayMatchingLifecycleTests {
         update(coordinator, endpoint: endpoint)
         update(coordinator, endpoint: endpoint, state: .paused)
         update(coordinator, endpoint: endpoint)
+
         #expect(endpoint.requests.count == 1)
         #expect(endpoint.observers.count == 1)
         #expect(coordinator.content?.refreshRate == Float(24000.0 / 1001))
@@ -93,16 +59,20 @@ struct MPVDisplayMatchingLifecycleTests {
         endpoint.switching = true
         endpoint.notify()
         update(coordinator, endpoint: endpoint, fps: 60)
+
         #expect(endpoint.requests.count == 1)
         endpoint.switching = false
         endpoint.notify()
+
         #expect(coordinator.content?.refreshRate == 60)
         #expect(switches == [true, false])
         endpoint.enabled = false
         endpoint.notify()
+
         #expect(coordinator.content == nil)
         endpoint.enabled = true
         endpoint.notify()
+
         #expect(coordinator.content?.refreshRate == 60)
         #expect(endpoint.requests.count == 4)
     }
@@ -118,12 +88,15 @@ struct MPVDisplayMatchingLifecycleTests {
         update(old, endpoint: endpoint)
         update(current, endpoint: endpoint)
         old.detach()
+
         #expect(endpoint.requests.count == 1)
         #expect(endpoint.observers.count == 1)
         update(current, endpoint: endpoint, state: .stopped)
+
         #expect(current.content == nil)
         #expect(endpoint.requests.count == 2)
         current.detach()
+
         #expect(endpoint.observers.isEmpty)
     }
 
@@ -137,6 +110,7 @@ struct MPVDisplayMatchingLifecycleTests {
         endpoint.switching = true
         endpoint.notify()
         update(coordinator, endpoint: nil)
+
         #expect(coordinator.content == nil)
         #expect(!coordinator.isDisplayModeSwitchInProgress)
         #expect(switches == [true, false])
@@ -145,6 +119,7 @@ struct MPVDisplayMatchingLifecycleTests {
         #expect(endpoint.requests[1] == nil)
         endpoint.notify()
         update(coordinator, endpoint: nil)
+
         #expect(endpoint.requests.count == 2)
     }
 
@@ -155,12 +130,63 @@ struct MPVDisplayMatchingLifecycleTests {
         defer { coordinator.detach() }
         endpoint.rejectsContent = true
         update(coordinator, endpoint: endpoint)
+
         #expect(coordinator.content == nil)
         #expect(endpoint.requests.count == 2)
         #expect(endpoint.requests[1] == nil)
         endpoint.rejectsContent = false
         update(coordinator, endpoint: endpoint)
+
         #expect(coordinator.content != nil)
         #expect(endpoint.requests.count == 3)
+    }
+
+    private func update(
+        _ coordinator: MPVDisplayMatchingCoordinator,
+        endpoint: Endpoint?,
+        fps: Double = 23.976,
+        state: MPVPlaybackState = .playing
+    ) {
+        coordinator.update(
+            target: endpoint.map(Target.init),
+            media: .init(
+                videoCodec: "hevc",
+                dimensions: .init(width: 3840, height: 2160),
+                framesPerSecond: fps,
+                hdr: .init(source: .init(primaries: "bt.2020", transferFunction: .pq))
+            ),
+            mediaGeneration: 1,
+            state: state,
+            isActive: true,
+            outputUsesHDR: true,
+            videoOutput: .sampleBuffer,
+            dolbyVisionStatus: .unknown
+        )
+    }
+}
+
+extension MPVDisplayMatchingLifecycleTests.Target: MPVDisplayMatchingTarget {
+
+    var identity: ObjectIdentifier {
+        ObjectIdentifier(endpoint)
+    }
+
+    var isMatchingEnabled: Bool {
+        endpoint.enabled
+    }
+
+    var isModeSwitchInProgress: Bool {
+        endpoint.switching
+    }
+
+    func apply(_ content: MPVDisplayMatchingContent?) -> Bool {
+        endpoint.requests.append(content)
+        return content == nil || !endpoint.rejectsContent
+    }
+
+    func observeChanges(_ onChange: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
+        let id = UUID()
+        endpoint.observers[id] = onChange
+        return { [weak endpoint] in endpoint?.observers.removeValue(forKey: id) }
     }
 }

@@ -1,9 +1,11 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVRenderingResourceTests {
+
     @Test(arguments: [MPVRenderingQuality.LUT.Domain.native, .normalized])
     func `readable local LUT and ordered shaders survive option resolution`(domain: MPVRenderingQuality.LUT.Domain) throws {
         let files = try TemporaryTestDirectory()
@@ -13,8 +15,10 @@ struct MPVRenderingResourceTests {
         let lut = try files.write("grade.cube", contents: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
         let result = MPVRenderingOptions.resolve(
             .init(lut: .init(domain: domain, url: lut), shaders: [first, second]),
-            backend: .metal, lowPowerMode: false
+            backend: .metal,
+            lowPowerMode: false
         )
+
         #expect(result.shaderPaths == [first.path, second.path])
         #expect(result.options["lut"] == lut.path)
         #expect(result.options["lut-type"] == domain.rawValue)
@@ -27,11 +31,14 @@ struct MPVRenderingResourceTests {
         defer { files.remove() }
         let valid = try files.write("valid.glsl", contents: "//!HOOK MAIN\n")
         let missing = files.url.appendingPathComponent("missing.glsl")
+
         let remote = try #require(URL(string: "https://example.invalid/grade.cube"))
         let result = MPVRenderingOptions.resolve(
             .init(lut: .init(url: remote), shaders: [missing, valid]),
-            backend: .metal, lowPowerMode: false
+            backend: .metal,
+            lowPowerMode: false
         )
+
         #expect(result.shaderPaths == [valid.path])
         #expect(result.options["lut"] == nil)
         #expect(result.options["lut-type"] == nil)
@@ -41,6 +48,7 @@ struct MPVRenderingResourceTests {
     @Test(arguments: [MPVRenderingQuality.Dithering.disabled, .ordered, .fruit, .errorDiffusion])
     func `explicit dithering overrides the preset`(dithering: MPVRenderingQuality.Dithering) {
         let result = MPVRenderingOptions.resolve(.init(dithering: dithering), backend: .metal, lowPowerMode: false)
+
         #expect(result.options["dither"] == (dithering == .disabled ? "no" : dithering.rawValue))
     }
 
@@ -48,8 +56,10 @@ struct MPVRenderingResourceTests {
     func `nonfinite antiringing uses preset defaults`(value: Double) {
         let result = MPVRenderingOptions.resolve(
             .init(antiringing: value, chromaAntiringing: value, preset: .highQuality),
-            backend: .metal, lowPowerMode: true
+            backend: .metal,
+            lowPowerMode: true
         )
+
         #expect(result.preset == .highQuality)
         #expect(result.options["scale-antiring"] == "0.7")
         #expect(result.options["cscale-antiring"] == "0.7")

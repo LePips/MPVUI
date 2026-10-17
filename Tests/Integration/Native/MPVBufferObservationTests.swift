@@ -1,19 +1,22 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVBufferObservationTests {
+
     @Test
     func `typed cache observations retain native progress duration and resume state`() async throws {
         var buffers: [MPVBufferStatus] = []
-        let engine = MPVEngine(configuration: .init()) { emission in
+        let engine = MPVSession(configuration: .init()) { emission in
             if case let .buffer(status) = emission.update {
                 buffers.append(status)
             }
         }
+
         let handle = try #require(mpv_create())
         var initialized = false
         defer {
@@ -25,9 +28,15 @@ struct MPVBufferObservationTests {
             }
         }
         for (name, value) in [
-            ("vo", "null"), ("ao", "null"), ("idle", "yes"),
-            ("pause", "yes"), ("keep-open", "yes"), ("hwdec", "no"),
-            ("cache", "yes"), ("cache-secs", "1"), ("cache-pause-wait", "0.1"),
+            ("vo", "null"),
+            ("ao", "null"),
+            ("idle", "yes"),
+            ("pause", "yes"),
+            ("keep-open", "yes"),
+            ("hwdec", "no"),
+            ("cache", "yes"),
+            ("cache-secs", "1"),
+            ("cache-pause-wait", "0.1"),
         ] {
             try #require(mpv_set_option_string(handle, name, value) >= 0)
         }
@@ -71,6 +80,7 @@ struct MPVBufferObservationTests {
                     engine.handleEvent(event)
                 }
             }
+
             #expect(observed == Set(expected.keys))
             #expect(sawFullProgress && sawResumedCache)
             #expect(!engine.isPausedForCache)

@@ -1,0 +1,58 @@
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -121,6 +121,8 @@
+     pl_queue queue;
+     pl_swapchain sw;
+     pl_fmt osd_fmt[SUBBITMAP_COUNT];
++    bool osd_swizzle;
++    uint8_t *osd_rgba;
+     pl_tex *sub_tex;
+     int num_sub_tex;
+ 
+@@ -338,11 +340,28 @@
+             MP_ERR(vo, "Failed recreating OSD texture!\n");
+             break;
+         }
++        const uint8_t *pixels = item->packed->planes[0];
++        size_t pitch = item->packed->stride[0];
++        if (p->osd_swizzle && item->format == SUBBITMAP_BGRA) {
++            pitch = (size_t)item->packed_w * 4;
++            MP_TARRAY_GROW(p, p->osd_rgba, pitch * item->packed_h - 1);
++            for (int y = 0; y < item->packed_h; y++) {
++                const uint8_t *row = pixels + y * item->packed->stride[0];
++                uint8_t *dst = p->osd_rgba + y * pitch;
++                for (int x = 0; x < item->packed_w; x++) {
++                    dst[4*x + 0] = row[4*x + 2];
++                    dst[4*x + 1] = row[4*x + 1];
++                    dst[4*x + 2] = row[4*x + 0];
++                    dst[4*x + 3] = row[4*x + 3];
++                }
++            }
++            pixels = p->osd_rgba;
++        }
+         ok = pl_tex_upload(p->gpu, &(struct pl_tex_transfer_params) {
+             .tex        = entry->tex,
+             .rc         = { .x1 = item->packed_w, .y1 = item->packed_h, },
+-            .row_pitch  = item->packed->stride[0],
+-            .ptr        = item->packed->planes[0],
++            .row_pitch  = pitch,
++            .ptr        = pixels,
+         });
+         if (!ok) {
+             MP_ERR(vo, "Failed uploading OSD texture!\n");
+@@ -2177,7 +2196,14 @@
+     p->rr = pl_renderer_create(p->pllog, p->gpu);
+     p->queue = pl_queue_create(p->gpu);
+     p->osd_fmt[SUBBITMAP_LIBASS] = pl_find_named_fmt(p->gpu, "r8");
+-    p->osd_fmt[SUBBITMAP_BGRA] = pl_find_named_fmt(p->gpu, "bgra8");
++    // BGRA is optional in GLES, and some drivers accept its textures but sample
++    // them as black. Upload mandatory RGBA with explicit channel conversion.
++    p->osd_swizzle = p->gpu->glsl.gles;
++    p->osd_fmt[SUBBITMAP_BGRA] = pl_find_named_fmt(p->gpu, p->osd_swizzle ? "rgba8" : "bgra8");
++    if (!p->osd_fmt[SUBBITMAP_BGRA]) {
++        p->osd_swizzle = true;
++        p->osd_fmt[SUBBITMAP_BGRA] = pl_find_named_fmt(p->gpu, "rgba8");
++    }
+     p->osd_sync = 1;
+ 
+     p->pars = pl_options_alloc(p->pllog);

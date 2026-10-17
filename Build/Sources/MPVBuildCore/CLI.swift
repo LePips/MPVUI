@@ -2,9 +2,11 @@ import Darwin
 import Foundation
 
 struct Arguments {
+
     var positional: [String] = []
     var values: [String: String] = [:]
     var flags: Set<String> = []
+
     init(_ raw: [String]) throws {
         let valueOptions: Set<String> = [
             "root",
@@ -17,7 +19,6 @@ struct Arguments {
             "candidate",
             "release",
             "tag",
-            "seed-inputs",
             "store",
             "ref"
         ]
@@ -73,12 +74,6 @@ struct Arguments {
 
 /// The command-line entry point for native library builds.
 public enum CLI {
-    static func defaultStore(_ root: URL) -> URL {
-        let current = root.appendingPathComponent(".build/mpvbuild")
-        let previous = root.appendingPathComponent(".build/native")
-        // Reuse existing caches in place: installed build tools may contain absolute paths.
-        return !exists(current) && exists(previous) ? previous : current
-    }
 
     /// Runs the supplied command-line arguments, throwing if validation or execution fails.
     public static func run(_ raw: [String]) throws {
@@ -95,11 +90,10 @@ public enum CLI {
             mpvbuild coverage [--profile release]
             mpvbuild repro [--profile release|dev --slices LIST --arch LIST]
             mpvbuild use local --artifact PATH | use remote
-            mpvbuild release candidate [--tag VERSION] | publish --candidate PATH | adopt --release ID [--authenticated] | publish-package --tag VERSION
+            mpvbuild release candidate [--tag VERSION] [--candidate PATH] | publish --candidate PATH | adopt --release ID [--authenticated] | \
+            publish-package --tag VERSION
             mpvbuild update COMPONENT
             mpvbuild status | clean [--cache]
-            Common: --jobs TOTAL --workers COUNT --offline --fresh --explain
-            Migration: --seed-inputs PREVIOUS_CHECKOUT imports verified inputs only.
             """)
             return
         }
@@ -131,10 +125,13 @@ public enum CLI {
         )
         let operation = try FileLock(store.path("locks/operation.lock"), shared: args.positional[0] != "clean")
         defer { withExtendedLifetime(operation) {} }
-        let toolPath = try Bootstrap.bin(store, native.toolchain).path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        let toolPath = try Bootstrap.bin(store, native.apple.toolchain).path + """
+        :/opt/homebrew/bin:/usr/local/bin:/usr/b\
+        in:/bin:/usr/sbin:/sbin
+        """
         let runner = try Runner(
             developer: developer,
-            epoch: native.sourceDateEpoch,
+            epoch: native.apple.sourceDateEpoch,
             logs: store.path("logs/\(UUID().uuidString)"),
             path: toolPath
         )
@@ -146,6 +143,7 @@ public enum CLI {
             }
             if let destination = ProcessInfo.processInfo.environment["MPVUI_VALIDATION_EVIDENCE"] {
                 struct Evidence: Encodable {
+
                     let summary: [String: String]
                     let artifacts: [String: String]
                 }
@@ -160,27 +158,24 @@ public enum CLI {
         }
         let inputs = InputStore(store: store, runner: runner, root: root, offline: args.flags.contains("offline"))
         let graph = BuildGraph(root: root, native: native, store: store, runner: runner, inputs: inputs)
-        if let previous = args.values["seed-inputs"] {
-            try inputs.seed(from: URL(fileURLWithPath: previous), lock: native)
-        }
         switch args.positional[0] {
         case "doctor":
             if args.flags.contains("bootstrap") {
-                try Bootstrap.run(native.toolchain, inputs: inputs)
+                try Bootstrap.run(native.apple.toolchain, inputs: inputs)
             }
-            let identities = try runner.doctor(native.toolchain)
+            let identities = try runner.doctor(native.apple.toolchain)
             for key in identities.keys.sorted() {
                 print("\(key): \(identities[key]!)")
             }
             print("doctor passed")
         case "coverage":
-            _ = try runner.doctor(native.toolchain)
+            _ = try runner.doctor(native.apple.toolchain)
             try inputs.preflight(native, slices: slices)
             let builder = DependencyBuilder(inputs: inputs, runner: runner, store: store)
             var report: [DependencyEvidence] = []
             for slice in slices {
                 for arch in slice.architectures {
-                    for dependency in native.dependencies where dependency.slices.contains(slice.id) {
+                    for dependency in native.apple.dependencies where dependency.slices.contains(slice.id) {
                         let product = try builder.materialize(dependency, slice: slice, arch: arch)
                         try report.append(read(DependencyEvidence.self, product.appendingPathComponent("coverage.json")))
                     }
@@ -264,19 +259,26 @@ public enum CLI {
             switch args.positional[1] {
             case "candidate":
                 try require(profile == "release", "Publication candidates require the complete release profile")
-                let products = try graph.build(
-                    slices: slices,
-                    jobs: args.positive("jobs", default: 8),
-                    workers: args.positive("workers", default: 2),
-                    fresh: args.flags.contains("fresh")
-                )
-                let candidate = try Packager(graph: graph).package(
-                    products,
-                    slices: slices,
-                    profile: "release",
-                    fresh: args.flags.contains("fresh"),
-                    tag: args.values["tag"]
-                )
+                let candidate: URL
+                if let path = args.values["candidate"] {
+                    try require(!args.flags.contains("fresh"), "--fresh cannot reuse an existing candidate")
+                    candidate = URL(fileURLWithPath: path).standardizedFileURL
+                    try manager.validateCandidate(candidate, tag: args.values["tag"])
+                } else {
+                    let products = try graph.build(
+                        slices: slices,
+                        jobs: args.positive("jobs", default: 8),
+                        workers: args.positive("workers", default: 2),
+                        fresh: args.flags.contains("fresh")
+                    )
+                    candidate = try Packager(graph: graph).package(
+                        products,
+                        slices: slices,
+                        profile: "release",
+                        fresh: args.flags.contains("fresh"),
+                        tag: args.values["tag"]
+                    )
+                }
                 validationArtifacts["nativeCandidate"] = candidate.path
                 let receipt = try ConsumerTests(graph: graph).run(candidate)
                 validationArtifacts["nativeTestReceipt"] = receipt.path
@@ -304,5 +306,12 @@ public enum CLI {
         case "clean": try store.clean(cache: args.flags.contains("cache"))
         default: throw BuildError("Unknown command: \(args.positional.joined(separator: " "))")
         }
+    }
+
+    static func defaultStore(_ root: URL) -> URL {
+        let current = root.appendingPathComponent(".build/mpvbuild")
+        let previous = root.appendingPathComponent(".build/native")
+        // Reuse existing caches in place: installed build tools may contain absolute paths.
+        return !exists(current) && exists(previous) ? previous : current
     }
 }

@@ -1,0 +1,18 @@
+package enum MPVEngineUpdate: Sendable {
+
+    case state(MPVPlaybackState)
+    case paused(Bool)
+    case timing(position: Duration, duration: Duration, isSeekable: Bool)
+    case frameRate(Double?)
+    case chapter(Int?)
+    case videoFrame(Bool)
+    case buffer(MPVBufferStatus)
+    case media(MPVMediaInformation)
+    case diagnostics(MPVPlaybackDiagnostics)
+    case dolbyVision(MPVDolbyVisionStatus)
+    case color(MPVRenderColorStatus)
+    case audio(volume: Double, isMuted: Bool, playbackRate: Double)
+    case textSubtitles(TextSubtitleSnapshot)
+    case error(MPVPlayerError, fatal: Bool)
+    case log(MPVLogMessage)
+}

@@ -1,30 +1,44 @@
 import CoreMedia
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVRenderingOptionsTests {
+
+    @Test
+    func `low power Android GPU defaults avoid dithering while explicit overrides remain honored`() {
+        let battery = MPVRenderingOptions.resolve(.init(), backend: .gpu, lowPowerMode: true)
+        #expect(battery.preset == .battery)
+        #expect(battery.options["dither"] == "no")
+        let requested = MPVRenderingOptions.resolve(.init(dithering: .ordered), backend: .gpu, lowPowerMode: true)
+        #expect(requested.options["dither"] == "ordered")
+    }
+
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `automatic decoder prefers Apple interop only for Metal`(output: MPVPlayerConfiguration.VideoOutput) {
-        #expect(MPVRenderingOptions.hardwareDecodingOptions(.automatic, backend: output)["hwdec"]
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.automatic, backend: output.coreValue)["hwdec"]
             == (output == .metal ? "videotoolbox,auto-safe" : "auto-safe"))
-        #expect(MPVRenderingOptions.hardwareDecodingOptions(.videoToolbox, backend: output)["hwdec"] == "videotoolbox")
-        #expect(MPVRenderingOptions.hardwareDecodingOptions(.disabled, backend: output) == ["hwdec": "no"])
+
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.videoToolbox, backend: output.coreValue)["hwdec"] == "videotoolbox")
+        #expect(MPVRenderingOptions.hardwareDecodingOptions(.disabled, backend: output.coreValue) == ["hwdec": "no"])
     }
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `Metal bounds hardware decoder threads without changing software or native output`(output: MPVPlayerConfiguration.VideoOutput) {
         for decoding in [MPVPlayerConfiguration.HardwareDecoding.automatic, .videoToolbox] {
-            #expect(MPVRenderingOptions.hardwareDecodingOptions(decoding, backend: output)["hwdec-threads"]
+            #expect(MPVRenderingOptions.hardwareDecodingOptions(decoding.coreValue, backend: output.coreValue)["hwdec-threads"]
                 == (output == .metal ? "2" : nil))
         }
+
         #expect(!MPVOptionOwnership.isManaged("hwdec-threads", deinterlace: .init()))
     }
 
     @Test(arguments: MPVRenderingQuality.Preset.allCases)
     func `Metal presets retain presentation pipelining`(preset: MPVRenderingQuality.Preset) {
         let result = MPVRenderingOptions.resolve(.init(preset: preset), backend: .metal, lowPowerMode: false)
+
         #expect(result.options["swapchain-depth"] == "2")
         #expect(!MPVOptionOwnership.isManaged("swapchain-depth", deinterlace: .init()))
     }
@@ -33,11 +47,13 @@ struct MPVRenderingOptionsTests {
     func `automatic uses power state and explicit overrides`() {
         let requested = MPVRenderingQuality(antiringing: 9, preset: .automatic, scaling: .lanczos)
         let battery = MPVRenderingOptions.resolve(requested, backend: .metal, lowPowerMode: true)
+
         #expect(battery.preset == .battery)
         #expect(battery.options["scale"] == "lanczos")
         #expect(battery.options["scale-antiring"] == "1.0")
         #expect(battery.options["hdr-compute-peak"] == "no")
         let balanced = MPVRenderingOptions.resolve(.init(), backend: .metal, lowPowerMode: false)
+
         #expect(balanced.preset == .balanced)
         #expect(balanced.options["hdr-compute-peak"] == "auto")
     }
@@ -45,6 +61,7 @@ struct MPVRenderingOptionsTests {
     @Test
     func `native does not claim GPU settings`() {
         let result = MPVRenderingOptions.resolve(.init(preset: .highQuality), backend: .sampleBuffer, lowPowerMode: false)
+
         #expect(result.options.isEmpty)
         #expect(!result.unsupportedFeatures.isEmpty)
     }
@@ -53,6 +70,7 @@ struct MPVRenderingOptionsTests {
     func `invalid files do not enter renderer`() throws {
         let quality = try MPVRenderingQuality(shaders: [#require(URL(string: "https://example.com/shader.glsl"))])
         let result = MPVRenderingOptions.resolve(quality, backend: .metal, lowPowerMode: false)
+
         #expect(result.options["glsl-shaders"] == nil)
         #expect(result.unsupportedFeatures.count == 1)
     }
@@ -60,6 +78,7 @@ struct MPVRenderingOptionsTests {
     @Test
     func `deinterlacing does not download progressive automatic frames`() {
         let policy = MPVDeinterlacePolicy(mode: .automatic)
+
         #expect(MPVRenderingOptions.deinterlaceOptions(policy)["deinterlace"] == "auto")
         let progressive = MPVRenderingOptions.deinterlaceStatus(
             policy: policy,
@@ -67,6 +86,7 @@ struct MPVRenderingOptionsTests {
             hardwareDecoder: "videotoolbox",
             automaticFilterIsActive: false
         )
+
         #expect(progressive.requiresSoftwareFrames == false)
         let interlaced = MPVRenderingOptions.deinterlaceStatus(
             policy: policy,
@@ -74,9 +94,11 @@ struct MPVRenderingOptionsTests {
             hardwareDecoder: "videotoolbox",
             automaticFilterIsActive: true
         )
+
         #expect(interlaced.requiresSoftwareFrames == true)
         #expect(interlaced.reason?.contains("downloaded") == true)
         let unknown = MPVRenderingOptions.deinterlaceStatus(policy: policy, interlaced: nil, hardwareDecoder: "videotoolbox")
+
         #expect(unknown.requiresSoftwareFrames == nil)
     }
 
@@ -84,6 +106,7 @@ struct MPVRenderingOptionsTests {
     func `explicit field order and detection use double rate software graph`() {
         let policy = MPVDeinterlacePolicy(algorithm: .yadif, analyzeFieldOrder: true, fieldOrder: .bottomFirst, mode: .forced)
         let result = MPVRenderingOptions.deinterlaceOptions(policy)
+
         #expect(result["deinterlace"] == "no")
         #expect(result["vf"] == "lavfi=[idet,yadif=mode=send_field:parity=bff:deint=all]")
     }

@@ -1,3 +1,4 @@
+import MPVCore
 import SwiftUI
 
 /// A SwiftUI video surface for ``MPVPlayer``.
@@ -20,7 +21,8 @@ import SwiftUI
 /// }
 /// ```
 @MainActor
-public struct MPVVideoPlayer: View {
+public struct MPVVideoPlayer {
+
     private let player: MPVPlayer
     private var overlay: MPVVideoOverlay?
 
@@ -28,11 +30,22 @@ public struct MPVVideoPlayer: View {
     public init(player: MPVPlayer) {
         self.player = player
     }
+}
+
+extension MPVVideoPlayer: View {
 
     /// The video surface and its configured overlay.
     public var body: some View {
         MPVPlayerSurface(player: player, overlay: overlay)
             .id(ObjectIdentifier(player))
+            #if os(iOS)
+            .overlay {
+                if player.externalPlayback.isPreparing || player.externalPlayback.isPrepared {
+                    MPVExternalPlaybackSurface(player: player)
+                        .allowsHitTesting(false)
+                }
+            }
+            #endif
     }
 
     /// Places content inside the video surface, including picture in picture.
@@ -58,5 +71,6 @@ public struct MPVVideoPlayer: View {
 
 @MainActor
 struct MPVVideoOverlay {
+
     let content: AnyView
 }

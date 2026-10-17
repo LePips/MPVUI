@@ -2,12 +2,14 @@
 import AppKit
 import CoreGraphics
 import Metal
+@testable import MPVCore
 @testable import MPVUI
 import QuartzCore
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 struct MPVPlatformVideoPlayerAppKitTests {
+
     @Test
     @MainActor
     func `surface installs shared metal layer with host configuration`() {
@@ -43,6 +45,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             try #require(layer.colorspace).name
                 == CGColorSpace.extendedLinearDisplayP3
         )
+
         #expect(layer.edrMetadata == nil)
         #expect(layer.wantsExtendedDynamicRangeContent)
 
@@ -92,6 +95,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let initialLifecycle = try await waitForLifecycle(player) {
             $0.handlesCreated == 1
         }
+
         #expect(player.lastError == nil)
         #expect(player.isRenderSurfaceActive(token: token))
         #expect(initialLifecycle.handlesCreated == 1)
@@ -104,11 +108,13 @@ struct MPVPlatformVideoPlayerAppKitTests {
             drawableWidth: Int(resizedDrawableSize.width),
             drawableHeight: Int(resizedDrawableSize.height)
         )
+
         #expect(didResize)
 
         let resizedLifecycle = try await waitForLifecycle(player) {
             $0.surfaceResizeCommands == initialLifecycle.surfaceResizeCommands + 1
         }
+
         #expect(player.lastError == nil)
         // With no media loaded, mpv accepts and records the trigger without
         // instantiating a Vulkan swapchain. The host must not prewrite the
@@ -120,6 +126,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             resizedLifecycle.surfaceResizeCommands
                 == initialLifecycle.surfaceResizeCommands + 1
         )
+
         #expect(resizedLifecycle.loadCommands == initialLifecycle.loadCommands)
     }
 
@@ -148,6 +155,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let initialLifecycle = try await waitForLifecycle(player) {
             $0.handlesCreated == 1
         }
+
         let initialLayer = try #require(surface.metalLayer as? MPVMetalLayer)
         let initialGeneration = surface.resizeDiagnosticSnapshot.surfaceGeneration
 
@@ -175,10 +183,12 @@ struct MPVPlatformVideoPlayerAppKitTests {
             replacementLifecycle.handlesCreated
                 == initialLifecycle.handlesCreated + 1
         )
+
         #expect(
             replacementLifecycle.handlesDestroyed
                 == initialLifecycle.handlesDestroyed + 1
         )
+
         #expect(replacementLifecycle.loadCommands == initialLifecycle.loadCommands)
         #expect(player.lastError == nil)
     }
@@ -208,8 +218,10 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let attachedLifecycle = try await waitForLifecycle(player) {
             $0.handlesCreated == 1
         }
+
         #expect(attachedLifecycle.handlesCreated == 1)
         let lifecycleBeforeTransition = await player.lifecycleDiagnostics()
+
         let committedBeforeTransition = try #require(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
         )
@@ -222,9 +234,11 @@ struct MPVPlatformVideoPlayerAppKitTests {
             for: surface.bounds.size,
             scale: surface.metalLayer.contentsScale
         )
+
         #expect(expectedDrawableSize != committedBeforeTransition)
 
         let transitionSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(transitionSnapshot.geometryChangeKind == .animatedTransition)
         #expect(transitionSnapshot.pendingDrawableSize == expectedDrawableSize)
         #expect(transitionSnapshot.committedDrawableSize == committedBeforeTransition)
@@ -233,6 +247,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         #expect(transitionSnapshot.inFlight == nil)
 
         try await Task.sleep(nanoseconds: 100_000_000)
+
         #expect(
             await player.lifecycleDiagnostics().surfaceResizeCommands
                 == lifecycleBeforeTransition.surfaceResizeCommands
@@ -247,6 +262,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             $0.surfaceResizeCommands
                 == lifecycleBeforeTransition.surfaceResizeCommands + 1
         }
+
         #expect(
             lifecycleAfterCompletion.surfaceResizeCommands
                 == lifecycleBeforeTransition.surfaceResizeCommands + 1
@@ -255,6 +271,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             $0.committedDrawableSize == expectedDrawableSize
                 && $0.inFlight == nil
         }
+
         #expect(completedSnapshot.committedDrawableSize == expectedDrawableSize)
         #expect(!completedSnapshot.finalCommitRequired)
         #expect(!completedSnapshot.hasAnimatedFallback)
@@ -263,16 +280,19 @@ struct MPVPlatformVideoPlayerAppKitTests {
             lifecycleAfterCompletion.handlesCreated
                 == lifecycleBeforeTransition.handlesCreated
         )
+
         #expect(
             lifecycleAfterCompletion.handlesDestroyed
                 == lifecycleBeforeTransition.handlesDestroyed
         )
+
         #expect(
             lifecycleAfterCompletion.loadCommands
                 == lifecycleBeforeTransition.loadCommands
         )
 
         try await Task.sleep(nanoseconds: 650_000_000)
+
         #expect(
             await player.lifecycleDiagnostics().surfaceResizeCommands
                 == lifecycleAfterCompletion.surfaceResizeCommands
@@ -306,6 +326,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let attachedLifecycle = try await waitForLifecycle(player) {
             $0.handlesCreated == 1
         }
+
         #expect(attachedLifecycle.handlesCreated == 1)
 
         let scenarios: [(animatedSize: CGSize, discreteSize: CGSize)] = [
@@ -327,6 +348,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
             surface.layoutSubtreeIfNeeded()
 
             let animatedSnapshot = surface.resizeDiagnosticSnapshot
+
             #expect(animatedSnapshot.geometryChangeKind == .animatedTransition)
             #expect(animatedSnapshot.hasAnimatedFallback)
             #expect(animatedSnapshot.finalCommitRequired)
@@ -344,6 +366,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 $0.surfaceResizeCommands
                     == lifecycleBeforeTransition.surfaceResizeCommands + 1
             }
+
             #expect(
                 lifecycleAfterFallback.surfaceResizeCommands
                     == lifecycleBeforeTransition.surfaceResizeCommands + 1
@@ -352,6 +375,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 $0.committedDrawableSize == animatedDrawableSize
                     && $0.inFlight == nil
             }
+
             #expect(fallbackSnapshot.geometryChangeKind == .final)
             #expect(fallbackSnapshot.committedDrawableSize == animatedDrawableSize)
             #expect(!fallbackSnapshot.finalCommitRequired)
@@ -369,6 +393,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 scale: surface.metalLayer.contentsScale
             )
             let discreteSnapshot = surface.resizeDiagnosticSnapshot
+
             #expect(discreteSnapshot.geometryChangeKind == .discrete)
             #expect(discreteSnapshot.pendingDrawableSize == expectedDrawableSize)
             #expect(!discreteSnapshot.finalCommitRequired)
@@ -378,6 +403,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 $0.surfaceResizeCommands
                     == lifecycleAfterFallback.surfaceResizeCommands + 1
             }
+
             #expect(
                 lifecycleAfterDiscrete.surfaceResizeCommands
                     == lifecycleAfterFallback.surfaceResizeCommands + 1
@@ -386,6 +412,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 $0.committedDrawableSize == expectedDrawableSize
                     && $0.inFlight == nil
             }
+
             #expect(committedSnapshot.geometryChangeKind == .discrete)
             #expect(committedSnapshot.committedDrawableSize == expectedDrawableSize)
             #expect(!committedSnapshot.finalCommitRequired)
@@ -394,21 +421,25 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 lifecycleAfterDiscrete.handlesCreated
                     == lifecycleBeforeTransition.handlesCreated
             )
+
             #expect(
                 lifecycleAfterDiscrete.handlesDestroyed
                     == lifecycleBeforeTransition.handlesDestroyed
             )
+
             #expect(
                 lifecycleAfterDiscrete.loadCommands
                     == lifecycleBeforeTransition.loadCommands
             )
 
             try await Task.sleep(nanoseconds: 650_000_000)
+
             #expect(
                 await player.lifecycleDiagnostics().surfaceResizeCommands
                     == lifecycleAfterDiscrete.surfaceResizeCommands
             )
         }
+
         #expect(player.lastError == nil)
     }
 
@@ -451,6 +482,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let attachedLifecycle = try await waitForLifecycle(player) {
             $0.handlesCreated == 1
         }
+
         #expect(attachedLifecycle.handlesCreated == 1)
         let mediaURL = TestPaths.baselineMedia
         try #require(FileManager.default.fileExists(atPath: mediaURL.path))
@@ -460,6 +492,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 $0.mediaInformation.dimensions != nil && $0.state == .playing
             }
         )
+
         let initialDrawableSize = try #require(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
         )
@@ -480,6 +513,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         // allowing deterministic intermediate layouts in this integration test.
         surface.viewWillStartLiveResize()
         let beganSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(beganSnapshot.isContinuousInteraction)
         #expect(beganSnapshot.finalCommitRequired)
 
@@ -549,12 +583,15 @@ struct MPVPlatformVideoPlayerAppKitTests {
             for: surface.bounds.size,
             scale: surface.metalLayer.contentsScale
         )
+
         #expect(finalDrawableSize != intermediateDrawableSize)
         let queuedContinuousSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(
             queuedContinuousSnapshot.geometryChangeKind
                 == .continuousInteractive
         )
+
         #expect(queuedContinuousSnapshot.finalCommitRequired)
         #expect(queuedContinuousSnapshot.isContinuousInteraction)
         #expect(!queuedContinuousSnapshot.hasContinuousFinalFallback)
@@ -589,6 +626,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let resizeCommandCount =
             lifecycleAfterFinal.surfaceResizeCommands
                 - lifecycleBeforeResize.surfaceResizeCommands
+
         #expect(resizeCommandCount >= 2)
         #expect(resizeCommandCount <= 3)
         try #require(finalSnapshot.committedDrawableSize == finalDrawableSize)
@@ -605,14 +643,17 @@ struct MPVPlatformVideoPlayerAppKitTests {
                 == finalOutputSize
         )
         try #require(surface.metalLayer.drawableSize == finalDrawableSize)
+
         #expect(
             lifecycleAfterFinal.handlesCreated
                 == lifecycleBeforeResize.handlesCreated
         )
+
         #expect(
             lifecycleAfterFinal.handlesDestroyed
                 == lifecycleBeforeResize.handlesDestroyed
         )
+
         #expect(
             lifecycleAfterFinal.loadCommands
                 == lifecycleBeforeResize.loadCommands
@@ -622,10 +663,12 @@ struct MPVPlatformVideoPlayerAppKitTests {
         // The coordinator unit test separately waits beyond the fallback
         // deadline to prove the explicit end cancels that task.
         try await Task.sleep(nanoseconds: 200_000_000)
+
         #expect(
             await player.lifecycleDiagnostics().surfaceResizeCommands
                 == lifecycleAfterFinal.surfaceResizeCommands
         )
+
         #expect(player.lastError == nil)
     }
 
@@ -633,6 +676,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         CGSize.zero,
         CGSize(width: 1, height: 1),
     ])
+
     @MainActor
     func `invalid live resize end aborts continuous interaction`(
         invalidFrameSize: CGSize
@@ -661,12 +705,14 @@ struct MPVPlatformVideoPlayerAppKitTests {
             $0.handlesCreated == 1
         }
         try #require(attachedLifecycle.handlesCreated == 1)
+
         let committedBeforeResize = try #require(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
         )
 
         surface.viewWillStartLiveResize()
         let beganSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(beganSnapshot.isContinuousInteraction)
         #expect(beganSnapshot.finalCommitRequired)
 
@@ -674,6 +720,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         surface.viewDidEndLiveResize()
 
         let abortedSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(!abortedSnapshot.isContinuousInteraction)
         #expect(!abortedSnapshot.finalCommitRequired)
         #expect(!abortedSnapshot.hasContinuousFinalFallback)
@@ -686,15 +733,18 @@ struct MPVPlatformVideoPlayerAppKitTests {
 
         try await Task.sleep(nanoseconds: 200_000_000)
         let lifecycleAfterAbort = await player.lifecycleDiagnostics()
+
         #expect(
             lifecycleAfterAbort.surfaceResizeCommands
                 == attachedLifecycle.surfaceResizeCommands
         )
+
         #expect(lifecycleAfterAbort.handlesCreated == attachedLifecycle.handlesCreated)
         #expect(
             lifecycleAfterAbort.handlesDestroyed
                 == attachedLifecycle.handlesDestroyed
         )
+
         #expect(player.lastError == nil)
     }
 
@@ -761,6 +811,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let expectedDrawableSize = CGSize(width: 1280, height: 720)
         let expectedOutputSize = MPVRenderOutputSize(width: 1280, height: 720)
         let scheduledSnapshot = surface.resizeDiagnosticSnapshot
+
         #expect(surface.metalLayer.contentsScale == 1)
         #expect(surface.metalLayer.drawableSize == initialDrawableSize)
         #expect(scheduledSnapshot.committedDrawableSize == initialDrawableSize)
@@ -790,18 +841,22 @@ struct MPVPlatformVideoPlayerAppKitTests {
             await waitForRenderOutputSize(expectedOutputSize, from: player)
                 == expectedOutputSize
         )
+
         #expect(
             lifecycleAfterScaleChange.handlesCreated
                 == lifecycleBeforeScaleChange.handlesCreated
         )
+
         #expect(
             lifecycleAfterScaleChange.handlesDestroyed
                 == lifecycleBeforeScaleChange.handlesDestroyed
         )
+
         #expect(
             lifecycleAfterScaleChange.loadCommands
                 == lifecycleBeforeScaleChange.loadCommands
         )
+
         #expect(player.state == .playing)
         #expect(player.lastError == nil)
     }
@@ -821,6 +876,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let nativeSurfaceConfigurations = NativeSurfaceConfigurationLogRecorder()
         player.logHandler = { nativeSurfaceConfigurations.record($0) }
         let subtitleSnapshots = TextSubtitleSnapshotRecorder()
+        player.setTextSubtitleInterceptionEnabled(true)
         let subtitleStream = player.textSubtitleStream()
         let subtitleObservation = Task { @MainActor in
             for await snapshot in subtitleStream {
@@ -892,7 +948,8 @@ struct MPVPlatformVideoPlayerAppKitTests {
         )
         player.selectTrack(englishSubtitle.id)
         let didSelectEnglishSubtitle = try await waitForPlayer(player) {
-            $0.subtitleTracks.first(where: { $0.id == englishSubtitle.id })?
+            $0.subtitleTracks
+                .first(where: { $0.id == englishSubtitle.id })?
                 .isSelected == true
         }
         try #require(didSelectEnglishSubtitle)
@@ -926,11 +983,13 @@ struct MPVPlatformVideoPlayerAppKitTests {
         try #require(layer.pixelFormat == .bgra8Unorm)
         try #require(try await waitForPlayer(player) { $0.state == .playing })
         try #require(
-            player.audioTracks.first(where: { $0.id == spanishAudio.id })?
+            player.audioTracks
+                .first(where: { $0.id == spanishAudio.id })?
                 .isSelected == true
         )
         try #require(
-            player.subtitleTracks.first(where: { $0.id == englishSubtitle.id })?
+            player.subtitleTracks
+                .first(where: { $0.id == englishSubtitle.id })?
                 .isSelected == true
         )
 
@@ -1002,9 +1061,11 @@ struct MPVPlatformVideoPlayerAppKitTests {
         )
         try #require(evidenceSnapshot.inFlight == nil)
         try #require(!evidenceSnapshot.finalCommitRequired)
+
         let resizeLatency = try #require(
             evidenceSnapshot.resizeLatencyNanoseconds
         )
+
         let nativeSurfaceConfiguration = try #require(
             await waitForNativeSurfaceConfiguration(
                 nativeSurfaceConfigurations
@@ -1034,6 +1095,7 @@ struct MPVPlatformVideoPlayerAppKitTests {
         let didDisableSubtitles = try await waitForPlayer(player) {
             !$0.subtitleTracks.contains(where: \.isSelected)
         }
+
         #expect(didDisableSubtitles)
         #expect(player.lastError == nil)
     }
@@ -1151,9 +1213,11 @@ struct MPVPlatformVideoPlayerAppKitTests {
             evidenceSnapshot.committedDrawableSize == expectedDrawableSize
         )
         try #require(evidenceSnapshot.inFlight == nil)
+
         let resizeLatency = try #require(
             evidenceSnapshot.resizeLatencyNanoseconds
         )
+
         let nativeSurfaceConfiguration = try #require(
             await waitForNativeSurfaceConfiguration(
                 nativeSurfaceConfigurations
@@ -1287,11 +1351,13 @@ struct MPVPlatformVideoPlayerAppKitTests {
 
 @MainActor
 private final class TextSubtitleSnapshotRecorder {
+
     var values: [TextSubtitleSnapshot] = []
 }
 
 @MainActor
 private final class NativeSurfaceConfigurationLogRecorder {
+
     var values: [String] = []
 
     func record(_ message: MPVLogMessage) {

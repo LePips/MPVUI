@@ -1,4 +1,5 @@
 import Foundation
+import MPVCore
 
 #if os(tvOS)
 import AVFoundation
@@ -10,6 +11,7 @@ import UIKit
 /// matching. Native sample-buffer HDR presentation is independent of this API.
 @MainActor
 enum MPVPlatformDisplayMatchingTarget {
+
     static func make(for window: PlatformWindow?) -> (any MPVDisplayMatchingTarget)? {
         #if os(tvOS)
         return window.map { MPVTVDisplayMatchingTarget(manager: $0.avDisplayManager) }
@@ -25,20 +27,27 @@ enum MPVPlatformDisplayMatchingTarget {
 /// Kept at the AVKit boundary so adapter tests need not switch a physical TV.
 @MainActor
 protocol MPVAVDisplayManaging: AnyObject {
+
     var preferredDisplayCriteria: AVDisplayCriteria? { get set }
+
     var isDisplayCriteriaMatchingEnabled: Bool { get }
+
     var isDisplayModeSwitchInProgress: Bool { get }
 }
 
 extension AVDisplayManager: MPVAVDisplayManaging {}
 
 @MainActor
-final class MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
+final class MPVTVDisplayMatchingTarget {
+
     private let manager: any MPVAVDisplayManaging
 
     init(manager: any MPVAVDisplayManaging) {
         self.manager = manager
     }
+}
+
+extension MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
 
     var identity: ObjectIdentifier {
         ObjectIdentifier(manager)
@@ -59,7 +68,8 @@ final class MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
         }
         guard let format = content.makeFormatDescription() else { return false }
         manager.preferredDisplayCriteria = AVDisplayCriteria(
-            refreshRate: content.refreshRate, formatDescription: format
+            refreshRate: content.refreshRate,
+            formatDescription: format
         )
         return true
     }

@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 #if os(macOS)
 import AppKit
@@ -11,6 +12,7 @@ import UIKit
 /// Call `close()` from `defer`. Each case starts with an independent native session.
 @MainActor
 final class PlaybackFixture {
+
     let player: MPVPlayer
     let surface: MPVPlatformVideoPlayer
     #if os(macOS)
@@ -19,6 +21,16 @@ final class PlaybackFixture {
     let window: UIWindow
     private weak var previousKeyWindow: UIWindow?
     #endif
+
+    var presentationContext: String {
+        #if os(macOS)
+        "windowVisible=\(window.isVisible), surfaceWindow=\(surface.window != nil), bounds=\(surface.bounds)"
+        #else
+        "windowScene=\(window.windowScene != nil), activation=\(window.windowScene?.activationState.rawValue ?? -1), "
+            + "windowHidden=\(window.isHidden), key=\(window.isKeyWindow), "
+            + "surfaceWindow=\(surface.window === window), bounds=\(surface.bounds)"
+        #endif
+    }
 
     init(
         configuration: MPVPlayerConfiguration = .init(
@@ -61,16 +73,6 @@ final class PlaybackFixture {
         surface.layoutIfNeeded()
         #endif
         surface.activateRenderingSurface()
-    }
-
-    var presentationContext: String {
-        #if os(macOS)
-        "windowVisible=\(window.isVisible), surfaceWindow=\(surface.window != nil), bounds=\(surface.bounds)"
-        #else
-        "windowScene=\(window.windowScene != nil), activation=\(window.windowScene?.activationState.rawValue ?? -1), "
-            + "windowHidden=\(window.isHidden), key=\(window.isKeyWindow), "
-            + "surfaceWindow=\(surface.window === window), bounds=\(surface.bounds)"
-        #endif
     }
 
     func loadPaused(_ url: URL = TestPaths.baselineMedia, at position: Duration = .seconds(1)) async throws {

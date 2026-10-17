@@ -1,6 +1,7 @@
 import Foundation
 
 enum ProcessDiagnostics {
+
     /// Selects compiler and Swift Testing failures even when later output is noisy.
     static func excerpt(_ output: String) -> String {
         let lines = output.components(separatedBy: "\n")

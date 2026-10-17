@@ -1,10 +1,12 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVMetalPerformanceTests {
+
     @Test(arguments: ["baseline.mp4", "video-h264-120fps.mkv", "color-hdr10.mkv"])
     func `Metal playback renders seeks and recreates with bounded decoder threading`(media: String) async throws {
         let fixture = PlaybackFixture(configuration: .init(
@@ -15,6 +17,7 @@ struct MPVMetalPerformanceTests {
         ))
         defer { fixture.close() }
         let player = fixture.player
+        player.setDiagnosticsEnabled(true)
         var messages: [String] = []
         player.logHandler = { messages.append($0.message) }
         let url = try TestPaths.testMedia(media)
@@ -30,6 +33,7 @@ struct MPVMetalPerformanceTests {
         }
         #endif
         let before = await player.lifecycleDiagnostics()
+
         #expect(await player.seekForPictureInPicture(to: .seconds(0.5)))
         try await eventually("paused Metal seek") {
             player.isPaused && abs(player.position.seconds - 0.5) < 0.15
@@ -39,6 +43,7 @@ struct MPVMetalPerformanceTests {
         player.pause()
         try await eventually("Metal playback pauses") { player.isPaused }
         let after = await player.lifecycleDiagnostics()
+
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(player.lastError == nil)
 
@@ -48,6 +53,7 @@ struct MPVMetalPerformanceTests {
             return state.handlesCreated == state.handlesDestroyed
         }
         try await fixture.loadPaused(url, at: .seconds(0.25))
+
         #expect(player.lastError == nil)
         #expect(await (player.lifecycleDiagnostics()).handlesCreated == before.handlesCreated + 1)
     }
@@ -59,12 +65,14 @@ struct MPVMetalPerformanceTests {
             videoOutput: .metal
         ))
         defer { fixture.close() }
+        fixture.player.setDiagnosticsEnabled(true)
         try fixture.player.load(TestPaths.testMedia("image-webp-animated.webp"), autoPlay: true)
         try await eventually("software decoded animation rendered by Metal") {
             fixture.player.position.seconds >= 0.75
                 && fixture.player.playbackDiagnostics.decoder.session == .software
                 && fixture.player.playbackDiagnostics.freshRenderPasses?.isEmpty == false
         }
+
         #expect(fixture.player.lastError == nil)
     }
 
@@ -77,6 +85,7 @@ struct MPVMetalPerformanceTests {
             videoOutput: .metal
         ))
         defer { fixture.close() }
+        fixture.player.setDiagnosticsEnabled(true)
         for _ in 0 ..< 2 {
             try await fixture.loadPaused()
             try await eventually("requested presentation depth") {

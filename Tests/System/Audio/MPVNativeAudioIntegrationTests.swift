@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -11,315 +12,14 @@ import Testing
 ))
 @MainActor
 struct MPVNativeAudioIntegrationTests {
-    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
-    func `public audio configuration reaches Apple without a video view`(
-        decoding: MPVAudioConfiguration.DolbyDecoding,
-        spatialization: MPVAudioConfiguration.Spatialization
-    ) async throws {
-        let player = MPVPlayer(configuration: .init(
-            audio: .init(dolbyDecoding: decoding, spatialization: spatialization),
-            autoPlay: false, logLevel: .verbose, volume: 0
-        ))
-        defer { player.stop() }
-        #expect(!player.hasActiveRenderSurface)
-        var sinkMuted = false
-        var logs: [String] = []
-        var completed = false
-        player.logHandler = { message in
-            logs.append("[\(message.prefix)] \(message.message)")
-            if message.message.contains("AUDIO_AUDIT_MUTED=yes") {
-                sinkMuted = true
-            }
-        }
-        defer {
-            if !completed {
-                print(
-                    "Public audio audit: state=\(player.state) position=\(player.position) error=\(String(describing: player.lastError)) audio=\(player.playbackDiagnostics.audio)"
-                )
-                print(logs.suffix(100).joined(separator: "\n"))
-            }
-        }
-        player.setMuted(true)
-        try player.load(TestPaths.testMedia("audio-eac3-5.1.mka"))
-        try await eventually("public player native audio initialized") {
-            player.playbackDiagnostics.audio.output == "avfoundation"
-                && player.playbackDiagnostics.audio.nativePath != nil
-        }
-        // Mute the actual sink before starting compressed audio, then verify
-        // the public command reached it without changing video backends.
-        player.setProperty("ao-mute", to: "yes")
-        player.command("expand-properties", arguments: ["print-text", "AUDIO_AUDIT_MUTED=${ao-mute}"])
-        try await eventually("native sink muted") { sinkMuted }
-        player.play()
-        try await eventually("public audio playback and spatialization observations") {
-            player.position.seconds > 0.2
-                && player.playbackDiagnostics.audio.allowsStereoSpatialization != nil
-                && player.playbackDiagnostics.audio.allowsMultichannelSpatialization != nil
-        }
-        let audio = player.playbackDiagnostics.audio
-        #expect(audio.nativePath == (decoding == .automatic ? "avplayer" : "sample-buffer"))
-        #expect(audio.outputFormat?.contains("spdif") == (decoding == .automatic))
-        #expect(audio.sourceChannels?.contains("5.1") == true)
-        #expect(audio.allowsStereoSpatialization == (spatialization == .automatic))
-        #expect(audio.allowsMultichannelSpatialization == (spatialization != .disabled))
-
-        let firstPosition = player.position
-        try await eventually("public audio clock continues after input drains") {
-            player.position > firstPosition + .milliseconds(400)
-        }
-        player.pause()
-        try await eventually("public audio paused") { player.state == .paused && player.isPaused }
-        let seekPosition = player.position + .seconds(1)
-        player.seek(by: .seconds(1))
-        try await eventually("relative audio seek uses the current native clock") {
-            player.state == .paused && abs(player.position.seconds - seekPosition.seconds) < 0.2
-        }
-
-        player.setPlaybackRate(1.25)
-        player.play()
-        try await eventually("public rate request uses PCM") {
-            player.playbackDiagnostics.audio.nativePath == "sample-buffer"
-                && player.playbackDiagnostics.audio.outputFormat?.contains("spdif") == false
-        }
-        #expect(player.videoOutput == .sampleBuffer)
-        #expect(player.lastError == nil)
-        #expect(player.playbackDiagnostics.audio.allowsStereoSpatialization == (spatialization == .automatic))
-        #expect(player.playbackDiagnostics.audio.allowsMultichannelSpatialization == (spatialization != .disabled))
-        #expect(player.lastError == nil)
-        completed = true
-    }
-
-    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, ["ac3", "eac3"])
-    func `configured Dolby policy preserves surround source layout`(
-        policy: MPVAudioConfiguration.DolbyDecoding,
-        codec: String
-    ) async throws {
-        let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("audio-\(codec)-5.1.mka"))
-        try await audio.wait("surround audio starts") { audio.number("audio-pts") > 0.2 }
-        #expect(audio.number("current-tracks/audio/demux-channel-count") == 6)
-        let native = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
-        #expect(native["allows-multichannel"] == .bool(true))
-        if policy == .automatic {
-            #expect(native["path"] == .string("avplayer"))
-            #expect(audio.string("audio-out-params/format") == "spdif-\(codec)")
-        } else {
-            #expect(native["path"] == .string("sample-buffer"))
-            #expect(audio.number("audio-out-params/channel-count") == 6)
-            #expect(!audio.string("audio-out-params/format").contains("spdif"))
-        }
-    }
-
-    @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "5.1", "7.1"])
-    func `PCM keeps speaker layouts and reads back Apple spatialization policy`(policy: String, layout: String) async throws {
-        let audio = try Session(options: ["ao-avfoundation-spatial-audio": policy])
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("audio-pcm-\(layout).mka"))
-        try await audio.wait("PCM native renderer") { audio.number("audio-pts") > 0.2 }
-        let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
-        #expect(fields["path"] == .string("sample-buffer"))
-        #expect(fields["allows-stereo"] == .bool(policy == "all"))
-        #expect(fields["allows-multichannel"] == .bool(policy != "no"))
-        #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
-        let count = ["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout]!
-        #expect(audio.number("audio-out-params/channel-count") == count)
-    }
-
-    @Test(arguments: ["all", "multichannel", "no"], ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
-    func `Dolby item spatialization survives seek recreation`(policy: String, fixture: String) async throws {
-        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "ao-avfoundation-spatial-audio": policy])
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia(fixture))
-        try await audio.wait("native Dolby item") { audio.number("audio-pts") > 0.2 }
-        for seek in [false, true] {
-            if seek {
-                let starts = audio.nativeClockStarts
-                try await audio.pauseAndSeek(to: 1.5)
-                try audio.set("pause", "no")
-                try await audio.wait("recreated native Dolby item") {
-                    audio.nativeClockStarts > starts && audio.number("audio-pts") > 1.7
-                }
-            }
-            let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
-            #expect(fields["path"] == .string("avplayer"))
-            #expect(fields["allows-stereo"] == .bool(policy == "all"))
-            #expect(fields["allows-multichannel"] == .bool(policy != "no"))
-        }
-    }
-
-    @Test(arguments: ["speed", "pitch", "volume", "af"], [false, true])
-    func `Dolby recovers to PCM for audio processing`(option: String, duringPlayback: Bool) async throws {
-        let value = option == "volume" ? "150" : option == "af" ? "lavfi=[volume=0.5]" : "1.25"
-        var options = ["audio-spdif": "ac3,eac3"]
-        if !duringPlayback {
-            options[option] = value
-        }
-        // Muted even when amplification is the setting under test.
-        options["mute"] = "yes"
-        let audio = try Session(options: options)
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
-        var previousPosition: Double?
-        if duringPlayback {
-            try await audio.wait("compressed start") { audio.nativeClockStarts > 0 }
-            previousPosition = audio.number("time-pos")
-            try audio.set(option, value)
-        }
-        try await audio.wait("processing uses spatializable PCM") {
-            audio.string("current-ao") == "avfoundation"
-                && !audio.string("audio-out-params/format").contains("spdif")
-                && audio.number("audio-pts") > 0.2
-        }
-        #expect(audio.node("avfoundation-audio-spatialization")?.mapValue?["allows-stereo"] == .bool(true))
-        if let previousPosition {
-            #expect(
-                abs(audio.number("time-pos") - previousPosition) < 2,
-                "PCM recovery must resume near the audible position, not the buffered read head"
-            )
-        }
-    }
-
-    @Test
-    func `pcm keeps default buffering and supports transport`() async throws {
-        let audio = try Session()
-        defer { audio.close() }
-        #expect(audio.string("options/ao-avfoundation-max-lookahead") == "0.000000"
-            || audio.number("options/ao-avfoundation-max-lookahead") == 0)
-        try await audio.load(TestPaths.baselineMedia)
-        try await audio.wait("PCM output and advancing audio clock") {
-            audio.string("current-ao") == "avfoundation" && audio.number("audio-pts") > 0.25
-        }
-        #expect(!audio.string("audio-out-params/format").contains("spdif"))
-        try await audio.pauseAndSeek(to: 0.6)
-        try audio.set("pause", "no")
-        try await audio.wait("PCM EOF") { audio.eof }
-    }
-
-    @Test(arguments: ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
-    func `compressed transport and EOF`(_ fixture: String) async throws {
-        let audio = try Session(options: [
-            "audio-spdif": "ac3,eac3",
-        ])
-        let format = fixture.contains("eac3") ? "spdif-eac3" : "spdif-ac3"
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia(fixture))
-        try await audio.wait("compressed output and advancing Apple audio clock") {
-            audio.string("current-ao") == "avfoundation"
-                && audio.string("audio-out-params/format") == format
-                && audio.number("audio-pts") > 0.3
-                && audio.nativeClockStarts > 0
-        }
-        let initialClockStarts = audio.nativeClockStarts
-        try await audio.pauseAndSeek(to: 1.5)
-        try audio.set("pause", "no")
-        try await audio.wait("compressed post-seek clock") {
-            audio.number("audio-pts") > 1.8 && audio.nativeClockStarts > initialClockStarts
-        }
-        #expect(audio.string("audio-out-params/format") == format)
-        let clock = audio.number("audio-pts")
-        try await audio.wait("continued compressed clock") { audio.number("audio-pts") > clock + 0.2 }
-        #expect(audio.string("audio-out-params/format") == format)
-        let postSeekClockStarts = audio.nativeClockStarts
-        try audio.command(["seek", "5", "absolute+exact"])
-        try await audio.wait("compressed output near EOF") {
-            audio.number("audio-pts") > 5.1 && audio.nativeClockStarts > postSeekClockStarts
-        }
-        #expect(audio.string("audio-out-params/format") == format)
-        try await audio.wait("compressed EOF") { audio.eof }
-        #expect(audio.logs.contains("native compressed audio drained at"), "\(audio.logs)")
-        #expect(!audio.logs.lowercased().contains("falling back to pcm"), "\(audio.logs)")
-    }
-
-    @Test(arguments: ["audio-ac3-5.1.mka", "audio-eac3-5.1.mka"])
-    func `compressed bounded stream drains at natural EOF`(_ fixture: String) async throws {
-        let audio = try Session(options: ["audio-spdif": "ac3,eac3"])
-        defer { audio.close() }
-        let format = fixture.contains("eac3") ? "spdif-eac3" : "spdif-ac3"
-        try await audio.load(TestPaths.testMedia(fixture))
-        try await audio.wait("bounded stream starts on Apple's clock") {
-            audio.string("audio-out-params/format") == format && audio.nativeClockStarts > 0
-                && audio.logs.contains("(bounded stream)")
-        }
-        let began = ContinuousClock.now
-        try await audio.wait("bounded compressed stream reaches natural EOF", timeout: 35) {
-            audio.eof
-        }
-        // The complete24-second stream must stay alive beyond queued input EOF.
-        #expect(began.duration(to: .now) > .seconds(20))
-        #expect(audio.logs.contains("native compressed audio drained at"), "\(audio.logs)")
-        #expect(!audio.logs.lowercased().contains("falling back to pcm"), "\(audio.logs)")
-    }
-
-    @Test(arguments: [false, true])
-    func `compressed close during startup is bounded`(paused: Bool) async throws {
-        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "gapless-audio": "yes"])
-        defer { audio.close() }
-        try await audio.load(TestPaths.testMedia("audio-ac3-stereo.mka"), resume: !paused)
-        #expect(audio.string("audio-out-params/format") == "spdif-ac3")
-        // Close synchronously just after initialization/resume, before yielding
-        // the main run loop to Apple preroll. Even a parked clock must finish.
-        let start = ContinuousClock.now
-        audio.close()
-        #expect(start.duration(to: .now) < .seconds(14))
-    }
-
-    @Test
-    func `explicit device uses PCM without affecting another compressed player`() async throws {
-        let compressed = try Session(options: [
-            "audio-spdif": "ac3,eac3",
-            "loop-file": "inf",
-        ])
-        defer { compressed.close() }
-        let devices = compressed.node("audio-device-list")
-        guard case let .array(entries) = devices else {
-            Issue.record("Audio device list unavailable")
-            return
-        }
-        let names = entries.compactMap { entry -> String? in
-            guard case let .map(values) = entry, case let .string(name) = values["name"],
-                  name.hasPrefix("avfoundation/"), name != "avfoundation/"
-            else { return nil }
-            return name
-        }
-        let device = try #require(names.first, "This test needs an explicit AVFoundation output device.")
-        let routed = try Session(options: ["audio-spdif": "ac3,eac3", "audio-device": device])
-        defer { routed.close() }
-        try await compressed.load(TestPaths.testMedia("audio-ac3-stereo.mka"))
-        try await compressed.wait("first compressed player clock") {
-            compressed.string("audio-out-params/format") == "spdif-ac3"
-                && compressed.number("audio-pts") > 0.2
-                && compressed.nativeClockStarts > 0
-        }
-        try await routed.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
-        try await routed.wait("explicit device PCM routing") {
-            routed.string("current-ao") == "avfoundation" && routed.number("audio-pts") > 0.2
-        }
-        #expect(!routed.string("audio-out-params/format").contains("spdif"))
-        #expect(routed.string("audio-device") == device)
-        try await compressed.wait("independent compressed player") {
-            compressed.string("audio-out-params/format") == "spdif-ac3"
-                && compressed.number("audio-pts") > 0.2
-        }
-        try await compressed.wait("compressed output reopens across the first loop boundary") {
-            compressed.nativeClockStarts >= 2
-                && compressed.string("audio-out-params/format") == "spdif-ac3"
-                && compressed.number("audio-pts") > 0.2
-        }
-        let clock = compressed.number("audio-pts")
-        try await compressed.wait("concurrent compressed clock continues") {
-            let now = compressed.number("audio-pts")
-            return now > clock + 0.2 || (clock > 5 && now < clock - 1)
-        }
-        #expect(compressed.string("audio-out-params/format") == "spdif-ac3")
-        #expect(!compressed.logs.lowercased().contains("falling back to pcm"), "\(compressed.logs)")
-    }
 
     @MainActor
     private final class Session {
-        private var handle: OpaquePointer?
+
         var eof = false
         var logs = ""
+        private var handle: OpaquePointer?
+
         var nativeClockStarts: Int {
             logs.components(separatedBy: "native compressed clock started at").count - 1
         }
@@ -381,6 +81,7 @@ struct MPVNativeAudioIntegrationTests {
             // Software volume cannot be assumed to mute an IEC 61937 stream.
             // Mute the real sink before allowing it to start playback.
             try set("ao-mute", "yes")
+
             #expect(string("ao-mute") == "yes")
             if resume {
                 try set("pause", "no")
@@ -415,6 +116,7 @@ struct MPVNativeAudioIntegrationTests {
                 if event.pointee.event_id == MPV_EVENT_END_FILE, let data = event.pointee.data {
                     let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
                     eof = end.reason == MPV_END_FILE_REASON_EOF
+
                     #expect(end.reason != MPV_END_FILE_REASON_ERROR, "Native audio failed: \(logs)")
                 }
             }
@@ -451,11 +153,343 @@ struct MPVNativeAudioIntegrationTests {
             }
             let paused = number("time-pos")
             try await Task.sleep(for: .milliseconds(150))
+
             #expect(abs(number("time-pos") - paused) < 0.1)
             try command(["seek", String(destination), "absolute+exact"])
             try await wait("paused seek") { abs(self.number("time-pos") - destination) < 0.15 }
+
             #expect(string("pause") == "yes")
         }
+    }
+
+    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
+    func `public audio configuration reaches Apple without a video view`(
+        decoding: MPVAudioConfiguration.DolbyDecoding,
+        spatialization: MPVAudioConfiguration.Spatialization
+    ) async throws {
+        let player = MPVPlayer(configuration: .init(
+            audio: .init(dolbyDecoding: decoding, spatialization: spatialization),
+            autoPlay: false,
+            logLevel: .verbose,
+            volume: 0
+        ))
+        defer { player.stop() }
+        player.setDiagnosticsEnabled(true)
+
+        #expect(!player.hasActiveRenderSurface)
+        var sinkMuted = false
+        var logs: [String] = []
+        var completed = false
+        player.logHandler = { message in
+            logs.append("[\(message.prefix)] \(message.message)")
+            if message.message.contains("AUDIO_AUDIT_MUTED=yes") {
+                sinkMuted = true
+            }
+        }
+        defer {
+            if !completed {
+                print(
+                    """
+                    Public audio audit: state=\(player.state) position=\(player.position) \
+                    error=\(String(describing: player.lastError)) audio=\(player.playbackDiagnostics.audio)
+                    """
+                )
+                print(logs.suffix(100).joined(separator: "\n"))
+            }
+        }
+        player.setMuted(true)
+        try player.load(TestPaths.testMedia("audio-eac3-5.1.mka"))
+        try await eventually("public player native audio initialized") {
+            player.playbackDiagnostics.audio.output == "avfoundation"
+                && player.playbackDiagnostics.audio.nativePath != nil
+        }
+        // Mute the actual sink before starting compressed audio, then verify
+        // the public command reached it without changing video backends.
+        player.setProperty("ao-mute", to: "yes")
+        player.command("expand-properties", arguments: ["print-text", "AUDIO_AUDIT_MUTED=${ao-mute}"])
+        try await eventually("native sink muted") { sinkMuted }
+        player.play()
+        try await eventually("public audio playback and spatialization observations") {
+            player.position.seconds > 0.2
+                && player.playbackDiagnostics.audio.allowsStereoSpatialization != nil
+                && player.playbackDiagnostics.audio.allowsMultichannelSpatialization != nil
+        }
+        let audio = player.playbackDiagnostics.audio
+
+        #expect(audio.nativePath == (decoding == .automatic ? "avplayer" : "sample-buffer"))
+        #expect(audio.outputFormat?.contains("spdif") == (decoding == .automatic))
+        #expect(audio.sourceChannels?.contains("5.1") == true)
+        #expect(audio.allowsStereoSpatialization == (spatialization == .automatic))
+        #expect(audio.allowsMultichannelSpatialization == (spatialization != .disabled))
+
+        let firstPosition = player.position
+        try await eventually("public audio clock continues after input drains") {
+            player.position > firstPosition + .milliseconds(400)
+        }
+        player.pause()
+        try await eventually("public audio paused") { player.state == .paused && player.isPaused }
+        let seekPosition = player.position + .seconds(1)
+        player.seek(by: .seconds(1))
+        try await eventually("relative audio seek uses the current native clock") {
+            player.state == .paused && abs(player.position.seconds - seekPosition.seconds) < 0.2
+        }
+
+        player.setPlaybackRate(1.25)
+        player.play()
+        try await eventually("public rate request uses PCM") {
+            player.playbackDiagnostics.audio.nativePath == "sample-buffer"
+                && player.playbackDiagnostics.audio.outputFormat?.contains("spdif") == false
+        }
+
+        #expect(player.videoOutput == .sampleBuffer)
+        #expect(player.lastError == nil)
+        #expect(player.playbackDiagnostics.audio.allowsStereoSpatialization == (spatialization == .automatic))
+        #expect(player.playbackDiagnostics.audio.allowsMultichannelSpatialization == (spatialization != .disabled))
+        #expect(player.lastError == nil)
+        completed = true
+    }
+
+    @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, ["ac3", "eac3"])
+    func `configured Dolby policy preserves surround source layout`(
+        policy: MPVAudioConfiguration.DolbyDecoding,
+        codec: String
+    ) async throws {
+        let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-\(codec)-5.1.mka"))
+        try await audio.wait("surround audio starts") { audio.number("audio-pts") > 0.2 }
+
+        #expect(audio.number("current-tracks/audio/demux-channel-count") == 6)
+        let native = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+        #expect(native["allows-multichannel"] == .bool(true))
+        if policy == .automatic {
+            #expect(native["path"] == .string("avplayer"))
+            #expect(audio.string("audio-out-params/format") == "spdif-\(codec)")
+        } else {
+            #expect(native["path"] == .string("sample-buffer"))
+            #expect(audio.number("audio-out-params/channel-count") == 6)
+            #expect(!audio.string("audio-out-params/format").contains("spdif"))
+        }
+    }
+
+    @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "5.1", "7.1"])
+    func `PCM keeps speaker layouts and reads back Apple spatialization policy`(policy: String, layout: String) async throws {
+        let audio = try Session(options: ["ao-avfoundation-spatial-audio": policy])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-pcm-\(layout).mka"))
+        try await audio.wait("PCM native renderer") { audio.number("audio-pts") > 0.2 }
+
+        let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+        #expect(fields["path"] == .string("sample-buffer"))
+        #expect(fields["allows-stereo"] == .bool(policy == "all"))
+        #expect(fields["allows-multichannel"] == .bool(policy != "no"))
+        #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
+        let count = ["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout]!
+
+        #expect(audio.number("audio-out-params/channel-count") == count)
+    }
+
+    @Test(arguments: ["all", "multichannel", "no"], ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
+    func `Dolby item spatialization survives seek recreation`(policy: String, fixture: String) async throws {
+        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "ao-avfoundation-spatial-audio": policy])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia(fixture))
+        try await audio.wait("native Dolby item") { audio.number("audio-pts") > 0.2 }
+        for seek in [false, true] {
+            if seek {
+                let starts = audio.nativeClockStarts
+                try await audio.pauseAndSeek(to: 1.5)
+                try audio.set("pause", "no")
+                try await audio.wait("recreated native Dolby item") {
+                    audio.nativeClockStarts > starts && audio.number("audio-pts") > 1.7
+                }
+            }
+
+            let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+            #expect(fields["path"] == .string("avplayer"))
+            #expect(fields["allows-stereo"] == .bool(policy == "all"))
+            #expect(fields["allows-multichannel"] == .bool(policy != "no"))
+        }
+    }
+
+    @Test(arguments: ["speed", "pitch", "volume", "af"], [false, true])
+    func `Dolby recovers to PCM for audio processing`(option: String, duringPlayback: Bool) async throws {
+        let value = option == "volume" ? "150" : option == "af" ? "lavfi=[volume=0.5]" : "1.25"
+        var options = ["audio-spdif": "ac3,eac3"]
+        if !duringPlayback {
+            options[option] = value
+        }
+        // Muted even when amplification is the setting under test.
+        options["mute"] = "yes"
+        let audio = try Session(options: options)
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
+        var previousPosition: Double?
+        if duringPlayback {
+            try await audio.wait("compressed start") { audio.nativeClockStarts > 0 }
+            previousPosition = audio.number("time-pos")
+            try audio.set(option, value)
+        }
+        try await audio.wait("processing uses spatializable PCM") {
+            audio.string("current-ao") == "avfoundation"
+                && !audio.string("audio-out-params/format").contains("spdif")
+                && audio.number("audio-pts") > 0.2
+        }
+
+        #expect(audio.node("avfoundation-audio-spatialization")?.mapValue?["allows-stereo"] == .bool(true))
+        if let previousPosition {
+            #expect(
+                abs(audio.number("time-pos") - previousPosition) < 2,
+                "PCM recovery must resume near the audible position, not the buffered read head"
+            )
+        }
+    }
+
+    @Test
+    func `pcm keeps default buffering and supports transport`() async throws {
+        let audio = try Session()
+        defer { audio.close() }
+
+        #expect(audio.string("options/ao-avfoundation-max-lookahead") == "0.000000"
+            || audio.number("options/ao-avfoundation-max-lookahead") == 0)
+        try await audio.load(TestPaths.baselineMedia)
+        try await audio.wait("PCM output and advancing audio clock") {
+            audio.string("current-ao") == "avfoundation" && audio.number("audio-pts") > 0.25
+        }
+
+        #expect(!audio.string("audio-out-params/format").contains("spdif"))
+        try await audio.pauseAndSeek(to: 0.6)
+        try audio.set("pause", "no")
+        try await audio.wait("PCM EOF") { audio.eof }
+    }
+
+    @Test(arguments: ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
+    func `compressed transport and EOF`(_ fixture: String) async throws {
+        let audio = try Session(options: [
+            "audio-spdif": "ac3,eac3",
+        ])
+        let format = fixture.contains("eac3") ? "spdif-eac3" : "spdif-ac3"
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia(fixture))
+        try await audio.wait("compressed output and advancing Apple audio clock") {
+            audio.string("current-ao") == "avfoundation"
+                && audio.string("audio-out-params/format") == format
+                && audio.number("audio-pts") > 0.3
+                && audio.nativeClockStarts > 0
+        }
+        let initialClockStarts = audio.nativeClockStarts
+        try await audio.pauseAndSeek(to: 1.5)
+        try audio.set("pause", "no")
+        try await audio.wait("compressed post-seek clock") {
+            audio.number("audio-pts") > 1.8 && audio.nativeClockStarts > initialClockStarts
+        }
+
+        #expect(audio.string("audio-out-params/format") == format)
+        let clock = audio.number("audio-pts")
+        try await audio.wait("continued compressed clock") { audio.number("audio-pts") > clock + 0.2 }
+
+        #expect(audio.string("audio-out-params/format") == format)
+        let postSeekClockStarts = audio.nativeClockStarts
+        try audio.command(["seek", "5", "absolute+exact"])
+        try await audio.wait("compressed output near EOF") {
+            audio.number("audio-pts") > 5.1 && audio.nativeClockStarts > postSeekClockStarts
+        }
+
+        #expect(audio.string("audio-out-params/format") == format)
+        try await audio.wait("compressed EOF") { audio.eof }
+
+        #expect(audio.logs.contains("native compressed audio drained at"), "\(audio.logs)")
+        #expect(!audio.logs.lowercased().contains("falling back to pcm"), "\(audio.logs)")
+    }
+
+    @Test(arguments: ["audio-ac3-5.1.mka", "audio-eac3-5.1.mka"])
+    func `compressed bounded stream drains at natural EOF`(_ fixture: String) async throws {
+        let audio = try Session(options: ["audio-spdif": "ac3,eac3"])
+        defer { audio.close() }
+        let format = fixture.contains("eac3") ? "spdif-eac3" : "spdif-ac3"
+        try await audio.load(TestPaths.testMedia(fixture))
+        try await audio.wait("bounded stream starts on Apple's clock") {
+            audio.string("audio-out-params/format") == format && audio.nativeClockStarts > 0
+                && audio.logs.contains("(bounded stream)")
+        }
+        let began = ContinuousClock.now
+        try await audio.wait("bounded compressed stream reaches natural EOF", timeout: 35) {
+            audio.eof
+        }
+        // The complete24-second stream must stay alive beyond queued input EOF.
+
+        #expect(began.duration(to: .now) > .seconds(20))
+        #expect(audio.logs.contains("native compressed audio drained at"), "\(audio.logs)")
+        #expect(!audio.logs.lowercased().contains("falling back to pcm"), "\(audio.logs)")
+    }
+
+    @Test(arguments: [false, true])
+    func `compressed close during startup is bounded`(paused: Bool) async throws {
+        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "gapless-audio": "yes"])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-ac3-stereo.mka"), resume: !paused)
+
+        #expect(audio.string("audio-out-params/format") == "spdif-ac3")
+        // Close synchronously just after initialization/resume, before yielding
+        // the main run loop to Apple preroll. Even a parked clock must finish.
+        let start = ContinuousClock.now
+        audio.close()
+
+        #expect(start.duration(to: .now) < .seconds(14))
+    }
+
+    @Test
+    func `explicit device uses PCM without affecting another compressed player`() async throws {
+        let compressed = try Session(options: [
+            "audio-spdif": "ac3,eac3",
+            "loop-file": "inf",
+        ])
+        defer { compressed.close() }
+        let devices = compressed.node("audio-device-list")
+        guard case let .array(entries) = devices else {
+            Issue.record("Audio device list unavailable")
+            return
+        }
+        let names = entries.compactMap { entry -> String? in
+            guard case let .map(values) = entry, case let .string(name) = values["name"],
+                  name.hasPrefix("avfoundation/"), name != "avfoundation/"
+            else { return nil }
+            return name
+        }
+
+        let device = try #require(names.first, "This test needs an explicit AVFoundation output device.")
+        let routed = try Session(options: ["audio-spdif": "ac3,eac3", "audio-device": device])
+        defer { routed.close() }
+        try await compressed.load(TestPaths.testMedia("audio-ac3-stereo.mka"))
+        try await compressed.wait("first compressed player clock") {
+            compressed.string("audio-out-params/format") == "spdif-ac3"
+                && compressed.number("audio-pts") > 0.2
+                && compressed.nativeClockStarts > 0
+        }
+        try await routed.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
+        try await routed.wait("explicit device PCM routing") {
+            routed.string("current-ao") == "avfoundation" && routed.number("audio-pts") > 0.2
+        }
+
+        #expect(!routed.string("audio-out-params/format").contains("spdif"))
+        #expect(routed.string("audio-device") == device)
+        try await compressed.wait("independent compressed player") {
+            compressed.string("audio-out-params/format") == "spdif-ac3"
+                && compressed.number("audio-pts") > 0.2
+        }
+        try await compressed.wait("compressed output reopens across the first loop boundary") {
+            compressed.nativeClockStarts >= 2
+                && compressed.string("audio-out-params/format") == "spdif-ac3"
+                && compressed.number("audio-pts") > 0.2
+        }
+        let clock = compressed.number("audio-pts")
+        try await compressed.wait("concurrent compressed clock continues") {
+            let now = compressed.number("audio-pts")
+            return now > clock + 0.2 || (clock > 5 && now < clock - 1)
+        }
+
+        #expect(compressed.string("audio-out-params/format") == "spdif-ac3")
+        #expect(!compressed.logs.lowercased().contains("falling back to pcm"), "\(compressed.logs)")
     }
 }
 #endif

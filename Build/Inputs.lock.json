@@ -1,763 +1,1021 @@
 {
-  "contracts": {
-    "macOSSwiftMember": "swift.o",
-    "minimumMPVBytes": 1048576,
-    "mpvDefinitions": [
-      "_audio_out_avfoundation",
-      "_mp_property_external_surface_size",
-      "_ra_ctx_vulkan_moltenvk",
-      "_sub_get_text_snapshot",
-      "_video_out_avfoundation"
-    ],
-    "mpvMembers": [
-      "audio_out_ao_avfoundation.m.o",
-      "options_options.c.o",
-      "player_command.c.o",
-      "sub_dec_sub.c.o",
-      "video_out_vulkan_context.c.o",
-      "video_out_vulkan_context_moltenvk.m.o",
-      "video_out_vo_avfoundation.m.o"
-    ],
-    "mpvReferences": [
-      "_pl_gpu_finish"
-    ],
-    "mpvStrings": [
-      "external-surface-size",
-      "moltenvk",
-      "sub-text-intercept",
-      "sub-text-snapshot",
-      "MoltenVK resize to %dx%d failed; restored %dx%d",
-      "pip-composite-osd",
-      "queue-lead-ms",
-      "AVFoundation AVSampleBufferDisplayLayer",
-      "compressed-lead",
-      "accept-compressed",
-      "native-dovi-profile7",
-      "Hardware decoding recovered after %d errors.",
-      "sub-text-cues",
-      "webp_anim"
-    ]
-  },
-  "dependencies": [
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
+  "android": {
+    "archives": {
+      "curl": {
+        "sha256": "d9b327997999045a24cda50f3983e69e51c516bd8be6ef9842fc7f99135e33bb",
+        "url": "https://curl.se/download/curl-8.21.0.tar.gz"
+      },
+      "fontconfig": {
+        "sha256": "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3",
+        "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/2.18.3/fontconfig-2.18.3.tar.gz"
+      },
+      "fribidi": {
+        "sha256": "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c",
+        "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz"
+      },
+      "harfbuzz": {
+        "sha256": "2357ed966c6ced7bfa720b0640c0231065af01158fbea215093ffa15aed44371",
+        "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.4.0/harfbuzz-14.4.0.tar.xz"
+      },
+      "libxml2": {
+        "sha256": "a569ee9c59eabb197a0d5047046d757ee14c86fb2d4a734555b633cb5584ad25",
+        "url": "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.15.4/libxml2-v2.15.4.tar.gz"
+      },
+      "lua": {
+        "sha256": "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
+        "url": "https://www.lua.org/ftp/lua-5.2.4.tar.gz"
+      },
+      "mbedtls": {
+        "sha256": "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6",
+        "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2"
+      },
+      "unibreak": {
+        "sha256": "9c4fad6e517338a098373acc9f35579ae2c325e6446666fb9ac2666ba15ceba4",
+        "url": "https://github.com/adah1972/libunibreak/releases/download/libunibreak_8_0/libunibreak-8.0.tar.gz"
+      }
+    },
+    "git": {
+      "dav1d": {
+        "commit": "9711965b60bb692ae24004659acf61f5c7d9ed61",
+        "url": "https://github.com/videolan/dav1d"
+      },
+      "freetype2": {
+        "commit": "0a0221a1347e2f1e07c395263540026e9a0aa7c7",
+        "url": "https://gitlab.freedesktop.org/freetype/freetype.git"
+      },
+      "libass": {
+        "commit": "f61db567e6593df3470e91594bcd4ad2d0473aff",
+        "url": "https://github.com/libass/libass"
+      },
+      "libdovi": {
+        "commit": "4fd2b2235c9f93582dd4a00e65ee34a07800afd7",
+        "url": "https://github.com/quietvoid/dovi_tool.git"
+      },
+      "libplacebo": {
+        "commit": "e2972fdd09adacd383656738d7d280f0cd84a761",
+        "patches": [
+          {
+            "id": "0007-libplacebo-yuv-target",
+            "path": "Build/Android/Patches/0007-libplacebo-yuv-target.patch",
+            "sha256": "312fa70885aa011ca3465427f4e340d66625fdcc53add04c91dd59234bdbc214"
+          }
+        ],
+        "url": "https://github.com/haasn/libplacebo"
+      }
+    },
+    "minimumAPI": 36,
+    "recipe": "fdf74f6830c47dbaa8a22ac79726e8303f1db5af",
+    "swift": {
+      "abis": [
+        "arm64-v8a",
+        "x86_64"
       ],
-      "id": "openssl",
-      "kind": "prebuilt-sdk",
-      "runtime": [
+      "compiler": {
+        "darwin": {
+          "files": {
+            "swift-driver": "146ec69292cf88255896ef605b11e6ef73742fd21481902d8862dde3ea158cd9",
+            "swift-frontend": "ffebe538a7cfc15bace5596208405a9e5e7a6920108a29867f5371fd175a8e7c"
+          },
+          "url": "https://download.swift.org/swift-6.4.1-release/xcode/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE-osx.pkg"
+        }
+      },
+      "licenses": {
+        "swift-corelibs-foundation/LICENSE": {
+          "sha256": "0ca84095d1de77cad1a866ebbad28f8db98a0826c6055d92b0608c5baa1643e2",
+          "url": "https://raw.githubusercontent.com/swiftlang/swift-corelibs-foundation/swift-6.4.1-RELEASE/LICENSE"
+        },
+        "swift-corelibs-libdispatch/LICENSE": {
+          "sha256": "0ca84095d1de77cad1a866ebbad28f8db98a0826c6055d92b0608c5baa1643e2",
+          "url": "https://raw.githubusercontent.com/swiftlang/swift-corelibs-libdispatch/swift-6.4.1-RELEASE/LICENSE"
+        },
+        "swift-foundation-icu/ICU-LICENSE.txt": {
+          "sha256": "01edac20612b1e590c1c1cfb02b7218c6adc7b0a944eda7a1e03aeee10725aed",
+          "url": "https://raw.githubusercontent.com/unicode-org/icu/release-76-1/LICENSE"
+        },
+        "swift-foundation-icu/LICENSE.txt": {
+          "sha256": "2245a990b635558be210fb3eb4f8a6f7a49aebc0fefbf5859146a65ddc7ddcf3",
+          "url": "https://raw.githubusercontent.com/swiftlang/swift-foundation-icu/swift-6.4.1-RELEASE/LICENSE.md"
+        },
+        "swift-foundation/LICENSE.txt": {
+          "sha256": "2245a990b635558be210fb3eb4f8a6f7a49aebc0fefbf5859146a65ddc7ddcf3",
+          "url": "https://raw.githubusercontent.com/swiftlang/swift-foundation/swift-6.4.1-RELEASE/LICENSE.md"
+        },
+        "swift-foundation/NOTICE.txt": {
+          "sha256": "c2e757911b86a76230099804831d8d847a865e88b5912171627492a7a49f0456",
+          "url": "https://raw.githubusercontent.com/swiftlang/swift-foundation/swift-6.4.1-RELEASE/NOTICE.txt"
+        }
+      },
+      "runtime": {
+        "arm64-v8a": {
+          "libBlocksRuntime.so": "3c345b6b82894bf4abc29d52fd0209e6f33b251a8176c23bf232e2befe13f7b8",
+          "libFoundation.so": "95135e2a2cd72a1a46ce685f3b0b51f2faf93ebb0406fe4195c33ab36f1c0b1b",
+          "libFoundationEssentials.so": "8b05e7d0c51ce6f9575cba34862ba86192df93ff5fdaeee96163b6f4c810dc1a",
+          "libFoundationInternationalization.so": "ffa5517b3ffda71acea200cdc051f53022c9bbfdba727ddd6666747d9f8e5f20",
+          "libFoundationNetworking.so": "74b9713459facb6fb22198ea6bad8bdede439f8949dc42d85e49df516fee5c50",
+          "libFoundationXML.so": "f9c84cb9f65f19a4dc4dab0b18c52846e001af4aa1443d8e7f169ed36745287c",
+          "libTesting.so": "c45d4d0d1bb19d1df9969267ac4525d2bb8a3e05723b7687a3fb82502438c624",
+          "libXCTest.so": "c6dbe5a83f037794607d03cc8a209e9838d8b87e74754e4a85d84f91c17c9828",
+          "lib_FoundationICU.so": "ba1793edc8c16af89047462e8800150fce1ff34445e1ff2651b9fcb65d0f943b",
+          "lib_TestingInterop.so": "6dfd30a0785a3705eb5d09d1c6715dbb91b79247219b4dfc0db856e3f5227011",
+          "lib_Testing_Foundation.so": "49a70cf698bcdab9c987238063150476f7f49c2517afd316d242444a25439316",
+          "libdispatch.so": "fa6aa77793c1547ce41b1f0b247e4436fcf96b4e4e6384a5376d88c4ebcfcb8a",
+          "libswiftAndroid.so": "3b550b7e859f35d9e1e9a9d0255937a120e3c3bd98e2c8a8e576bcf1cc74b27e",
+          "libswiftCore.so": "03576f24bf480b6e6693f9e74f1e4e3195e5de86bff5b55c506323a1f5b6e152",
+          "libswiftDispatch.so": "4debba2a6a9f22da34a4b1bb39a63158175e97cb5b11e65e9c0abd8e3213f13e",
+          "libswiftDistributed.so": "9d09d28350d290873d5f96f6d4d2b11fefb01db2e0491b01527154e3973df457",
+          "libswiftObservation.so": "87e3cc8b31b1a09bd5d3a77818d7d1c0ee8aefd86faf2516dcf4f9c26eccb828",
+          "libswiftRegexBuilder.so": "098a8e0d548204b9385f38bbf9298dff626b3259095fb6b3df29c83ba60d617f",
+          "libswiftSwiftOnoneSupport.so": "85fd366e7c819bb73c85ce94d081e099e78df65c798ce666f6ca6c847c9e8226",
+          "libswiftSynchronization.so": "922bec1de66a021612f2e4e9183640e1823ab4b7a81391c0ee977385bf53b5dd",
+          "libswift_Builtin_float.so": "bdeb0553590d748b2a0516c333b5c8037189fd93606c3f00333e5d0a184751c4",
+          "libswift_Concurrency.so": "27472ac9124f367a83ea4d30d926e5dd83a07e9cbdaad4e4c8e97e4c45daf0dc",
+          "libswift_Differentiation.so": "2f92b0365bbe979c0358060d5e2e819b53228addf432445739c371e90f41306d",
+          "libswift_RegexParser.so": "2d6fdaa4c959198129db47a309e8a6084f5d0724aff3f2ddda66644a3886b39d",
+          "libswift_StringProcessing.so": "bbaf06168bb269d84fee67ca2bb1c6e0e98d50cc7ce81d966bb66a169201dd15",
+          "libswift_Volatile.so": "6a2812b01f341e9b7b00ae737095b79bb27613ea6d745b64c4a4d53bf27dc7cc",
+          "libswift_math.so": "c0bd4bb1257cb0872770bee7b8a72446e59fe8177aa26e365ac004e483af3ef5"
+        },
+        "x86_64": {
+          "libBlocksRuntime.so": "a563984c66d8be78e6039a73bcab263f41da5737fb1cf5e78e63543459c9efbc",
+          "libFoundation.so": "f657976356a0615c13fca5a6af9f952da346b940620c8b007b1324542b11de23",
+          "libFoundationEssentials.so": "faede8dc4f1c4814f7db125ec5182eaca3faa3f5d3ed1242c38a6b1f2b06bb7b",
+          "libFoundationInternationalization.so": "710ce806076ede6c3c03798614216bd490a1f4007ded39837ac26be054644bdd",
+          "libFoundationNetworking.so": "174001f73c49f637f0abea25b304d318c24118d3abd381f590aae36311e219cb",
+          "libFoundationXML.so": "a0e56d71730347f8b59c91ee61ad9032fc9a9562d0a290b99631e4d6c4451ccf",
+          "libTesting.so": "7b96c0190cc9e67a36687af21661327e017a6f09e815db07fc94b30b4355bea1",
+          "libXCTest.so": "7d4b37cb4052ab68f06c2f908a9d3943bdd6ffd4a5bef24b9b3221316b319c77",
+          "lib_FoundationICU.so": "ded8e2bef7866d0bb336fbd59b2546037975f29864b7b4ea1e3ff56454a8e667",
+          "lib_TestingInterop.so": "d2628e0ef7bafc1027da6050e5e375d973b1ced66b21a2603a06eb973816929a",
+          "lib_Testing_Foundation.so": "034b23b01d7bb3f384ae842259a40e0d2f0d9f6cedfe39f369a0b9e456bf7ba3",
+          "libdispatch.so": "1c35df5f37aaa80c13f2d10abeedc116467f2f6cad228301444e2ac923bb12d5",
+          "libswiftAndroid.so": "7ad6364e11c19b6972a3057ffedada71f9d286d0ba33c955d7894623129a863b",
+          "libswiftCore.so": "027b53654e9d77aef4b0bc6b12cd024f1adc0acd2fb4116a94ac2ad96aff7d02",
+          "libswiftDispatch.so": "b98af8513cdc8a9fbaacb54f746cd3e4b0026ab6f25bb5ec81e33402cc832b57",
+          "libswiftDistributed.so": "c02fa957e9a76a1a4b97197f99d14f3a45489e9c7306db0635da31325b9ca9c7",
+          "libswiftObservation.so": "dc4ac5644211ba17035d1aaf4a3432c4c6a3e2764de73bcc586558447edbff67",
+          "libswiftRegexBuilder.so": "c7a4425916b0e3341c9308e9382f06bdca9be8d1e777925711e259062ba830cf",
+          "libswiftSwiftOnoneSupport.so": "89490f564aac27834bd117e6fe08cd7ce9016ca005fdad3aea1fcc8fc6e52ec8",
+          "libswiftSynchronization.so": "9ad63d55531343fd2d40e3ae9852fb48f37cd238e6244d59975b368a4b0afcc1",
+          "libswift_Builtin_float.so": "40bc124e140d1f8350e618d388c48785fe26abe93e25fca978675fb78959ac41",
+          "libswift_Concurrency.so": "1b3217fccf11edeb3585da0a54fe58c54e4645b9315869c11b13e37dd0ac6ac7",
+          "libswift_Differentiation.so": "ec906aae54fe029cc7519bab3391d4ee77ac06324e1758ab1b8d5b7693654e9b",
+          "libswift_RegexParser.so": "cf83f07de652ee8fc243051a81db19ebd0e734532803c55eab32748c0008c323",
+          "libswift_StringProcessing.so": "2ec416f4235fbda2d21bb5f1f7ea7179337d3684e77efbd24ddb674d29dff579",
+          "libswift_Volatile.so": "8a2b9a3144221ce5bcaacdb9e7a19384eb405e37dea71dd44b5674651b0ebd61",
+          "libswift_math.so": "ba7036cf8e75defa7feaa78fd9cd8441cc9ec85b23713fa85a35eab3f9579eb3"
+        }
+      },
+      "sdk": "swift-6.4.1-RELEASE_android",
+      "sdkArchive": {
+        "sha256": "a356b79f8f1daa6ae3a66f4c556966ca20c0208b3659805cf30a83a0a31d6772",
+        "url": "https://download.swift.org/swift-6.4.1-release/android-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_android.artifactbundle.tar.gz"
+      },
+      "sdkFiles": {
+        "swift-resources/usr/share/swift/LICENSE.txt": "770af8291f708538d8ff885a0bbc4e045cd700531741c4f99528d435c14d7f55",
+        "swift-sdk.json": "36ac608b34584a21f7ea1a0f044a17e61ba88692a45b488ee906472a1729c9b9",
+        "swift-toolset.json": "0f9e3a784a4e60bf4c816460dae0ed64e0a723167af111fc05bac8a010b0e065"
+      },
+      "sdkResources": {
+        "arm64-v8a": "df7c88ce4a3affe3874410cd06d948347c2e0056509b86b900cbf170e5ef64f7",
+        "x86_64": "1d823b96b6c5aa2cc9e9b188773394ae6e8f10b4c2fc284a9f56a1b74bcb4e2e"
+      },
+      "version": "6.4.1"
+    },
+    "toolchain": {
+      "cargoC": "0.10.24+cargo-0.98.0",
+      "ndk": "30.0.16248370",
+      "rust": "1.95.0"
+    }
+  },
+  "apple": {
+    "contracts": {
+      "macOSSwiftMember": "swift.o",
+      "minimumMPVBytes": 1048576,
+      "mpvDefinitions": [
+        "_audio_out_avfoundation",
+        "_mp_property_external_surface_size",
+        "_ra_ctx_vulkan_moltenvk",
+        "_sub_get_text_snapshot",
+        "_video_out_avfoundation"
+      ],
+      "mpvMembers": [
+        "audio_out_ao_avfoundation.m.o",
+        "options_options.c.o",
+        "player_command.c.o",
+        "sub_dec_sub.c.o",
+        "video_out_vulkan_context.c.o",
+        "video_out_vulkan_context_moltenvk.m.o",
+        "video_out_vo_avfoundation.m.o"
+      ],
+      "mpvReferences": [
+        "_pl_gpu_finish"
+      ],
+      "mpvStrings": [
+        "external-surface-size",
+        "moltenvk",
+        "sub-text-intercept",
+        "sub-text-snapshot",
+        "MoltenVK resize to %dx%d failed; restored %dx%d",
+        "pip-composite-osd",
+        "queue-lead-ms",
+        "AVFoundation AVSampleBufferDisplayLayer",
+        "compressed-lead",
+        "accept-compressed",
+        "native-dovi-profile7",
+        "Hardware decoding recovered after %d errors.",
+        "sub-text-cues",
+        "webp_anim"
+      ]
+    },
+    "dependencies": [
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "openssl",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libcrypto",
+            "module": "Libcrypto",
+            "sha256": "593283be2a90f7fd66f6e6ed331b2f099cf403e0926fe3b4ac09a7062b793965",
+            "target": "Libcrypto",
+            "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libcrypto.xcframework.zip"
+          },
+          {
+            "framework": "Libssl",
+            "module": "Libssl",
+            "sha256": "ff5ffd43d015d7285fd37e4a3145b25cbd8d2842740bd629a711c299a20e226a",
+            "target": "Libssl",
+            "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libssl.xcframework.zip"
+          }
+        ],
+        "sha256": "8bc37424aa98fdeac17fd00fbeea7b784a39f1f800cc7f9e0c948d3b169c6f2f",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/openssl-all.zip",
+        "version": "3.3.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "gmp",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "gmp",
+            "module": "gmp",
+            "sha256": "ad33c7a08f4cdcb9924c8f0e6d9a054dad33d7794b97667bf8b6fb2b236ae585",
+            "target": "gmp",
+            "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gmp.xcframework.zip"
+          }
+        ],
+        "sha256": "cef5c3ff12260528a5971d2bd7bb3bc31ae85fac1235c06eff3de96c28c38aa2",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gmp-all.zip",
+        "version": "3.8.11"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "nettle",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "nettle",
+            "module": "nettle",
+            "sha256": "0fdf3ebf8bd7b8bc8eee837cf27261cb4c52ae520b6576a2f468656aa1691e02",
+            "target": "nettle",
+            "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/nettle.xcframework.zip"
+          },
+          {
+            "framework": "hogweed",
+            "module": "hogweed",
+            "sha256": "25727c9fa67287fa0a4f4722f88bb8be669b23cd7e837e2d00870eb8a25d3f27",
+            "target": "hogweed",
+            "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/hogweed.xcframework.zip"
+          }
+        ],
+        "sha256": "7c1606e5acdc0be563f5a6bb19cd2fe3e1e93b30154ac22fc2f80bffcf3151c2",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/nettle-all.zip",
+        "version": "3.8.11"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "gnutls",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "gnutls",
+            "module": "gnutls",
+            "sha256": "3dbec5809339189bf9679e218c6cff387ebf8fb72745927835afc2678f5c9f4d",
+            "target": "gnutls",
+            "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gnutls.xcframework.zip"
+          }
+        ],
+        "sha256": "6e125d9d7be4e09e112950703b0563324f5a05e546782e542b353db360f59b59",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gnutls-all.zip",
+        "version": "3.8.11"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libunibreak",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libunibreak",
+            "module": "Libunibreak",
+            "sha256": "940d9833cf4477d0a260d9f2b4066125bc0ff7bbc111ac3c90e774765b77a559",
+            "target": "Libunibreak",
+            "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libunibreak.xcframework.zip"
+          }
+        ],
+        "sha256": "a7a9c0afa36e2301eec583e5575c30c1609357045d718565d06faf93abc56617",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libunibreak-all.zip",
+        "version": "0.17.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libfreetype",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libfreetype",
+            "module": "Libfreetype",
+            "sha256": "496ca62488530e14b1e4624d20ee2b237c0bd675cd70c19da578a5768302d02d",
+            "target": "Libfreetype",
+            "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libfreetype.xcframework.zip"
+          }
+        ],
+        "sha256": "d5fb41dd3d66c6e433b389a398571b51b8d65f3f9e81f10ee61d5434a647749e",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libfreetype-all.zip",
+        "version": "0.17.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libfribidi",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libfribidi",
+            "module": "Libfribidi",
+            "sha256": "bc15e097b892f2f90424e4a27ba287070cc2f98a74a4da10e6d2481d15cf5ff9",
+            "target": "Libfribidi",
+            "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libfribidi.xcframework.zip"
+          }
+        ],
+        "sha256": "7ae8cf8c8b16a8b4ebc004f3368044d9baf8454398d18d9e8bc37964b04a2fe6",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libfribidi-all.zip",
+        "version": "0.17.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libharfbuzz",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libharfbuzz",
+            "module": "Libharfbuzz",
+            "sha256": "aa8e0b9ca0387dac74e3e93c86e34d11982bb013b28022d0e6966a8427a35b2e",
+            "target": "Libharfbuzz",
+            "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libharfbuzz.xcframework.zip"
+          }
+        ],
+        "sha256": "ff67179fb84a9a0f34b2ba276c4028823fecd90315cf18496be400cdfc768a3e",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libharfbuzz-all.zip",
+        "version": "0.17.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libass",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libass",
+            "module": "Libass",
+            "sha256": "3f4c576d2818ceb4544aa2a20e1f55846511c5e706fd19adc3ea9fd842270498",
+            "target": "Libass",
+            "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libass.xcframework.zip"
+          }
+        ],
+        "sha256": "d5e4b6046d0a4198fb97083816348b2229071749de8c429747a9558c325a1d3a",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libass-all.zip",
+        "version": "0.17.5"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libsmbclient",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libsmbclient",
+            "module": "Libsmbclient",
+            "sha256": "3a53375fab11bc888cc553664ea5dd902208d04f0cc21ec746302bf356246b6f",
+            "target": "Libsmbclient",
+            "url": "https://github.com/mpvkit/libsmbclient-build/releases/download/4.15.13-2512/Libsmbclient.xcframework.zip"
+          }
+        ],
+        "sha256": "6861f0b0e45abd3248a8160d1c0b4ede66eef5163f04598830883a951607cef9",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libsmbclient-build/releases/download/4.15.13-2512/libsmbclient-all.zip",
+        "version": "4.15.13-2512"
+      },
+      {
+        "consumers": [
+          "mpv"
+        ],
+        "id": "libbluray",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libbluray",
+            "module": "Libbluray",
+            "sha256": "bc037d34e2b0b5ab7f202fb371f5fb298136cc66fdf406c2172185d06f53f18d",
+            "target": "Libbluray",
+            "url": "https://github.com/mpvkit/libbluray-build/releases/download/1.4.0/Libbluray.xcframework.zip"
+          }
+        ],
+        "sha256": "c0302f43258ba41d9661dea0be4a7c9c1dd59d30d284ecfbf7319157c8e8a8de",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libbluray-build/releases/download/1.4.0/libbluray-all.zip",
+        "version": "1.4.0"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libuavs3d",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libuavs3d",
+            "module": "Libuavs3d",
+            "sha256": "bd5256081486d16c51c868d755bf70266c424b54c895269580de44ec6707f789",
+            "target": "Libuavs3d",
+            "url": "https://github.com/mpvkit/libuavs3d-build/releases/download/1.2.1-fix/Libuavs3d.xcframework.zip"
+          }
+        ],
+        "sha256": "8644c7a8182679dbe762b522356606220bb6d2196a5ec65511eda42ef48b3e7a",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libuavs3d-build/releases/download/1.2.1-fix/libuavs3d-all.zip",
+        "version": "1.2.1-fix"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libdovi",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libdovi",
+            "module": "Libdovi",
+            "sha256": "e693e239808350868e79c5448ef9f02e2716bc822dd8632a41a368a1eae5ca7d",
+            "target": "Libdovi",
+            "url": "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/Libdovi.xcframework.zip"
+          }
+        ],
+        "sha256": "81b85386016a012391c473674ef96e4e494fa76aef2f7b6c102a335e844644f8",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/libdovi-all.zip",
+        "version": "3.3.2"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "vulkan",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "MoltenVK",
+            "module": "MoltenVK",
+            "sha256": "aee189c54ad7c62bf734a3dc51eb4cfad5685d1d63b0ec519ecd1b437c332418",
+            "target": "MoltenVK",
+            "url": "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.2/MoltenVK.xcframework.zip"
+          }
+        ],
+        "sha256": "551bf9ee4e6fe1f9a148a6aef8eff5e5e6e0c0be9dedda2405812023d4a38c60",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.2/MoltenVK-all.zip",
+        "version": "1.4.2"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libshaderc",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libshaderc_combined",
+            "module": "Libshaderc_combined",
+            "sha256": "77a3d355993cf53843a394bf58262dab99cdd93f9e6fe31d5ca6e55b03866ce1",
+            "target": "Libshaderc_combined",
+            "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/Libshaderc_combined.xcframework.zip"
+          }
+        ],
+        "sha256": "d213fa58de7886846fb8cb713ea5213b77654a3ad2ba3d89b1f2fe367d945ba5",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/libshaderc-all.zip",
+        "version": "2026.1.0"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "lcms2",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "lcms2",
+            "module": "lcms2",
+            "sha256": "945a6fa36ad8b39cfb75603a84f375249bc382adde4eb8e9cfc70b8cb942312d",
+            "target": "lcms2",
+            "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2.xcframework.zip"
+          }
+        ],
+        "sha256": "a101ca23ce1686eed5e0154997994e50aefaceb5179ef2b55b4d2a798425ccac",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2-all.zip",
+        "version": "2.18.0"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libplacebo",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libplacebo",
+            "module": "Libplacebo",
+            "sha256": "2fa3d54cb81f302d6f11c7b2f509af30944381c3b11ee9d35096eb4637a6e2dd",
+            "target": "Libplacebo",
+            "url": "https://github.com/mpvkit/libplacebo-build/releases/download/7.360.1/Libplacebo.xcframework.zip"
+          }
+        ],
+        "sha256": "cdb8a07563bca119ca909ab4a3503825c27678736cdab294338b0a7dbe2cf35c",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libplacebo-build/releases/download/7.360.1/libplacebo-all.zip",
+        "version": "7.360.1"
+      },
+      {
+        "consumers": [
+          "ffmpeg",
+          "mpv"
+        ],
+        "id": "libdav1d",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libdav1d",
+            "module": "Libdav1d",
+            "sha256": "d1a32ae6a1f0193e9f05c44c9176844af7f6d2a58cb33843f6f1b8dfd9224083",
+            "target": "Libdav1d",
+            "url": "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.3/Libdav1d.xcframework.zip"
+          }
+        ],
+        "sha256": "5d9ca131372bc9513100dbc43a59582ad1cf7acf6136ad4e6fecd63dc0075d82",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.3/libdav1d-all.zip",
+        "version": "1.5.3"
+      },
+      {
+        "consumers": [
+          "mpv"
+        ],
+        "id": "libuchardet",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libuchardet",
+            "module": "Libuchardet",
+            "sha256": "ea4f548a230a755e059144657cc9e2ff563c1cdeae03974c38f8b6e1a40303fb",
+            "target": "Libuchardet",
+            "url": "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8/Libuchardet.xcframework.zip"
+          }
+        ],
+        "sha256": "21407ffd33ce5550f7adf0759c268ac3c8022a90f80b2a9a25e8273fd27814bb",
+        "slices": [
+          "ios",
+          "isimulator",
+          "maccatalyst",
+          "macos",
+          "tvos",
+          "tvsimulator",
+          "xros",
+          "xrsimulator"
+        ],
+        "url": "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8/libuchardet-all.zip",
+        "version": "0.0.8"
+      },
+      {
+        "consumers": [
+          "mpv"
+        ],
+        "id": "libluajit",
+        "kind": "prebuilt-sdk",
+        "runtime": [
+          {
+            "framework": "Libluajit",
+            "module": "Libluajit",
+            "sha256": "3a171ef1627fb88260893dc452f989bd93dd8510814771ba3aff7753470d3f3e",
+            "target": "Libluajit",
+            "url": "https://github.com/mpvkit/libluajit-build/releases/download/2.1.0-fix/Libluajit.xcframework.zip"
+          }
+        ],
+        "sha256": "15a2b0d2b013074cefcfacfcb9df4ea7e5624e76decdb7c3b0556c3068a2816b",
+        "slices": [
+          "macos"
+        ],
+        "url": "https://github.com/mpvkit/libluajit-build/releases/download/2.1.0-fix/libluajit-all.zip",
+        "version": "2.1.0-fix"
+      }
+    ],
+    "epochPolicy": "Pinned upstream recipe commit committer timestamp",
+    "features": {
+      "avfoundation": true,
+      "gpl": true,
+      "libraryOnly": true,
+      "moltenVK": true,
+      "videoToolbox": true
+    },
+    "metadataVersion": "1.0.0-mpvui.2",
+    "publication": {
+      "nativePrefix": "native-",
+      "repository": "LePips/MPVUI"
+    },
+    "recipeSource": {
+      "commit": "288527dffbc6d3e63cce147fc7b520c64a791603",
+      "ref": "1.0.0",
+      "url": "https://github.com/mpvkit/MPVKit.git"
+    },
+    "slices": [
+      {
+        "architectures": [
+          "arm64"
+        ],
+        "id": "ios",
+        "machOPlatform": 2,
+        "minimumOS": "16.0",
+        "platform": "ios",
+        "sdk": "iphoneos",
+        "variant": ""
+      },
+      {
+        "architectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "id": "isimulator",
+        "machOPlatform": 7,
+        "minimumOS": "16.0",
+        "platform": "ios",
+        "sdk": "iphonesimulator",
+        "variant": "simulator"
+      },
+      {
+        "architectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "id": "maccatalyst",
+        "machOPlatform": 6,
+        "minimumOS": "16.0",
+        "platform": "ios",
+        "sdk": "macosx",
+        "variant": "maccatalyst"
+      },
+      {
+        "architectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "id": "macos",
+        "machOPlatform": 1,
+        "minimumOS": "13.0",
+        "platform": "macos",
+        "sdk": "macosx",
+        "variant": ""
+      },
+      {
+        "architectures": [
+          "arm64"
+        ],
+        "id": "tvos",
+        "machOPlatform": 3,
+        "minimumOS": "16.0",
+        "platform": "tvos",
+        "sdk": "appletvos",
+        "variant": ""
+      },
+      {
+        "architectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "id": "tvsimulator",
+        "machOPlatform": 8,
+        "minimumOS": "16.0",
+        "platform": "tvos",
+        "sdk": "appletvsimulator",
+        "variant": "simulator"
+      },
+      {
+        "architectures": [
+          "arm64"
+        ],
+        "id": "xros",
+        "machOPlatform": 11,
+        "minimumOS": "1.0",
+        "platform": "xros",
+        "sdk": "xros",
+        "variant": ""
+      },
+      {
+        "architectures": [
+          "arm64"
+        ],
+        "id": "xrsimulator",
+        "machOPlatform": 12,
+        "minimumOS": "1.0",
+        "platform": "xros",
+        "sdk": "xrsimulator",
+        "variant": "simulator"
+      }
+    ],
+    "sourceDateEpoch": 1784974019,
+    "toolchain": {
+      "bootstrapAssets": [
         {
-          "framework": "Libcrypto",
-          "module": "Libcrypto",
-          "sha256": "593283be2a90f7fd66f6e6ed331b2f099cf403e0926fe3b4ac09a7062b793965",
-          "target": "Libcrypto",
-          "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libcrypto.xcframework.zip"
+          "id": "meson",
+          "kind": "wheel",
+          "sha256": "71f133147fa0fcfe8f4df49fa1045771064947834538409e5d97b3613aac8b4e",
+          "url": "https://files.pythonhosted.org/packages/07/68/b0117422eb0a46d9d8d9e328f0c5b5c835179bfc058688bca35c90c89eba/meson-1.12.0-py3-none-any.whl"
         },
         {
-          "framework": "Libssl",
-          "module": "Libssl",
-          "sha256": "ff5ffd43d015d7285fd37e4a3145b25cbd8d2842740bd629a711c299a20e226a",
-          "target": "Libssl",
-          "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/Libssl.xcframework.zip"
-        }
-      ],
-      "sha256": "8bc37424aa98fdeac17fd00fbeea7b784a39f1f800cc7f9e0c948d3b169c6f2f",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/openssl-build/releases/download/3.3.5/openssl-all.zip",
-      "version": "3.3.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "gmp",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "gmp",
-          "module": "gmp",
-          "sha256": "ad33c7a08f4cdcb9924c8f0e6d9a054dad33d7794b97667bf8b6fb2b236ae585",
-          "target": "gmp",
-          "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gmp.xcframework.zip"
-        }
-      ],
-      "sha256": "cef5c3ff12260528a5971d2bd7bb3bc31ae85fac1235c06eff3de96c28c38aa2",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gmp-all.zip",
-      "version": "3.8.11"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "nettle",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "nettle",
-          "module": "nettle",
-          "sha256": "0fdf3ebf8bd7b8bc8eee837cf27261cb4c52ae520b6576a2f468656aa1691e02",
-          "target": "nettle",
-          "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/nettle.xcframework.zip"
+          "id": "ninja",
+          "kind": "wheel",
+          "sha256": "fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b",
+          "url": "https://files.pythonhosted.org/packages/b5/b8/90a9518f2264637084d6199bc20c2f3fb97fefc4c474d277720150c3bd6d/ninja-1.13.2-py3-none-macosx_10_9_universal2.whl"
         },
         {
-          "framework": "hogweed",
-          "module": "hogweed",
-          "sha256": "25727c9fa67287fa0a4f4722f88bb8be669b23cd7e837e2d00870eb8a25d3f27",
-          "target": "hogweed",
-          "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/hogweed.xcframework.zip"
+          "id": "pkg-config",
+          "kind": "source-tar",
+          "sha256": "c88a653fbabfa2a5857a30f6b6ad6c40dbacc3b7c72cc066e5c7dc4571cbddaa",
+          "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-3.0.6.tar.xz"
         }
       ],
-      "sha256": "7c1606e5acdc0be563f5a6bb19cd2fe3e1e93b30154ac22fc2f80bffcf3151c2",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/nettle-all.zip",
-      "version": "3.8.11"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "gnutls",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "gnutls",
-          "module": "gnutls",
-          "sha256": "3dbec5809339189bf9679e218c6cff387ebf8fb72745927835afc2678f5c9f4d",
-          "target": "gnutls",
-          "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gnutls.xcframework.zip"
+      "sdks": {
+        "appletvos": {
+          "build": "24J360",
+          "version": "27.0"
+        },
+        "appletvsimulator": {
+          "build": "24J360",
+          "version": "27.0"
+        },
+        "iphoneos": {
+          "build": "24A430",
+          "version": "27.0"
+        },
+        "iphonesimulator": {
+          "build": "24A430",
+          "version": "27.0"
+        },
+        "macosx": {
+          "build": "26A425",
+          "version": "27.0"
+        },
+        "xros": {
+          "build": "24M361",
+          "version": "27.0"
+        },
+        "xrsimulator": {
+          "build": "24M361",
+          "version": "27.0"
         }
-      ],
-      "sha256": "6e125d9d7be4e09e112950703b0563324f5a05e546782e542b353db360f59b59",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/gnutls-build/releases/download/3.8.11/gnutls-all.zip",
-      "version": "3.8.11"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libunibreak",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libunibreak",
-          "module": "Libunibreak",
-          "sha256": "940d9833cf4477d0a260d9f2b4066125bc0ff7bbc111ac3c90e774765b77a559",
-          "target": "Libunibreak",
-          "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libunibreak.xcframework.zip"
-        }
-      ],
-      "sha256": "a7a9c0afa36e2301eec583e5575c30c1609357045d718565d06faf93abc56617",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libunibreak-all.zip",
-      "version": "0.17.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libfreetype",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libfreetype",
-          "module": "Libfreetype",
-          "sha256": "496ca62488530e14b1e4624d20ee2b237c0bd675cd70c19da578a5768302d02d",
-          "target": "Libfreetype",
-          "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libfreetype.xcframework.zip"
-        }
-      ],
-      "sha256": "d5fb41dd3d66c6e433b389a398571b51b8d65f3f9e81f10ee61d5434a647749e",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libfreetype-all.zip",
-      "version": "0.17.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libfribidi",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libfribidi",
-          "module": "Libfribidi",
-          "sha256": "bc15e097b892f2f90424e4a27ba287070cc2f98a74a4da10e6d2481d15cf5ff9",
-          "target": "Libfribidi",
-          "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libfribidi.xcframework.zip"
-        }
-      ],
-      "sha256": "7ae8cf8c8b16a8b4ebc004f3368044d9baf8454398d18d9e8bc37964b04a2fe6",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libfribidi-all.zip",
-      "version": "0.17.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libharfbuzz",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libharfbuzz",
-          "module": "Libharfbuzz",
-          "sha256": "aa8e0b9ca0387dac74e3e93c86e34d11982bb013b28022d0e6966a8427a35b2e",
-          "target": "Libharfbuzz",
-          "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libharfbuzz.xcframework.zip"
-        }
-      ],
-      "sha256": "ff67179fb84a9a0f34b2ba276c4028823fecd90315cf18496be400cdfc768a3e",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libharfbuzz-all.zip",
-      "version": "0.17.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libass",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libass",
-          "module": "Libass",
-          "sha256": "3f4c576d2818ceb4544aa2a20e1f55846511c5e706fd19adc3ea9fd842270498",
-          "target": "Libass",
-          "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/Libass.xcframework.zip"
-        }
-      ],
-      "sha256": "d5e4b6046d0a4198fb97083816348b2229071749de8c429747a9558c325a1d3a",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libass-build/releases/download/0.17.5/libass-all.zip",
-      "version": "0.17.5"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libsmbclient",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libsmbclient",
-          "module": "Libsmbclient",
-          "sha256": "3a53375fab11bc888cc553664ea5dd902208d04f0cc21ec746302bf356246b6f",
-          "target": "Libsmbclient",
-          "url": "https://github.com/mpvkit/libsmbclient-build/releases/download/4.15.13-2512/Libsmbclient.xcframework.zip"
-        }
-      ],
-      "sha256": "6861f0b0e45abd3248a8160d1c0b4ede66eef5163f04598830883a951607cef9",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libsmbclient-build/releases/download/4.15.13-2512/libsmbclient-all.zip",
-      "version": "4.15.13-2512"
-    },
-    {
-      "consumers": [
-        "mpv"
-      ],
-      "id": "libbluray",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libbluray",
-          "module": "Libbluray",
-          "sha256": "bc037d34e2b0b5ab7f202fb371f5fb298136cc66fdf406c2172185d06f53f18d",
-          "target": "Libbluray",
-          "url": "https://github.com/mpvkit/libbluray-build/releases/download/1.4.0/Libbluray.xcframework.zip"
-        }
-      ],
-      "sha256": "c0302f43258ba41d9661dea0be4a7c9c1dd59d30d284ecfbf7319157c8e8a8de",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libbluray-build/releases/download/1.4.0/libbluray-all.zip",
-      "version": "1.4.0"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libuavs3d",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libuavs3d",
-          "module": "Libuavs3d",
-          "sha256": "bd5256081486d16c51c868d755bf70266c424b54c895269580de44ec6707f789",
-          "target": "Libuavs3d",
-          "url": "https://github.com/mpvkit/libuavs3d-build/releases/download/1.2.1-fix/Libuavs3d.xcframework.zip"
-        }
-      ],
-      "sha256": "8644c7a8182679dbe762b522356606220bb6d2196a5ec65511eda42ef48b3e7a",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libuavs3d-build/releases/download/1.2.1-fix/libuavs3d-all.zip",
-      "version": "1.2.1-fix"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libdovi",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libdovi",
-          "module": "Libdovi",
-          "sha256": "e693e239808350868e79c5448ef9f02e2716bc822dd8632a41a368a1eae5ca7d",
-          "target": "Libdovi",
-          "url": "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/Libdovi.xcframework.zip"
-        }
-      ],
-      "sha256": "81b85386016a012391c473674ef96e4e494fa76aef2f7b6c102a335e844644f8",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libdovi-build/releases/download/3.3.2/libdovi-all.zip",
-      "version": "3.3.2"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "vulkan",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "MoltenVK",
-          "module": "MoltenVK",
-          "sha256": "aee189c54ad7c62bf734a3dc51eb4cfad5685d1d63b0ec519ecd1b437c332418",
-          "target": "MoltenVK",
-          "url": "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.2/MoltenVK.xcframework.zip"
-        }
-      ],
-      "sha256": "551bf9ee4e6fe1f9a148a6aef8eff5e5e6e0c0be9dedda2405812023d4a38c60",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/moltenvk-build/releases/download/1.4.2/MoltenVK-all.zip",
-      "version": "1.4.2"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libshaderc",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libshaderc_combined",
-          "module": "Libshaderc_combined",
-          "sha256": "77a3d355993cf53843a394bf58262dab99cdd93f9e6fe31d5ca6e55b03866ce1",
-          "target": "Libshaderc_combined",
-          "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/Libshaderc_combined.xcframework.zip"
-        }
-      ],
-      "sha256": "d213fa58de7886846fb8cb713ea5213b77654a3ad2ba3d89b1f2fe367d945ba5",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libshaderc-build/releases/download/2026.1.0/libshaderc-all.zip",
-      "version": "2026.1.0"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "lcms2",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "lcms2",
-          "module": "lcms2",
-          "sha256": "945a6fa36ad8b39cfb75603a84f375249bc382adde4eb8e9cfc70b8cb942312d",
-          "target": "lcms2",
-          "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2.xcframework.zip"
-        }
-      ],
-      "sha256": "a101ca23ce1686eed5e0154997994e50aefaceb5179ef2b55b4d2a798425ccac",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/lcms2-build/releases/download/2.18.0/lcms2-all.zip",
-      "version": "2.18.0"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libplacebo",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libplacebo",
-          "module": "Libplacebo",
-          "sha256": "2fa3d54cb81f302d6f11c7b2f509af30944381c3b11ee9d35096eb4637a6e2dd",
-          "target": "Libplacebo",
-          "url": "https://github.com/mpvkit/libplacebo-build/releases/download/7.360.1/Libplacebo.xcframework.zip"
-        }
-      ],
-      "sha256": "cdb8a07563bca119ca909ab4a3503825c27678736cdab294338b0a7dbe2cf35c",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libplacebo-build/releases/download/7.360.1/libplacebo-all.zip",
-      "version": "7.360.1"
-    },
-    {
-      "consumers": [
-        "ffmpeg",
-        "mpv"
-      ],
-      "id": "libdav1d",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libdav1d",
-          "module": "Libdav1d",
-          "sha256": "d1a32ae6a1f0193e9f05c44c9176844af7f6d2a58cb33843f6f1b8dfd9224083",
-          "target": "Libdav1d",
-          "url": "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.3/Libdav1d.xcframework.zip"
-        }
-      ],
-      "sha256": "5d9ca131372bc9513100dbc43a59582ad1cf7acf6136ad4e6fecd63dc0075d82",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libdav1d-build/releases/download/1.5.3/libdav1d-all.zip",
-      "version": "1.5.3"
-    },
-    {
-      "consumers": [
-        "mpv"
-      ],
-      "id": "libuchardet",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libuchardet",
-          "module": "Libuchardet",
-          "sha256": "ea4f548a230a755e059144657cc9e2ff563c1cdeae03974c38f8b6e1a40303fb",
-          "target": "Libuchardet",
-          "url": "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8/Libuchardet.xcframework.zip"
-        }
-      ],
-      "sha256": "21407ffd33ce5550f7adf0759c268ac3c8022a90f80b2a9a25e8273fd27814bb",
-      "slices": [
-        "ios",
-        "isimulator",
-        "maccatalyst",
-        "macos",
-        "tvos",
-        "tvsimulator",
-        "xros",
-        "xrsimulator"
-      ],
-      "url": "https://github.com/mpvkit/libuchardet-build/releases/download/0.0.8/libuchardet-all.zip",
-      "version": "0.0.8"
-    },
-    {
-      "consumers": [
-        "mpv"
-      ],
-      "id": "libluajit",
-      "kind": "prebuilt-sdk",
-      "runtime": [
-        {
-          "framework": "Libluajit",
-          "module": "Libluajit",
-          "sha256": "3a171ef1627fb88260893dc452f989bd93dd8510814771ba3aff7753470d3f3e",
-          "target": "Libluajit",
-          "url": "https://github.com/mpvkit/libluajit-build/releases/download/2.1.0-fix/Libluajit.xcframework.zip"
-        }
-      ],
-      "sha256": "15a2b0d2b013074cefcfacfcb9df4ea7e5624e76decdb7c3b0556c3068a2816b",
-      "slices": [
-        "macos"
-      ],
-      "url": "https://github.com/mpvkit/libluajit-build/releases/download/2.1.0-fix/libluajit-all.zip",
-      "version": "2.1.0-fix"
+      },
+      "tools": {
+        "gitMinimum": "2.39.0",
+        "glslc": "shaderc v2026.4 unknown hash, 2026-09-11\nspirv-tools v2026.4 v2022.4-1347-gef96ed76\nglslang 11.1.0-1566-ge1b562a8\n\nTarget: SPIR-V 1.0",
+        "make": "GNU Make 3.81",
+        "meson": "1.12.0",
+        "nasm": "NASM version 3.02",
+        "ninja": "1.13.2",
+        "pkg-config": "3.0.6",
+        "zip": "This is Zip 3.0 (July 5th 2008), by Info-ZIP, with modifications by Apple Inc."
+      },
+      "xcode": {
+        "build": "27A266a",
+        "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+        "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)",
+        "version": "27.0"
+      }
     }
-  ],
-  "epochPolicy": "Pinned upstream recipe commit committer timestamp",
-  "features": {
-    "avfoundation": true,
-    "gpl": true,
-    "libraryOnly": true,
-    "moltenVK": true,
-    "videoToolbox": true
   },
-  "metadataVersion": "1.0.0-mpvui.2",
-  "publication": {
-    "nativePrefix": "native-",
-    "repository": "LePips/MPVUI"
-  },
-  "recipeSource": {
-    "commit": "288527dffbc6d3e63cce147fc7b520c64a791603",
-    "ref": "1.0.0",
-    "url": "https://github.com/mpvkit/MPVKit.git"
-  },
-  "slices": [
-    {
-      "architectures": [
-        "arm64"
-      ],
-      "id": "ios",
-      "machOPlatform": 2,
-      "minimumOS": "16.0",
-      "platform": "ios",
-      "sdk": "iphoneos",
-      "variant": ""
-    },
-    {
-      "architectures": [
-        "arm64",
-        "x86_64"
-      ],
-      "id": "isimulator",
-      "machOPlatform": 7,
-      "minimumOS": "16.0",
-      "platform": "ios",
-      "sdk": "iphonesimulator",
-      "variant": "simulator"
-    },
-    {
-      "architectures": [
-        "arm64",
-        "x86_64"
-      ],
-      "id": "maccatalyst",
-      "machOPlatform": 6,
-      "minimumOS": "16.0",
-      "platform": "ios",
-      "sdk": "macosx",
-      "variant": "maccatalyst"
-    },
-    {
-      "architectures": [
-        "arm64",
-        "x86_64"
-      ],
-      "id": "macos",
-      "machOPlatform": 1,
-      "minimumOS": "13.0",
-      "platform": "macos",
-      "sdk": "macosx",
-      "variant": ""
-    },
-    {
-      "architectures": [
-        "arm64",
-        "arm64e"
-      ],
-      "id": "tvos",
-      "machOPlatform": 3,
-      "minimumOS": "16.0",
-      "platform": "tvos",
-      "sdk": "appletvos",
-      "variant": ""
-    },
-    {
-      "architectures": [
-        "arm64",
-        "x86_64"
-      ],
-      "id": "tvsimulator",
-      "machOPlatform": 8,
-      "minimumOS": "16.0",
-      "platform": "tvos",
-      "sdk": "appletvsimulator",
-      "variant": "simulator"
-    },
-    {
-      "architectures": [
-        "arm64"
-      ],
-      "id": "xros",
-      "machOPlatform": 11,
-      "minimumOS": "1.0",
-      "platform": "xros",
-      "sdk": "xros",
-      "variant": ""
-    },
-    {
-      "architectures": [
-        "arm64"
-      ],
-      "id": "xrsimulator",
-      "machOPlatform": 12,
-      "minimumOS": "1.0",
-      "platform": "xros",
-      "sdk": "xrsimulator",
-      "variant": "simulator"
-    }
-  ],
-  "sourceDateEpoch": 1784974019,
+  "schemaVersion": 1,
   "sources": [
     {
       "commit": "41f6a645068483470267271e1d09966ca3b9f413",
@@ -766,97 +1024,183 @@
         {
           "id": "0001-moltenvk-embedding",
           "path": "Build/Patches/mpv/0001-moltenvk-embedding.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "fa13203f09f23028ec9ea862ed2e822b4b0b1b38bb4bba36513098706271986a"
         },
         {
           "id": "0002-apple-audio-portability",
           "path": "Build/Patches/mpv/0002-apple-audio-portability.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "97809dfd274901c00c30c1c69ccb6151113f90dddd9c517155e6c98574949f8f"
         },
         {
           "id": "0003-text-subtitle-interception",
           "path": "Build/Patches/mpv/0003-text-subtitle-interception.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
           "sha256": "81407324ec8c4c66601f69bcd7ffcf3e9eb120decccc4c4da12a75b39f4dba71"
         },
         {
           "id": "0004-swift-object-build",
           "path": "Build/Patches/mpv/0004-swift-object-build.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "f37a88dbf5434dd39f7c4875ae070387fd82a43623b3dd044adb8f13c77dc997"
         },
         {
           "id": "0005-avfoundation-native-video",
           "path": "Build/Patches/mpv/0005-avfoundation-native-video.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "39b15236f9a19e3750df62eebc1b8399d71c71f9924dbedb675d5cfd53cfedbe"
         },
         {
           "id": "0006-avfoundation-compressed-audio",
           "path": "Build/Patches/mpv/0006-avfoundation-compressed-audio.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "798735b8255cd07039894915710f667dbdc5fedf0e76f70c491e15023011cc85"
         },
         {
           "id": "0007-native-dolby-vision-compatibility",
           "path": "Build/Patches/mpv/0007-native-dolby-vision-compatibility.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "6f3b39d09243d1f52f1294c3008c2bd19648151c1607c8bd33a669a82d343c07"
         },
         {
           "id": "0008-bounded-hardware-decoder-recovery",
           "path": "Build/Patches/mpv/0008-bounded-hardware-decoder-recovery.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "ef3c1b6f24aa8b2e1a45eb9c063ce0d06e639834afa51f7103c613301f36ecbb"
         },
         {
           "id": "0009-native-hdr-color-metadata",
           "path": "Build/Patches/mpv/0009-native-hdr-color-metadata.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "9a2c93bd3aa2ab1e567442ffddef5e693bc78b1bec575d0a6cfcf0f3c980b13b"
         },
         {
           "id": "0010-apple-rendering-quality",
           "path": "Build/Patches/mpv/0010-apple-rendering-quality.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "45eaadb0da9e689e5bee9c84d9df35c320c02691711d018744892a6b7c0e8140"
         },
         {
           "id": "0011-native-subtitle-image-cache",
           "path": "Build/Patches/mpv/0011-native-subtitle-image-cache.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "ea4c6c0114668b6b866f897df496290b258478fb335716a60c49f6448d6c11ef"
         },
         {
           "id": "0012-text-subtitle-queries",
           "path": "Build/Patches/mpv/0012-text-subtitle-queries.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
           "sha256": "b3a1cc80af98daa3ac55c89b5cbfbe4210b96199cca3b2e9d9fc8b298cad465e"
         },
         {
           "id": "0013-subtitle-roles",
           "path": "Build/Patches/mpv/0013-subtitle-roles.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
           "sha256": "4d69da025910a97d12bae4fe93cf2262171cb9062d01edc2d483613ad29a704a"
         },
         {
           "id": "0014-webp-animation-duration",
           "path": "Build/Patches/mpv/0014-webp-animation-duration.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
           "sha256": "e96d8d7afcfe15c49df2add4d3dc0a1684380d2420368b1c139b98e0ac8019d2"
         },
         {
           "id": "0015-apple-spatial-audio",
           "path": "Build/Patches/mpv/0015-apple-spatial-audio.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "2a19ffc239b4a9e72fc7e8c637a813e91b5cfbd7455663b6264792fdca59b2e2"
         },
         {
           "id": "0016-native-audio-clock-wakeup",
           "path": "Build/Patches/mpv/0016-native-audio-clock-wakeup.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "563615ef6c5ce8b81d065a9baeea89624e6371467c463029991096103d764fd2"
         },
         {
           "id": "0017-track-switch-buffering",
           "path": "Build/Patches/mpv/0017-track-switch-buffering.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "f3952cc333df592c417f223872b74cffbb9ddca48126d41fc8828ad988db44c0"
         },
         {
           "id": "0018-simulator-frame-upload",
           "path": "Build/Patches/mpv/0018-simulator-frame-upload.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "565a6df4532e53177f35ca9d1e42bed94962fca35887e7de76257966c8c6bf69"
+        },
+        {
+          "id": "0006-mpv-dovi-yuv",
+          "path": "Build/Android/Patches/0006-mpv-dovi-yuv.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "51246fbd3d52e5acceef205a1078a50e916bb80b75a31446b8c1194340b53e16"
+        },
+        {
+          "id": "0008-mpv-gles-bitmap-subtitles",
+          "path": "Build/Android/Patches/0008-mpv-gles-bitmap-subtitles.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "8f11248f5126d208365236451bdcf9a5f1130106d362de47cf9c8acbb1fa9bd4"
         },
         {
           "id": "0019-avfoundation-buffer-reuse-and-subtitle-compositing",
           "path": "Build/Patches/mpv/0019-avfoundation-buffer-reuse-and-subtitle-compositing.patch",
-          "sha256": "73b03e4d97cd54666a6df388f76d0a15edf100cee7e6fb2c298e37f9a1db935f"
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "ddc842647ce41c39906f354e1862e1406a9b97e6a87bcb91c36a3bd2af2acf1e"
+        },
+        {
+          "id": "0020-unavailable-pixel-aspect-ratio",
+          "path": "Build/Patches/mpv/0020-unavailable-pixel-aspect-ratio.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "b0052c925b4f1aef639cf6e455e7c78c9158498078c4c011bc939808692c8009"
         }
       ],
       "ref": "v0.41.0",
@@ -870,100 +1214,87 @@
         {
           "id": "0001-apple-pixelbuffer-compatibility",
           "path": "Build/Patches/ffmpeg/0001-apple-pixelbuffer-compatibility.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "bbdbc9f0973163468238ce87046b403939dc0eedd1194a547a1ce8b26f781512"
         },
         {
           "id": "0002-native-dolby-vision",
           "path": "Build/Patches/ffmpeg/0002-native-dolby-vision.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "fd30e2988265c0a189dc36b4855f227f2fecab95f4e7de4d04b99f9c307e7b41"
         },
         {
           "id": "0003-native-dolby-vision-compatibility",
           "path": "Build/Patches/ffmpeg/0003-native-dolby-vision-compatibility.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "ec615366ac3e7baabd7ce639afaf0083d3fc2c393c48bdc778be46ebde58a4fc"
         },
         {
           "id": "0004-hevc-diagnostic-levels",
           "path": "Build/Patches/ffmpeg/0004-hevc-diagnostic-levels.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "7ce3d2ad6f5c3b903f02254d320ac8036f57ca30b84a02fc05ac9ee59391efb1"
         },
         {
           "id": "0005-apple-dynamic-hdr-diagnostics",
           "path": "Build/Patches/ffmpeg/0005-apple-dynamic-hdr-diagnostics.patch",
+          "platforms": [
+            "apple"
+          ],
           "sha256": "15088a10676c4d3c4862e58e54be7902714f9040ed633b5ad8801851fdd5c026"
+        },
+        {
+          "id": "0001-mediacodec-dolby-vision",
+          "path": "Build/Android/Patches/0001-mediacodec-dolby-vision.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "23aee87e51ee6eaffb4e2bfe64a49be42ce94a4c362932930805115885cf93bd"
+        },
+        {
+          "id": "0002-mediacodec-stall-recovery",
+          "path": "Build/Android/Patches/0002-mediacodec-stall-recovery.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "114241c823b19ac4c94d3204f75399ef18fa3ab00e417b97beb098fefa2da9fb"
+        },
+        {
+          "id": "0003-mediacodec-inband-dolby-vision",
+          "path": "Build/Android/Patches/0003-mediacodec-inband-dolby-vision.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "f3e4a7ce0b8eaf39b81e2dddab4d64a3e47121aba309de9f8eb0d837bad5580b"
+        },
+        {
+          "id": "0004-mediacodec-profile7-compatibility",
+          "path": "Build/Android/Patches/0004-mediacodec-profile7-compatibility.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "d083982d5144b5e6c1d0dc0cbe527de2fea0099178dc3a56cc1cc3cc19d1593d"
+        },
+        {
+          "id": "0005-mediacodec-dovi-gpu",
+          "path": "Build/Android/Patches/0005-mediacodec-dovi-gpu.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "0c39b909cbafe39fb457a954a2100428f99ce685beed1b85842cd55553f35822"
         }
       ],
       "ref": "n9.0.2",
       "url": "https://github.com/FFmpeg/FFmpeg",
       "version": "9.0.2"
     }
-  ],
-  "toolchain": {
-    "bootstrapAssets": [
-      {
-        "id": "meson",
-        "kind": "wheel",
-        "sha256": "71f133147fa0fcfe8f4df49fa1045771064947834538409e5d97b3613aac8b4e",
-        "url": "https://files.pythonhosted.org/packages/07/68/b0117422eb0a46d9d8d9e328f0c5b5c835179bfc058688bca35c90c89eba/meson-1.12.0-py3-none-any.whl"
-      },
-      {
-        "id": "ninja",
-        "kind": "wheel",
-        "sha256": "fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b",
-        "url": "https://files.pythonhosted.org/packages/b5/b8/90a9518f2264637084d6199bc20c2f3fb97fefc4c474d277720150c3bd6d/ninja-1.13.2-py3-none-macosx_10_9_universal2.whl"
-      },
-      {
-        "id": "pkg-config",
-        "kind": "source-tar",
-        "sha256": "c88a653fbabfa2a5857a30f6b6ad6c40dbacc3b7c72cc066e5c7dc4571cbddaa",
-        "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-3.0.6.tar.xz"
-      }
-    ],
-    "sdks": {
-      "appletvos": {
-        "build": "24J360",
-        "version": "27.0"
-      },
-      "appletvsimulator": {
-        "build": "24J360",
-        "version": "27.0"
-      },
-      "iphoneos": {
-        "build": "24A430",
-        "version": "27.0"
-      },
-      "iphonesimulator": {
-        "build": "24A430",
-        "version": "27.0"
-      },
-      "macosx": {
-        "build": "26A425",
-        "version": "27.0"
-      },
-      "xros": {
-        "build": "24M361",
-        "version": "27.0"
-      },
-      "xrsimulator": {
-        "build": "24M361",
-        "version": "27.0"
-      }
-    },
-    "tools": {
-      "gitMinimum": "2.39.0",
-      "glslc": "shaderc v2026.4 unknown hash, 2026-09-11\nspirv-tools v2026.4 v2022.4-1347-gef96ed76\nglslang 11.1.0-1566-ge1b562a8\n\nTarget: SPIR-V 1.0",
-      "make": "GNU Make 3.81",
-      "nasm": "NASM version 3.02",
-      "meson": "1.12.0",
-      "ninja": "1.13.2",
-      "pkg-config": "3.0.6",
-      "zip": "This is Zip 3.0 (July 5th 2008), by Info-ZIP, with modifications by Apple Inc."
-    },
-    "xcode": {
-      "build": "27A266a",
-      "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
-      "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)",
-      "version": "27.0"
-    }
-  }
+  ]
 }

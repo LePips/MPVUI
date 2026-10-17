@@ -1,11 +1,47 @@
 #if os(macOS)
 import AppKit
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVPlaybackDiagnosticsIntegrationTests {
+
+    @MainActor
+    private final class DiagnosticHost {
+
+        let player: MPVPlayer
+        let surface: MPVPlatformVideoPlayer
+        let window: NSWindow
+
+        init(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) {
+            player = MPVPlayer(configuration: .init(
+                additionalOptions: ["ao": "null"],
+                autoPlay: false,
+                hardwareDecoding: hardwareDecoding,
+                logLevel: .none,
+                videoOutput: .sampleBuffer
+            ))
+            surface = MPVPlatformVideoPlayer(player: player)
+            window = NSWindow(
+                contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = surface
+            surface.layoutSubtreeIfNeeded()
+            surface.activateRenderingSurface()
+        }
+
+        func close() {
+            player.stop()
+            surface.detach()
+            window.contentView = nil
+        }
+    }
+
     @Test
     func `decoder diagnostics follow their player when the first player closes`() async throws {
         var first: DiagnosticHost? = DiagnosticHost(hardwareDecoding: .disabled)
@@ -29,6 +65,7 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+
         #expect(second.player.playbackDiagnostics.decoder.selectedDecoder == "videotoolbox")
         #expect(second.player.playbackDiagnostics.decoder.videoToolboxSessionUsesHardware != nil)
         #expect(first?.player.playbackDiagnostics.decoder.session == .software)
@@ -39,6 +76,7 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
         first?.close()
         first = nil
         second.player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .milliseconds(300))
+
         #expect(second.player.playbackDiagnostics.decoder.videoToolboxSessionUsesHardware == nil)
         for _ in 0 ..< 120 {
             if second.player.playbackDiagnostics.decoder.videoToolboxSessionUsesHardware != nil {
@@ -46,6 +84,7 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+
         #expect(second.player.playbackDiagnostics.decoder.selectedDecoder == "videotoolbox")
         #expect(second.player.playbackDiagnostics.decoder.videoToolboxSessionUsesHardware != nil)
         #expect(second.player.lastError == nil)
@@ -56,6 +95,7 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+
         #expect(second.player.playbackDiagnostics.seekLatencySeconds != nil)
         #expect(second.player.isPaused)
     }
@@ -72,7 +112,9 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
         let surface = MPVPlatformVideoPlayer(player: player)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
-            styleMask: [.titled], backing: .buffered, defer: false
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
         )
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
@@ -82,6 +124,7 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             surface.detach()
             window.contentView = nil
         }
+        player.setDiagnosticsEnabled(true)
         player.load(TestPaths.baselineMedia, autoPlay: false)
         for _ in 0 ..< 120 {
             if let statistics = player.playbackDiagnostics.nativeOutputStatistics,
@@ -96,11 +139,11 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         let observed = player.playbackDiagnostics
+
         let statistics = try #require(observed.nativeOutputStatistics)
         #expect((statistics.sampleBuildCount ?? 0) > 0)
         #expect((statistics.totalSampleBuildNanoseconds ?? 0) > 0)
         #expect(observed.freshRenderPasses == nil)
-        #expect(observed.frameCopyCount == nil)
         #expect(observed.startLatencySeconds != nil)
         if hardwareDecoding == .disabled {
             #expect((statistics.pixelBufferCopies ?? 0) > 0)
@@ -119,40 +162,10 @@ struct MPVPlaybackDiagnosticsIntegrationTests {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+
         #expect(player.playbackDiagnostics.seekLatencySeconds != nil)
         #expect(player.isPaused)
         #expect(player.lastError == nil)
-    }
-
-    @MainActor
-    private final class DiagnosticHost {
-        let player: MPVPlayer
-        let surface: MPVPlatformVideoPlayer
-        let window: NSWindow
-
-        init(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) {
-            player = MPVPlayer(configuration: .init(
-                additionalOptions: ["ao": "null"],
-                autoPlay: false,
-                hardwareDecoding: hardwareDecoding,
-                logLevel: .none,
-                videoOutput: .sampleBuffer
-            ))
-            surface = MPVPlatformVideoPlayer(player: player)
-            window = NSWindow(
-                contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
-                styleMask: [.titled], backing: .buffered, defer: false
-            )
-            window.contentView = surface
-            surface.layoutSubtreeIfNeeded()
-            surface.activateRenderingSurface()
-        }
-
-        func close() {
-            player.stop()
-            surface.detach()
-            window.contentView = nil
-        }
     }
 }
 #endif

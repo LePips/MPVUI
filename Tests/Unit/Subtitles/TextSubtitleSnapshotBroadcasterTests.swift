@@ -1,17 +1,21 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit, .subtitles))
 struct TextSubtitleSnapshotBroadcasterTests {
+
     @Test
     func `terminated broadcaster rejects future subscribers and publications`() async {
         let broadcaster = TextSubtitleSnapshotBroadcaster()
         var existing = broadcaster.subscribe().makeAsyncIterator()
+
         #expect(await existing.next() == TextSubtitleSnapshot())
         broadcaster.terminate()
         broadcaster.terminate()
         broadcaster.publish(TextSubtitleSnapshot(regions: [TextSubtitleRegion(text: "too late")]))
         var late = broadcaster.subscribe().makeAsyncIterator()
+
         #expect(await existing.next() == nil)
         #expect(await late.next() == nil)
     }
@@ -24,6 +28,7 @@ struct TextSubtitleSnapshotBroadcasterTests {
 
         let firstInitial = await first.next()
         let secondInitial = await second.next()
+
         #expect(firstInitial == TextSubtitleSnapshot())
         #expect(secondInitial == TextSubtitleSnapshot())
 
@@ -34,11 +39,13 @@ struct TextSubtitleSnapshotBroadcasterTests {
 
         let firstDisplayed = await first.next()
         let secondDisplayed = await second.next()
+
         #expect(firstDisplayed == displayed)
         #expect(secondDisplayed == displayed)
 
         var late = broadcaster.subscribe().makeAsyncIterator()
         let replayed = await late.next()
+
         #expect(replayed == displayed)
     }
 
@@ -53,6 +60,7 @@ struct TextSubtitleSnapshotBroadcasterTests {
         broadcaster.publish(newest)
 
         let delivered = await values.next()
+
         #expect(delivered == newest)
     }
 
@@ -67,22 +75,32 @@ struct TextSubtitleSnapshotBroadcasterTests {
         ])
         broadcaster.publish(displayed)
         let received = await values.next()
+
         #expect(received == displayed)
 
         broadcaster.terminate()
         let cleared = await values.next()
         let finished = await values.next()
+
         #expect(cleared == TextSubtitleSnapshot())
         #expect(finished == nil)
     }
 
     @Test
     @MainActor
-    func `player stream opts in and starts empty`() async {
+    func `player stream starts empty and interception is explicitly controlled`() async {
         let player = MPVPlayer()
-        var values = player.textSubtitleStream().makeAsyncIterator()
+        #expect(!player.isTextSubtitleInterceptionEnabled)
+        let stream = player.textSubtitleStream()
+        #expect(!player.isTextSubtitleInterceptionEnabled)
+        player.setTextSubtitleInterceptionEnabled(true)
+        #expect(player.isTextSubtitleInterceptionEnabled)
+        player.setTextSubtitleInterceptionEnabled(false)
+        #expect(!player.isTextSubtitleInterceptionEnabled)
+        var values = stream.makeAsyncIterator()
 
         let initial = await values.next()
+
         #expect(initial == TextSubtitleSnapshot())
         #expect(player.lastError == nil)
     }

@@ -1,9 +1,10 @@
 import CoreGraphics
 import Foundation
 import Metal
+import MPVCore
 
 /// Immutable CoreGraphics profiles can be shared with the engine queue.
-struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
+struct MPVRenderColorConfiguration: @unchecked Sendable {
 
     // MARK: - Boolean options
 
@@ -19,22 +20,6 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
     let layerColorSpace: CGColorSpace
     let pixelFormat: MTLPixelFormat
     let status: MPVRenderColorStatus
-
-    init(
-        iccIntent: MPVColorManagement.RenderingIntent,
-        layerColorSpace: CGColorSpace,
-        outputHeadroom: Double,
-        pixelFormat: MTLPixelFormat,
-        status: MPVRenderColorStatus,
-        usesExtendedDynamicRange: Bool
-    ) {
-        self.iccIntent = iccIntent
-        self.layerColorSpace = layerColorSpace
-        self.outputHeadroom = outputHeadroom
-        self.pixelFormat = pixelFormat
-        self.status = status
-        self.usesExtendedDynamicRange = usesExtendedDynamicRange
-    }
 
     /// All target settings are committed while the native renderer is suspended.
     /// Explicitly clear ICC state when automatic system conversion owns output.
@@ -62,13 +47,20 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
         ]
     }
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.usesExtendedDynamicRange == rhs.usesExtendedDynamicRange
-            && lhs.outputHeadroom == rhs.outputHeadroom
-            && lhs.status == rhs.status
-            && lhs.pixelFormat == rhs.pixelFormat
-            && lhs.iccIntent == rhs.iccIntent
-            && CFEqual(lhs.layerColorSpace, rhs.layerColorSpace)
+    init(
+        iccIntent: MPVColorManagement.RenderingIntent,
+        layerColorSpace: CGColorSpace,
+        outputHeadroom: Double,
+        pixelFormat: MTLPixelFormat,
+        status: MPVRenderColorStatus,
+        usesExtendedDynamicRange: Bool
+    ) {
+        self.iccIntent = iccIntent
+        self.layerColorSpace = layerColorSpace
+        self.outputHeadroom = outputHeadroom
+        self.pixelFormat = pixelFormat
+        self.status = status
+        self.usesExtendedDynamicRange = usesExtendedDynamicRange
     }
 
     static func resolve(
@@ -182,9 +174,22 @@ struct MPVRenderColorConfiguration: @unchecked Sendable, Equatable {
     }
 }
 
+extension MPVRenderColorConfiguration: Equatable {
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.usesExtendedDynamicRange == rhs.usesExtendedDynamicRange
+            && lhs.outputHeadroom == rhs.outputHeadroom
+            && lhs.status == rhs.status
+            && lhs.pixelFormat == rhs.pixelFormat
+            && lhs.iccIntent == rhs.iccIntent
+            && CFEqual(lhs.layerColorSpace, rhs.layerColorSpace)
+    }
+}
+
 /// Load once per player surface, never during brightness polling. ICC data must
 /// describe an RGB display, not an input scanner or a CMYK printer profile.
 struct MPVCalibratedDisplayProfile {
+
     let colorSpace: CGColorSpace?
     let isValidLUT: Bool
 

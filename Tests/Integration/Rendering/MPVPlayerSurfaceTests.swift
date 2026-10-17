@@ -1,4 +1,5 @@
 import Dispatch
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -9,12 +10,14 @@ import UIKit
 #endif
 
 private final class SurfaceProbe {
+
     var isAttachedToWindow = true
     var activationCount = 0
 }
 
 @Suite(.tags(.integration), .serialized)
 struct MPVPlayerSurfaceTests {
+
     @MainActor
     @Test
     func `surface has the exact platform representable view type`() {
@@ -30,6 +33,7 @@ struct MPVPlayerSurfaceTests {
         defer { dismantleRepresentableSurface(surface) }
 
         let platformView: PlatformView = surface
+
         #expect(platformView === surface)
         #expect(surface.player === player)
 
@@ -165,6 +169,7 @@ struct MPVPlayerSurfaceTests {
             supersedingAttachment.handlesCreated
                 == firstAttachment.handlesCreated + 1
         )
+
         #expect(
             supersedingAttachment.handlesDestroyed
                 == firstAttachment.handlesDestroyed + 1
@@ -189,14 +194,17 @@ struct MPVPlayerSurfaceTests {
             firstSurface.resizeDiagnosticSnapshot.surfaceGeneration
                 > firstGeneration
         )
+
         #expect(
             restoredAttachment.handlesCreated
                 == supersedingAttachment.handlesCreated + 1
         )
+
         #expect(
             restoredAttachment.handlesDestroyed
                 == supersedingAttachment.handlesDestroyed + 1
         )
+
         #expect(player.lastError == nil)
 
         dismantleRepresentableSurface(firstSurface)
@@ -252,6 +260,7 @@ struct MPVPlayerSurfaceTests {
             supersedingAttachment.handlesCreated
                 == firstAttachment.handlesCreated + 1
         )
+
         #expect(
             supersedingAttachment.handlesDestroyed
                 == firstAttachment.handlesDestroyed + 1
@@ -275,10 +284,12 @@ struct MPVPlayerSurfaceTests {
             restoredAttachment.handlesCreated
                 == supersedingAttachment.handlesCreated + 1
         )
+
         #expect(
             restoredAttachment.handlesDestroyed
                 == supersedingAttachment.handlesDestroyed + 1
         )
+
         #expect(player.lastError == nil)
     }
 
@@ -322,6 +333,7 @@ struct MPVPlayerSurfaceTests {
         // The token handoff is synchronous: the first handle is gone even
         // though the zero-sized owner cannot attach a replacement target.
         let zeroSizedOwnership = await player.lifecycleDiagnostics()
+
         #expect(!firstSurface.isActiveRenderingSurface)
         #expect(secondSurface.isActiveRenderingSurface)
         #expect(secondSurface.resizeDiagnosticSnapshot.activeLayerAddress == nil)
@@ -329,10 +341,12 @@ struct MPVPlayerSurfaceTests {
             zeroSizedOwnership.handlesCreated
                 == firstAttachment.handlesCreated
         )
+
         #expect(
             zeroSizedOwnership.handlesDestroyed
                 == firstAttachment.handlesDestroyed + 1
         )
+
         #expect(zeroSizedOwnership.loadCommands == firstAttachment.loadCommands)
 
         let restoredBoundsSize = CGSize(width: 480, height: 270)
@@ -361,14 +375,17 @@ struct MPVPlayerSurfaceTests {
             firstSurface.resizeDiagnosticSnapshot.committedDrawableSize
                 == expectedRestoredDrawableSize
         )
+
         #expect(
             restoredAttachment.handlesCreated
                 == firstAttachment.handlesCreated + 1
         )
+
         #expect(
             restoredAttachment.handlesDestroyed
                 == firstAttachment.handlesDestroyed + 1
         )
+
         #expect(restoredAttachment.loadCommands == firstAttachment.loadCommands)
         #expect(player.state == .idle)
         #expect(player.lastError == nil)
@@ -430,6 +447,7 @@ struct MPVPlayerSurfaceTests {
             surface.resizeDiagnosticSnapshot.surfaceGeneration
                 > firstGeneration
         )
+
         #expect(reattachment.handlesCreated == detached.handlesCreated + 1)
         #expect(reattachment.handlesDestroyed == detached.handlesDestroyed)
         #expect(player.lastError == nil)
@@ -493,10 +511,12 @@ struct MPVPlayerSurfaceTests {
             afterInactiveDismantle.handlesCreated
                 == currentAttachment.handlesCreated
         )
+
         #expect(
             afterInactiveDismantle.handlesDestroyed
                 == currentAttachment.handlesDestroyed
         )
+
         #expect(player.lastError == nil)
     }
 

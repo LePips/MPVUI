@@ -58,11 +58,50 @@ class CoverageReportTests(unittest.TestCase):
             (folder / "Example.swift").write_text("struct SubtitleTests {\n}\nstruct Helper {}\n")
             self.assertEqual(coverage.suites(root, ["Unit"]), "(SubtitleTests)/")
 
+    def test_exports_core_and_ui_test_binaries_with_one_merged_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = []
+            for name in ("MPVCoreTests", "MPVUITests"):
+                binary = root / f"{name}.xctest/Contents/MacOS/{name}"
+                binary.parent.mkdir(parents=True)
+                binary.touch()
+                binaries.append(binary)
+            report = root / "coverage.json"
+            (root / "default.profdata").touch()
+            destination = root / "merged.json"
+            with (
+                patch.object(coverage.subprocess, "check_output", return_value="/tools/llvm-cov\n"),
+                patch.object(coverage.subprocess, "run") as run,
+            ):
+                self.assertEqual(coverage.export_test_bundles(root, report, destination), destination)
+            self.assertEqual(
+                run.call_args.args[0],
+                [
+                    "/tools/llvm-cov",
+                    "export",
+                    str(binaries[0]),
+                    "-instr-profile",
+                    str(root / "default.profdata"),
+                    "-object",
+                    str(binaries[1]),
+                ],
+            )
+            (root / "default.profdata").unlink()
+            with self.assertRaisesRegex(ValueError, "Missing merged test profile"):
+                coverage.export_test_bundles(root, report, destination)
+
     def test_runner_publishes_counts_and_failed_coverage_gate_without_raw_success_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "Tests/Unit").mkdir(parents=True)
             (root / "Tests/Unit/Example.swift").write_text("struct ExampleTests {}")
+            (root / "Tests/Core").mkdir()
+            (root / "Tests/Core/Core.swift").write_text("struct CoreTests {}")
+            (root / "Tests/System").mkdir()
+            (root / "Tests/System/System.swift").write_text("struct SystemTests {}")
+            (root / "Tests/Benchmarks").mkdir()
+            (root / "Tests/Benchmarks/Benchmark.swift").write_text("struct BenchmarkTests {}")
             (root / "Build/Tests").mkdir(parents=True)
             (root / "Build/Tests/coverage-thresholds.json").write_text('{"lines":90}')
             export = root / "llvm.json"
@@ -70,6 +109,9 @@ class CoverageReportTests(unittest.TestCase):
             evidence = root / "evidence.json"
 
             def run(command, **kwargs):
+                self.assertIn(str(root / "Build/Tests/run_swift_tests.py"), command)
+                self.assertIn("--enable-code-coverage", command)
+                self.assertEqual(command[command.index("--filter") + 1], "(CoreTests|ExampleTests|SystemTests)/")
                 kwargs["stdout"].write("noise\n" * 10000 + "Test run with 4 tests in 2 suites passed\n")
                 return SimpleNamespace(returncode=0)
 
@@ -80,7 +122,7 @@ class CoverageReportTests(unittest.TestCase):
                 patch.object(coverage.subprocess, "run", side_effect=run),
                 patch.object(coverage.subprocess, "check_output", return_value=str(export)),
                 patch.dict(os.environ, {EVIDENCE_ENV: str(evidence)}),
-                patch("sys.argv", ["coverage.py", "--check"]),
+                patch("sys.argv", ["coverage.py", "--check", "--lane", "all"]),
                 contextlib.redirect_stdout(stdout),
                 contextlib.redirect_stderr(io.StringIO()),
             ):

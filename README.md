@@ -1,6 +1,6 @@
 # MPVUI
 
-A SwiftUI video player backed by mpv, built on [MPVKit](https://github.com/mpvkit/MPVKit).
+A Swift video player for SwiftUI and [Android](Android/README.md) Compose, backed by mpv.
 
 ## Usage
 
@@ -24,7 +24,8 @@ struct MyVideoPlayer: View {
 
 ## Development
 
+- [Architecture](Documentation/ARCHITECTURE.md): shared core, platform integration, and build diagrams.
 - [Building](Build/BUILD.md): native libraries, local artifact selection, and release candidates.
 - [Patches](Build/PATCHES.md): native changes and their purposes.
-- [Rendering](Build/RENDERING.md): video outputs, HDR, PiP, subtitles, and fonts.
-- [Testing](TESTING.md): automated tests, generated media, and device checks.
+- [Rendering](Build/RENDERING.md): video output, high dynamic range, and subtitles.
+- [Testing](Documentation/TESTING.md): shared core, platform integration, and consumer checks.

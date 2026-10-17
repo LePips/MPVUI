@@ -1,6 +1,7 @@
 import Foundation
 
 enum Bootstrap {
+
     static func bin(_ store: ManagedStore, _ lock: ToolchainLock) throws -> URL {
         // A new bootstrap layout must not reuse a version-correct but broken launcher.
         try store.path("toolchains/v2-\(fingerprint(lock))/bin")

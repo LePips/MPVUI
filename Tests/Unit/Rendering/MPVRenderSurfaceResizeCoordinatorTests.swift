@@ -1,11 +1,13 @@
 import CoreGraphics
 import Dispatch
+@testable import MPVCore
 @testable import MPVUI
 import QuartzCore
 import Testing
 
 @Suite(.tags(.unit), .serialized)
 struct MPVRenderSurfaceResizeCoordinatorTests {
+
     @Test(arguments: [MPVPlayerConfiguration.LogLevel.warning, .debug])
     @MainActor
     func `disabled resize logging does not read the drawable`(
@@ -32,16 +34,19 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         for _ in 0 ..< 100 {
             coordinator.requestResize(to: defaultInitialSize, contentsScale: 1, kind: .discrete)
         }
+
         #expect(layer.drawableSizeReadCount == 0)
 
         player.logHandler = { _ in }
         coordinator.requestResize(to: defaultInitialSize, contentsScale: 1, kind: .discrete)
         let expectedReads = logLevel == .debug ? 1 : 0
+
         #expect(layer.drawableSizeReadCount == expectedReads)
 
         // Consumers can stop logging after the coordinator was initialized.
         player.logHandler = nil
         coordinator.requestResize(to: defaultInitialSize, contentsScale: 1, kind: .discrete)
+
         #expect(layer.drawableSizeReadCount == expectedReads)
     }
 
@@ -54,6 +59,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         harness.layer.resetAssignments()
 
         harness.coordinator.beginContinuousInteraction()
+
         #expect(
             harness.coordinator.requestResize(
                 to: CGSize(width: 200, height: 120),
@@ -64,6 +70,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
 
         #expect(await eventually { harness.driver.requests.count == 1 })
         let request = harness.driver.requests[0]
+
         #expect(request.drawableSize == CGSize(width: 200, height: 120))
         #expect(request.contentsScale == 2)
         #expect(request.geometryChangeKind == .continuousInteractive)
@@ -75,12 +82,14 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             harness.layer.contentsScaleAssignments.last?
                 .actionsWereDisabled == true
         )
+
         #expect(
             harness.coordinator.diagnosticSnapshot.inFlight?.identifier
                 == request.identifier
         )
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -102,6 +111,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         harness.coordinator.requestResize(
@@ -123,14 +133,17 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(
             harness.driver.requests[1].drawableSize
                 == CGSize(width: 400, height: 240)
         )
+
         #expect(harness.driver.maximumConcurrentCommits == 1)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.inFlight == nil
@@ -153,6 +166,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.requestResize(
             to: CGSize(width: 220, height: 132),
@@ -161,16 +175,19 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         await sleep(nanoseconds: 10_000_000)
+
         #expect(harness.driver.requests.count == 1)
         #expect(await eventually { harness.driver.requests.count == 2 })
 
         let firstSubmission = try #require(
             harness.driver.submissionTimes.first
         )
+
         let secondSubmission = try #require(
             harness.driver.submissionTimes.dropFirst().first
         )
         let interval = secondSubmission - firstSubmission
+
         #expect(interval >= 30_000_000)
         harness.coordinator.deactivate()
     }
@@ -195,6 +212,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
                 !harness.coordinator.diagnosticSnapshot.finalCommitRequired
             }
         )
+
         #expect(harness.driver.requests.count == 2)
         #expect(harness.driver.requests[0].geometryChangeKind == .continuousInteractive)
         #expect(harness.driver.requests[0].drawableSize == finalSize)
@@ -203,7 +221,8 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(!harness.coordinator.diagnosticSnapshot.isContinuousInteraction)
     }
 
-    @Test @MainActor
+    @Test
+    @MainActor
     func `holding an explicit window drag does not retire its buffers`() async {
         let harness = makeHarness(
             timing: timing(cadence: 0, continuousFinal: 10_000_000),
@@ -212,11 +231,14 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         let size = CGSize(width: 320, height: 180)
         harness.coordinator.beginContinuousInteraction()
         harness.coordinator.requestResize(to: size, contentsScale: 2, kind: .continuousInteractive)
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         await sleep(nanoseconds: 50_000_000)
+
         #expect(harness.driver.requests.count == 1)
         #expect(harness.coordinator.diagnosticSnapshot.isContinuousInteraction)
         harness.coordinator.endContinuousInteraction(finalSize: size, contentsScale: 2)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(harness.driver.requests.last?.geometryChangeKind == .final)
     }
@@ -243,6 +265,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         let synchronized = harness.coordinator.diagnosticSnapshot
+
         #expect(synchronized.event == .snapshot)
         #expect(!synchronized.isContinuousInteraction)
         #expect(!synchronized.finalCommitRequired)
@@ -250,6 +273,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(synchronized.pendingDrawableSize == nil)
 
         await sleep(nanoseconds: trailingDelay * 2)
+
         #expect(harness.driver.requests.isEmpty)
         #expect(harness.diagnostics.events.contains(.alreadySynchronized))
         #expect(!harness.diagnostics.events.contains(.continuousFinalScheduled))
@@ -271,6 +295,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.requestResize(
             to: CGSize(width: 220, height: 132),
@@ -287,6 +312,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
                 == CGSize(width: 240, height: 144)
         )
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(harness.driver.requests[1].geometryChangeKind == .final)
         #expect(
@@ -295,16 +321,19 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
                     == CGSize(width: 240, height: 144)
             }
         )
+
         #expect(!harness.coordinator.diagnosticSnapshot.finalCommitRequired)
 
         let requestCountAfterFinal = harness.driver.requests.count
         await sleep(nanoseconds: trailingDelay + 100_000_000)
+
         #expect(harness.driver.requests.count == requestCountAfterFinal)
         #expect(
             !harness.diagnostics.events.contains(.continuousFinalScheduled)
@@ -325,6 +354,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.requestResize(
             to: pendingSize,
@@ -334,6 +364,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
 
         let beforeAbort = harness.coordinator.diagnosticSnapshot
         let inFlightIdentifier = beforeAbort.inFlight?.identifier
+
         #expect(beforeAbort.pendingDrawableSize == pendingSize)
         #expect(beforeAbort.contentsScale == 2)
         #expect(harness.layer.contentsScale == 1)
@@ -344,6 +375,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         harness.coordinator.abortContinuousInteraction()
 
         let aborted = harness.coordinator.diagnosticSnapshot
+
         #expect(aborted.activeLayerAddress == beforeAbort.activeLayerAddress)
         #expect(aborted.committedDrawableSize == beforeAbort.committedDrawableSize)
         #expect(aborted.inFlight?.identifier == inFlightIdentifier)
@@ -362,22 +394,27 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(!aborted.hasContinuousFinalFallback)
 
         await sleep(nanoseconds: 200_000_000)
+
         #expect(harness.driver.requests.count == 1)
         let afterFallbackDeadline = harness.coordinator.diagnosticSnapshot
+
         #expect(afterFallbackDeadline.pendingDrawableSize == nil)
         #expect(!afterFallbackDeadline.finalCommitRequired)
         #expect(!afterFallbackDeadline.isContinuousInteraction)
         #expect(!afterFallbackDeadline.hasContinuousFinalFallback)
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.inFlight == nil
             }
         )
+
         #expect(
             harness.coordinator.diagnosticSnapshot.committedDrawableSize
                 == inFlightSize
         )
+
         #expect(harness.driver.requests.count == 1)
     }
 
@@ -396,6 +433,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(
             harness.coordinator.endContinuousInteraction(
@@ -412,6 +450,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             )
         )
         let preserved = harness.coordinator.diagnosticSnapshot
+
         #expect(preserved.pendingDrawableSize == finalSize)
         #expect(preserved.geometryChangeKind == .final)
         #expect(preserved.finalCommitRequired)
@@ -420,12 +459,14 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(harness.driver.requests[1].geometryChangeKind == .final)
         #expect(harness.driver.requests[1].drawableSize == finalSize)
         #expect(harness.driver.maximumConcurrentCommits == 1)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -449,6 +490,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(
             harness.coordinator.endContinuousInteraction(
@@ -465,17 +507,20 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             )
         )
         let promoted = harness.coordinator.diagnosticSnapshot
+
         #expect(promoted.pendingDrawableSize == originalFinalSize)
         #expect(promoted.geometryChangeKind == .final)
         #expect(promoted.finalCommitRequired)
 
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(harness.driver.requests[1].drawableSize == originalFinalSize)
         #expect(harness.driver.requests[1].contentsScale == 2)
         #expect(harness.driver.requests[1].geometryChangeKind == .final)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -502,6 +547,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             kind: .animatedTransition
         )
         await sleep(nanoseconds: 10_000_000)
+
         #expect(harness.driver.requests.isEmpty)
         #expect(harness.layer.drawableSize == retainedSize)
         #expect(harness.coordinator.diagnosticSnapshot.hasAnimatedFallback)
@@ -510,6 +556,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             finalSize: finalSize,
             contentsScale: 2
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(harness.driver.requests[0].geometryChangeKind == .final)
         #expect(harness.layer.drawableSize == retainedSize)
@@ -530,6 +577,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .animatedTransition
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(harness.driver.requests[0].geometryChangeKind == .final)
 
@@ -538,6 +586,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1
         )
         await sleep(nanoseconds: 15_000_000)
+
         #expect(harness.driver.requests.count == 1)
         #expect(!harness.coordinator.diagnosticSnapshot.hasAnimatedFallback)
     }
@@ -557,6 +606,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         harness.coordinator.requestResize(
@@ -564,12 +614,14 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .discrete
         )
+
         #expect(await eventually { harness.driver.requests.count == 2 })
 
         harness.coordinator.completeAnimatedTransition(
             finalSize: firstFinal,
             contentsScale: 1
         )
+
         #expect(await eventually { harness.driver.requests.count == 3 })
         #expect(harness.driver.requests[2].geometryChangeKind == .final)
         #expect(harness.driver.requests[2].drawableSize == firstFinal)
@@ -596,6 +648,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         }
 
         await sleep(nanoseconds: 4_000_000)
+
         #expect(harness.driver.requests.isEmpty)
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(
@@ -616,18 +669,21 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 2,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         #expect(harness.layer.drawableSize == defaultInitialSize)
         #expect(harness.layer.contentsScale == 2)
 
         await sleep(nanoseconds: 2_000_000)
         harness.driver.completeFirst(with: false)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.inFlight == nil
             }
         )
         let snapshot = harness.coordinator.diagnosticSnapshot
+
         #expect(snapshot.failedDrawableSize == failedSize)
         #expect(snapshot.committedDrawableSize == defaultInitialSize)
         #expect(snapshot.observedDrawableSize == defaultInitialSize)
@@ -639,6 +695,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             harness.layer.contentsScaleAssignments.last?
                 .actionsWereDisabled == true
         )
+
         #expect(harness.diagnostics.events.contains(.rolledBack))
         #expect(harness.diagnostics.events.contains(.failed))
     }
@@ -654,6 +711,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         harness.coordinator.requestResize(
@@ -669,6 +727,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(harness.driver.requests[1].drawableSize == finalSize)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize == finalSize
@@ -691,6 +750,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         harness.coordinator.requestResize(
@@ -706,6 +766,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         #expect(harness.driver.maximumConcurrentCommits == 1)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -729,6 +790,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         harness.coordinator.requestResize(
@@ -743,16 +805,19 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             harness.driver.requests[1].geometryChangeKind
                 == .continuousInteractive
         )
+
         #expect(harness.driver.requests[1].drawableSize == newerContinuousSize)
         #expect(harness.coordinator.diagnosticSnapshot.finalCommitRequired)
 
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 3 })
         #expect(harness.driver.requests[2].geometryChangeKind == .final)
         #expect(harness.driver.requests[2].drawableSize == newerContinuousSize)
         #expect(harness.driver.maximumConcurrentCommits == 1)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 !harness.coordinator.diagnosticSnapshot.finalCommitRequired
@@ -792,6 +857,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 2,
             kind: .final
         )
+
         #expect(
             await eventually {
                 coordinator.diagnosticSnapshot.failedDrawableSize == failedSize
@@ -813,10 +879,12 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         await sleep(nanoseconds: 3_000_000)
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.resizeLatencyNanoseconds != nil
@@ -825,11 +893,13 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
 
         let latency = harness.coordinator.diagnosticSnapshot
             .resizeLatencyNanoseconds
+
         #expect(latency != nil)
         #expect((latency ?? 0) >= 3_000_000)
         let commitDiagnostic = harness.diagnostics.snapshots.last {
             $0.event == .committed
         }
+
         #expect(commitDiagnostic?.resizeLatencyNanoseconds == latency)
     }
 
@@ -847,6 +917,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.requestResize(
             to: CGSize(width: 300, height: 180),
@@ -878,6 +949,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         }
 
         let snapshot = harness.coordinator.diagnosticSnapshot
+
         #expect(snapshot.activeLayerAddress == harness.layerAddress)
         #expect(snapshot.committedDrawableSize == defaultInitialSize)
         #expect(snapshot.pendingDrawableSize == nil)
@@ -886,6 +958,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
 
         harness.driver.completeFirst(with: true)
         await sleep(nanoseconds: 20_000_000)
+
         #expect(harness.driver.requests.count == 1)
         #expect(
             harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -905,6 +978,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .continuousInteractive
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.requestResize(
             to: CGSize(width: 320, height: 180),
@@ -913,11 +987,13 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         harness.driver.completeFirst(with: false)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(
             harness.driver.requests[1].drawableSize
                 == CGSize(width: 320, height: 180)
         )
+
         #expect(harness.driver.maximumConcurrentCommits == 1)
         harness.driver.completeFirst(with: true)
         harness.coordinator.deactivate()
@@ -933,20 +1009,24 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         harness.coordinator.deactivate()
 
         let detached = harness.coordinator.diagnosticSnapshot
+
         #expect(detached.activeLayerAddress == nil)
         #expect(detached.committedDrawableSize == nil)
         #expect(detached.inFlight != nil)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.inFlight == nil
             }
         )
+
         #expect(harness.coordinator.diagnosticSnapshot.committedDrawableSize == nil)
         #expect(harness.diagnostics.events.contains(.staleCompletion))
     }
@@ -960,6 +1040,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
         let oldRequest = harness.driver.requests[0]
 
@@ -981,16 +1062,20 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 2,
             kind: .final
         )
+
         #expect(harness.driver.requests.count == 1)
 
         harness.driver.completeFirst(with: true)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         let newRequest = harness.driver.requests[1]
+
         #expect(newRequest.surfaceGeneration > oldRequest.surfaceGeneration)
         #expect(newRequest.layerAddress == replacementAddress)
         #expect(harness.diagnostics.events.contains(.staleCompletion))
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -1008,6 +1093,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .final
         )
+
         #expect(await eventually { harness.driver.requests.count == 1 })
 
         let replacementLayer = RecordingMetalLayer()
@@ -1029,11 +1115,13 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
         )
 
         harness.driver.completeFirst(with: false)
+
         #expect(await eventually { harness.driver.requests.count == 2 })
         #expect(replacementLayer.drawableSize == replacementInitial)
         #expect(harness.coordinator.diagnosticSnapshot.failedDrawableSize == nil)
 
         harness.driver.completeFirst(with: true)
+
         #expect(
             await eventually {
                 harness.coordinator.diagnosticSnapshot.committedDrawableSize
@@ -1054,10 +1142,12 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
             contentsScale: 1,
             kind: .discrete
         )
+
         #expect(harness.coordinator.diagnosticSnapshot.hasScheduledCommit)
 
         harness.coordinator.rendererConfigurationDidChange()
         await sleep(nanoseconds: 60_000_000)
+
         #expect(harness.driver.requests.isEmpty)
         #expect(harness.coordinator.diagnosticSnapshot.activeLayerAddress == nil)
         #expect(
@@ -1083,6 +1173,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
                 harness.coordinator.diagnosticSnapshot.committedContentsScale == 2
             }
         )
+
         #expect(harness.layer.contentsScale == 2)
     }
 
@@ -1125,6 +1216,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
                 kind: .final
             )
         )
+
         #expect(
             await eventually {
                 coordinator.diagnosticSnapshot.committedDrawableSize == requestedSize
@@ -1175,6 +1267,7 @@ struct MPVRenderSurfaceResizeCoordinatorTests {
                 kind: .discrete
             )
         )
+
         #expect(
             await eventually {
                 diagnostics.events.contains(.alreadySynchronized)
@@ -1192,6 +1285,7 @@ private let defaultInitialSize = CGSize(width: 100, height: 60)
 
 @MainActor
 private struct ResizeCoordinatorHarness {
+
     let layer: RecordingMetalLayer
     let layerAddress: Int64
     let driver: ResizeCommitDriver
@@ -1250,7 +1344,9 @@ private func timing(
 
 @MainActor
 private final class ResizeCommitDriver {
+
     private struct PendingCommit {
+
         let continuation: CheckedContinuation<Bool, Never>
     }
 
@@ -1300,6 +1396,7 @@ private final class ResizeCommitDriver {
 
 @MainActor
 private final class ResizeDiagnosticRecorder {
+
     var snapshots: [MPVRenderSurfaceResizeCoordinator.DiagnosticSnapshot] = []
 
     var events: [MPVRenderSurfaceResizeCoordinator.DiagnosticEvent] {
@@ -1308,21 +1405,24 @@ private final class ResizeDiagnosticRecorder {
 }
 
 private final class RecordingMetalLayer: CAMetalLayer {
+
     struct Assignment {
+
         let drawableSize: CGSize
         let actionsWereDisabled: Bool
     }
 
     struct ContentsScaleAssignment {
+
         let contentsScale: CGFloat
         let actionsWereDisabled: Bool
     }
 
-    private var recordedDrawableSize = CGSize.zero
-    private var recordedContentsScale: CGFloat = 1
     private(set) var drawableSizeReadCount = 0
     private(set) var assignments: [Assignment] = []
     private(set) var contentsScaleAssignments: [ContentsScaleAssignment] = []
+    private var recordedDrawableSize = CGSize.zero
+    private var recordedContentsScale: CGFloat = 1
 
     override var drawableSize: CGSize {
         get {

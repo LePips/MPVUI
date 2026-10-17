@@ -4,8 +4,9 @@ import Foundation
 /// A plain archive merge can resolve native symbols against other dependencies,
 /// mixing incompatible implementations in the consuming app.
 enum NativeLibrary {
+
     static func publicSymbols(in headers: URL) throws -> Set<String> {
-        let declaration = try NSRegularExpression(pattern: #"(?m)^MPV_EXPORT\s+[^;]*?\b(mpv_\w+)\s*\("#)
+        let declaration = try NSRegularExpression(pattern: #"(?m)^MPV_EXPORT\s+[^;]*?\b((?:mpv|mpvui)_\w+)\s*\("#)
         var symbols: Set<String> = []
         for header in try files(headers) where header.pathExtension == "h" {
             let text = try String(contentsOf: header, encoding: .utf8)
@@ -39,11 +40,23 @@ enum NativeLibrary {
         // Public entry points are rooted with -u below; strip unreachable
         // internal code while retaining local symbols for crash diagnostics.
         try runner.run("/usr/bin/clang", linkArguments(slice: slice, arch: arch, runner: runner) + [
-            "-dynamiclib", "-Wl,-dead_strip", "-Wl,-dead_strip_dylibs",
-            "-Xlinker", "-oso_prefix", "-Xlinker", archive.deletingLastPathComponent().path + "/",
-            "-Xlinker", "-install_name", "-Xlinker", installName,
-            "-Xlinker", "-exported_symbols_list", "-Xlinker", interface.path,
-            "-o", destination.path
+            "-dynamiclib",
+            "-Wl,-dead_strip",
+            "-Wl,-dead_strip_dylibs",
+            "-Xlinker",
+            "-oso_prefix",
+            "-Xlinker",
+            archive.deletingLastPathComponent().path + "/",
+            "-Xlinker",
+            "-install_name",
+            "-Xlinker",
+            installName,
+            "-Xlinker",
+            "-exported_symbols_list",
+            "-Xlinker",
+            interface.path,
+            "-o",
+            destination.path
         ] + exports.sorted().flatMap { ["-Xlinker", "-u", "-Xlinker", $0] } + [archive.path])
         try verify(destination, exports: exports, runner: runner)
         try require(MachO.validate(destination, slice: slice, arch: arch).count == 1, "Expected one native dynamic library")
@@ -52,9 +65,21 @@ enum NativeLibrary {
     static func linkArguments(slice: Slice, arch: String, runner: Runner) throws -> [String] {
         let sdk = try runner.sdk(slice.sdk)
         let system = [
-            "AVFoundation", "AudioToolbox", "CoreAudio", "CoreFoundation", "CoreGraphics",
-            "CoreMedia", "CoreImage", "CoreText", "CoreVideo", "Foundation", "IOSurface", "Metal",
-            "QuartzCore", "Security", "VideoToolbox"
+            "AVFoundation",
+            "AudioToolbox",
+            "CoreAudio",
+            "CoreFoundation",
+            "CoreGraphics",
+            "CoreMedia",
+            "CoreImage",
+            "CoreText",
+            "CoreVideo",
+            "Foundation",
+            "IOSurface",
+            "Metal",
+            "QuartzCore",
+            "Security",
+            "VideoToolbox"
         ] + (slice.id == "macos" ? ["AppKit", "OpenGL", "IOKit"] : ["UIKit"]) +
             (["ios", "isimulator", "tvos", "tvsimulator"].contains(slice.id) ? ["OpenGLES"] : []) +
             (slice.variant == "maccatalyst" ? ["IOKit"] : [])
@@ -73,8 +98,10 @@ enum NativeLibrary {
     }
 
     static func verify(_ binary: URL, exports: Set<String>, runner: Runner) throws {
-        let actual = try Set(runner.run("/usr/bin/nm", ["-gUj", binary.path]).split(separator: "\n")
-            .filter { !$0.hasSuffix(":") }.map(String.init))
+        let actual = try Set(runner.run("/usr/bin/nm", ["-gUj", binary.path])
+            .split(separator: "\n")
+            .filter { !$0.hasSuffix(":") }
+            .map(String.init))
         try require(
             actual == exports,
             "Native interface mismatch; missing: \(exports.subtracting(actual).sorted()), leaked: \(actual.subtracting(exports).sorted())"

@@ -1,18 +1,20 @@
 import Foundation
 
 struct Updater {
+
     let graph: BuildGraph
+
     func run(component: String, ref requested: String?) throws -> URL {
         let id: String
         let ref: String
         if ["mpv", "ffmpeg", "recipes"].contains(component) {
             id = component
-            ref = try requested ?? (id == "recipes" ? graph.native.recipeSource.ref : graph.native.source(id).ref)
+            ref = try requested ?? (id == "recipes" ? graph.native.apple.recipeSource.ref : graph.native.source(id).ref)
         } else {
             id = component.hasPrefix("n") ? "ffmpeg" : "mpv"
             ref = component
         }
-        let url = try id == "recipes" ? graph.native.recipeSource.url : graph.native.source(id).url
+        let url = try id == "recipes" ? graph.native.apple.recipeSource.url : graph.native.source(id).url
         try require(!graph.inputs.offline, "Update resolves upstream refs and cannot run offline")
         try require(!ref.hasPrefix("-") && !ref.contains("\n"), "Invalid upstream ref")
         let advertised = try graph.runner.run(
@@ -32,7 +34,11 @@ struct Updater {
         try mkdir(directory)
         if id == "recipes" {
             try put(
-                "Upstream recipe resolution\n\nPrevious: \(graph.native.recipeSource.commit)\nCandidate: \(commit)\nRef: \(ref)\n\nReview the upstream recipe diff and port relevant changes into Build/Sources/MPVBuildCore/Recipes. Inputs.lock.json is not promoted automatically.\n",
+                """
+                Upstream recipe resolution\n\nPrevious: \(graph.native.apple.recipeSource.commit)\nCandidate: \(commit)\nRef: \(ref)\n\
+                \nReview the upstream recipe diff and port relevant changes into Build/Sources/MPVBuildCore/Recipes. Inputs.lock.json \
+                is not promoted automatically.\n
+                """,
                 directory.appendingPathComponent("REVIEW.md")
             )
             let source = Source(id: "recipes", url: url, ref: ref, commit: commit, version: ref, patches: [])
@@ -55,10 +61,16 @@ struct Updater {
         object["sources"] = sources
         let candidate = try decode(NativeLock.self, from: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]))
         try candidate.validate(root: graph.root)
-        _ = try graph.inputs.prepare(candidate.source(id))
+        for platform in NativePlatform.allCases {
+            _ = try graph.inputs.prepare(candidate.source(id, platform: platform))
+        }
         try write(candidate, directory.appendingPathComponent("Inputs.lock.json"))
         try put(
-            "Build input update candidate\n\nComponent: \(id)\nRef: \(ref)\nPrevious commit: \(previous)\nCandidate commit: \(commit)\nOrdered patches: applied and verified.\n\nReview this lock and run a complete release candidate before adoption. The committed lock and manifests were not modified.\n",
+            """
+            Build input update candidate\n\nComponent: \(id)\nRef: \(ref)\nPrevious commit: \(previous)\nCandidate commit: \(commit)\n\
+            Ordered patches: applied and verified.\n\nReview this lock and run a complete release candidate before adoption. The \
+            committed lock and manifests were not modified.\n
+            """,
             directory.appendingPathComponent("REVIEW.md")
         )
         return directory

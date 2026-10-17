@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+@testable import MPVCore
 @testable import MPVUI
 import SwiftUI
 import Testing
@@ -7,13 +8,18 @@ import Testing
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVVideoPlayerCompositionTests {
+
     @Test
     func `repeated overlay modifiers present only the latest content`() async throws {
         let player = MPVPlayer(configuration: .init(autoPlay: false, videoOutput: .sampleBuffer))
         var appeared: [String] = []
         let view = MPVVideoPlayer(player: player)
-            .videoOverlay { Text("First").onAppear { appeared.append("first") } }
-            .videoOverlay(alignment: .bottom) { Text("Second").onAppear { appeared.append("second") } }
+            .videoOverlay { Text("First")
+                .onAppear { appeared.append("first") }
+            }
+            .videoOverlay(alignment: .bottom) { Text("Second")
+                .onAppear { appeared.append("second") }
+            }
         let host = NSHostingView(rootView: view)
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
@@ -30,6 +36,7 @@ struct MPVVideoPlayerCompositionTests {
             window.contentView = nil
         }
         try await eventually("latest overlay mounted") { appeared.contains("second") }
+
         #expect(!appeared.contains("first"))
         let surface = try #require(findSurface(in: host))
         #expect(surface.player === player)
@@ -61,16 +68,10 @@ struct MPVVideoPlayerCompositionTests {
         try await eventually("replacement player attached") {
             second.hasActiveRenderSurface && !first.hasActiveRenderSurface
         }
+
         let surface = try #require(findSurface(in: host))
         #expect(surface.player === second)
         #expect(surface.videoOverlayHost == nil)
-    }
-
-    private func findSurface(in view: NSView) -> MPVPlatformVideoPlayer? {
-        if let surface = view as? MPVPlatformVideoPlayer {
-            return surface
-        }
-        return view.subviews.lazy.compactMap { findSurface(in: $0) }.first
     }
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
@@ -78,12 +79,16 @@ struct MPVVideoPlayerCompositionTests {
         output: MPVPlayerConfiguration.VideoOutput
     ) async throws {
         let player = MPVPlayer(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: output
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            videoOutput: output
         ))
         let host = NSHostingView(rootView: TrackDrivenPlayerView(player: player))
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
-            styleMask: [.titled], backing: .buffered, defer: false
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
         )
         window.contentView = host
         window.orderFront(nil)
@@ -103,15 +108,27 @@ struct MPVVideoPlayerCompositionTests {
                     && (findSurface(in: host) != nil) == hasVideo
                     && (player.mediaInformation.dimensions != nil) == hasVideo
             }
+
             #expect(player.lastError == nil)
             #expect(player.videoTracks.isEmpty == !hasVideo)
         }
     }
+
+    private func findSurface(in view: NSView) -> MPVPlatformVideoPlayer? {
+        if let surface = view as? MPVPlatformVideoPlayer {
+            return surface
+        }
+        return view.subviews.lazy.compactMap { findSurface(in: $0) }.first
+    }
 }
 
 @MainActor
-private struct TrackDrivenPlayerView: View {
+private struct TrackDrivenPlayerView {
+
     let player: MPVPlayer
+}
+
+extension TrackDrivenPlayerView: View {
 
     var body: some View {
         if player.videoTracks.isEmpty {

@@ -1,11 +1,13 @@
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVRawCommandPersistenceTests {
+
     private nonisolated static var outputs: [MPVPlayerConfiguration.VideoOutput] {
         #if targetEnvironment(simulator)
         // Metal Simulator cannot allocate libplacebo's staging buffer for the
@@ -22,8 +24,11 @@ struct MPVRawCommandPersistenceTests {
         output: MPVPlayerConfiguration.VideoOutput
     ) async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false,
-            hardwareDecoding: .disabled, logLevel: .info, videoOutput: output
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            logLevel: .info,
+            videoOutput: output
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()
@@ -32,6 +37,7 @@ struct MPVRawCommandPersistenceTests {
         player.command("add", arguments: ["options/video-zoom", "0.25"])
         player.command("vf", arguments: ["add", "@flip:hflip"])
         let before = try await runtimeSettings(player)
+
         #expect(before.contains("rotation=90"))
         #expect(before.contains("zoom=0.250000"))
         #expect(before.contains("hflip"))
@@ -44,6 +50,7 @@ struct MPVRawCommandPersistenceTests {
             }
             player.pause()
             try await eventually("raw-configured replay paused") { player.state == .paused }
+
             #expect(try await runtimeSettings(player) == before)
             #expect(player.lastError == nil)
         }
@@ -54,22 +61,25 @@ struct MPVRawCommandPersistenceTests {
         player.setProperty("options/video-zoom", to: "0.5")
         player.play()
         try await eventually("replayed after deferred property") { player.state == .playing }
+
         #expect(try await runtimeSettings(player).contains("zoom=0.500000"))
         #expect(player.lastError == nil)
     }
 
     @Test
     func `timeline file local and rejected mutations are not restored as configuration`() {
-        let engine = MPVEngine(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init()) { _ in }
         defer { engine.shutdownSynchronously() }
         engine.queue.sync {
             for property in ["pause", "wid", "vo", "file-local-options/video-zoom", "start"] {
                 engine.recordAcceptedCommand(["set", property, "1"], status: 0)
             }
             engine.recordAcceptedCommand(["set", "video-rotate", "invalid"], status: MPV_ERROR_COMMAND.rawValue)
+
             #expect(engine.commandMutatedOptions.isEmpty)
             engine.recordAcceptedCommand(["set", "chapter", "1"], status: 0)
             engine.recordAcceptedCommand(["set", "time-pos", "1"], status: 0)
+
             #expect(engine.commandMutatedOptions.isEmpty)
         }
     }
@@ -82,7 +92,8 @@ struct MPVRawCommandPersistenceTests {
             }
         }
         player.command("expand-properties", arguments: [
-            "print-text", "RAW_RENDER rotation=${=video-rotate} zoom=${=video-zoom} filters=${=vf}",
+            "print-text",
+            "RAW_RENDER rotation=${=video-rotate} zoom=${=video-zoom} filters=${=vf}",
         ])
         try await eventually("native raw rendering settings") { result != nil }
         return try #require(result)

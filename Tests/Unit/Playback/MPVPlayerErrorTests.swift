@@ -1,8 +1,10 @@
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVPlayerErrorTests {
+
     @Test(arguments: [
         (MPVPlayerError.clientCreationFailed, "Unable to create the mpv client."),
         (.clientUnavailable, "mpv is not available."),
@@ -20,6 +22,7 @@ struct MPVPlayerErrorTests {
             "Picture in Picture requires native sample-buffer output on a supported iOS device, or the macOS PiP host."
         ),
     ])
+
     func `failures retain actionable context for the caller`(error: MPVPlayerError, expected: String) {
         #expect(error.localizedDescription == expected)
     }
@@ -30,6 +33,7 @@ struct MPVPlayerErrorTests {
         (.seek, "The Picture in Picture seek timed out."),
         (.restoreInterface, "The playback interface did not finish restoring before Picture in Picture closed."),
     ])
+
     func `PiP timeout tells the caller which operation stalled`(operation: MPVPlayerError.PictureInPictureOperation, expected: String) {
         #expect(MPVPlayerError.pictureInPictureTimedOut(operation: operation).localizedDescription == expected)
     }

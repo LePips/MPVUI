@@ -1,0 +1,57 @@
+From: MPVUI contributors
+Subject: [PATCH] Preserve in-band Dolby Vision without container configuration
+
+Inspect Annex B packets before MediaCodec submission. RPU NALs require
+a native Dolby Vision session or software decoding; ordinary HEVC output
+loses RPU metadata and cannot correctly map Profile 5.
+
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -62,6 +62,8 @@
+     // Ref. MediaFormat KEY_OPERATING_RATE
+     int operating_rate;
+     int native_dovi;
++    int dovi_decoder;
++    int rejected_dovi;
+     int stalled;
+ } MediaCodecH264DecContext;
+ 
+@@ -454,6 +456,7 @@
+                 goto done;
+             }
+             codec_mime = "video/dolby-vision";
++            s->dovi_decoder = 1;
+             ff_AMediaFormat_setInt32(format, "mpvui-dovi-profile", 1 << dv->dv_profile);
+             ff_AMediaFormat_setInt32(format, "profile", 1 << dv->dv_profile);
+             ff_AMediaFormat_setInt32(format, "level", 1 << (dv->dv_level - 1));
+@@ -524,7 +527,7 @@
+     ssize_t index;
+     int64_t stalled_since = 0;
+ 
+-    if (s->stalled)
++    if (s->stalled || s->rejected_dovi)
+         return AVERROR_EXTERNAL;
+ 
+     /* In delay_flush mode, wait until the user has released or rendered
+@@ -578,6 +581,21 @@
+ 
+         /* try to flush any buffered packet data */
+         if (s->buffered_pkt.size > 0) {
++            // Raw HEVC and transport streams may carry RPU without container
++            // configuration. The decoder's Annex B BSF preserves those NALs.
++            // Refuse ordinary HEVC decoding before submitting an RPU packet.
++            if (avctx->codec_id == AV_CODEC_ID_HEVC && !s->dovi_decoder) {
++                const uint8_t *data = s->buffered_pkt.data;
++                for (int i = 0; i + 4 < s->buffered_pkt.size; i++) {
++                    if (!data[i] && !data[i + 1] && data[i + 2] == 1 &&
++                        ((data[i + 3] >> 1) & 0x3f) == 62) {
++                        av_log(avctx, AV_LOG_WARNING,
++                               "Dolby Vision RPU requires software/GPU fallback without a native Dolby Vision session\n");
++                        s->rejected_dovi = 1;
++                        return AVERROR_EXTERNAL;
++                    }
++                }
++            }
+             ret = ff_mediacodec_dec_send(avctx, s->ctx, &s->buffered_pkt, false);
+             if (ret >= 0) {
+                 s->buffered_pkt.size -= ret;

@@ -1,10 +1,12 @@
 import Foundation
 
-struct InputStore: Sendable {
+struct InputStore {
+
     let store: ManagedStore
     let runner: Runner
     let root: URL
     let offline: Bool
+
     var codeRoot: URL {
         ProcessInfo.processInfo.environment["MPVBUILD_CODE_ROOT"].map { URL(fileURLWithPath: $0) } ?? root
             .appendingPathComponent("Build/Sources/MPVBuildCore")
@@ -28,10 +30,10 @@ struct InputStore: Sendable {
     func preflight(_ lock: NativeLock, slices: [Slice]) throws {
         guard offline else { return }
         var missing: [String] = []
-        for source in lock.sources where !gitContains(source) {
+        for source in lock.sources(for: .apple) where !gitContains(source) {
             missing.append("git \(source.url) @ \(source.commit)")
         }
-        for dependency in lock.dependencies where !Set(dependency.slices).isDisjoint(with: slices.map(\.id)) {
+        for dependency in lock.apple.dependencies where !Set(dependency.slices).isDisjoint(with: slices.map(\.id)) {
             for (url, sha) in [(dependency.url, dependency.sha256)] + dependency.runtime.map({ ($0.url, $0.sha256) }) {
                 if (try? digest(archivePath(sha))) != sha {
                     missing.append("\(sha) \(url)")
@@ -85,7 +87,9 @@ struct InputStore: Sendable {
             }
             try runner.run("git", ["--git-dir", repository.path, "fetch", "--no-tags", "--depth=1", source.url, source.commit])
         }
-        struct PreparationKey: Encodable { let source: Source
+        struct PreparationKey: Encodable {
+
+            let source: Source
             let implementation: String
         }
         let key = try fingerprint(PreparationKey(source: source, implementation: digest(codeRoot.appendingPathComponent("Inputs.swift"))))
@@ -114,38 +118,5 @@ struct InputStore: Sendable {
             }
             return ["pinned-commit", "ordered-patches", "locked-version"]
         }.appendingPathComponent("source")
-    }
-
-    // Migration/import is explicit. Only checksum-verified downloads and immutable Git objects are imported.
-    func seed(from previous: URL, lock native: NativeLock) throws {
-        let cache = previous.appendingPathComponent(".build/mpvkit-cache")
-        for dependency in native.dependencies {
-            for sha in [dependency.sha256] + dependency.runtime.map(\.sha256) {
-                let source = cache.appendingPathComponent(sha)
-                if !exists(source) {
-                    continue
-                }
-                try require(digest(source) == sha, "Seed checksum mismatch: \(sha)")
-                _ = try store.node(stage: "downloads", name: sha, key: sha) { directory in
-                    try fm.copyItem(at: source, to: directory.appendingPathComponent("archive.zip"))
-                    return ["sha256"]
-                }
-            }
-        }
-        for source in native.sources {
-            let previousSource = previous
-                .appendingPathComponent(".build/mpvkit/dist/\(source.id == "mpv" ? "libmpv" : "FFmpeg")-\(source.ref)")
-            if gitContains(source) {
-                continue
-            }
-            let repository = try gitPath(source)
-            let lock = try FileLock(store.path("locks/git-\(hash(Data(source.url.utf8))).lock"))
-            defer { withExtendedLifetime(lock) {} }
-            try runner.run("git", ["-C", previousSource.path, "cat-file", "-e", source.commit + "^{commit}"])
-            if !exists(repository) {
-                try runner.run("git", ["init", "--bare", repository.path])
-            }
-            try runner.run("git", ["--git-dir", repository.path, "fetch", "--no-tags", previousSource.path, source.commit])
-        }
     }
 }

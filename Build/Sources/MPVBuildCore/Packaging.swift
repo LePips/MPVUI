@@ -1,7 +1,8 @@
 import Darwin
 import Foundation
 
-struct Artifact: Codable, Sendable {
+struct Artifact: Codable {
+
     let target: String
     let framework: String
     let module: String
@@ -11,7 +12,8 @@ struct Artifact: Codable, Sendable {
     let slices: [Slice]
 }
 
-struct ArtifactIndex: Codable, Sendable {
+struct ArtifactIndex: Codable {
+
     let releaseID: String
     let nativeInputFingerprint: String
     let buildRecordPath: String
@@ -19,15 +21,7 @@ struct ArtifactIndex: Codable, Sendable {
     let dependencies: [RuntimeAsset]
 }
 
-struct ProductDefinition: Codable, Sendable {
-    let target: String
-    let framework: String
-    let component: String
-    let library: String
-    let headerDirectory: String
-    var archive: String {
-        framework + ".xcframework.zip"
-    }
+struct ProductDefinition: Codable {
 
     static let all = [ProductDefinition(
         target: "Libmpv-GPL",
@@ -36,9 +30,19 @@ struct ProductDefinition: Codable, Sendable {
         library: "libmpv.a",
         headerDirectory: "mpv"
     )]
+    let target: String
+    let framework: String
+    let component: String
+    let library: String
+    let headerDirectory: String
+
+    var archive: String {
+        framework + ".xcframework.zip"
+    }
 }
 
 struct NativeBuildRecord: Codable {
+
     let nativeInputFingerprint: String
     let nativeLockDigest: String
     let componentDigests: [String: String]
@@ -46,7 +50,10 @@ struct NativeBuildRecord: Codable {
 }
 
 struct PackagingKey: Encodable {
-    struct Input: Encodable { let component: String
+
+    struct Input: Encodable {
+
+        let component: String
         let slice: Slice
         let architecture: String
         let digest: String
@@ -58,27 +65,98 @@ struct PackagingKey: Encodable {
     let metadataVersion: String
     let epoch: Int
     let nativeInputFingerprint: String
+    let nativeLockDigest: String
     let notices: String
     let license: String
     let releaseID: String
 }
 
 struct Packager {
+
     let graph: BuildGraph
+
+    static func normalizeMetadata(_ file: URL) throws {
+        var metadata = try plist(file)
+        guard let available = metadata["AvailableLibraries"] as? [[String: Any]]
+        else { throw BuildError("Missing XCFramework library inventory") }
+        var libraries: [[String: Any]] = []
+        for var library in available {
+            guard library["LibraryIdentifier"] is String,
+                  let architectures = library["SupportedArchitectures"] as? [String]
+            else { throw BuildError("Invalid XCFramework library metadata") }
+            library["SupportedArchitectures"] = architectures.sorted()
+            libraries.append(library)
+        }
+        // xcodebuild uses an unordered internal collection even when its input arguments are sorted.
+        metadata["AvailableLibraries"] = libraries.sorted { ($0["LibraryIdentifier"] as! String) < ($1["LibraryIdentifier"] as! String) }
+        try put(PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0), file)
+    }
+
+    static func platformName(_ slice: Slice) -> String {
+        [
+            "iphoneos": "iPhoneOS",
+            "iphonesimulator": "iPhoneSimulator",
+            "appletvos": "AppleTVOS",
+            "appletvsimulator": "AppleTVSimulator",
+            "macosx": "MacOSX",
+            "xros": "XROS",
+            "xrsimulator": "XRSimulator"
+        ][slice.sdk]!
+    }
+
+    static func versionFramework(_ root: URL, binary: String) throws {
+        let version = root.appendingPathComponent("Versions/A")
+        try mkdir(version.appendingPathComponent("Resources"))
+        for name in [binary, "Headers", "Modules"] {
+            try fm.moveItem(at: root.appendingPathComponent(name), to: version.appendingPathComponent(name))
+            try fm.createSymbolicLink(atPath: root.appendingPathComponent(name).path, withDestinationPath: "Versions/Current/" + name)
+        }
+        try fm.moveItem(at: root.appendingPathComponent("Info.plist"), to: version.appendingPathComponent("Resources/Info.plist"))
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("Versions/Current").path, withDestinationPath: "A")
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("Resources").path, withDestinationPath: "Versions/Current/Resources")
+    }
+
+    static func excludedHeaders(_ framework: String) -> [String] {
+        if framework == "Libavcodec" {
+            return ["xvmc", "vdpau", "qsv", "dxva2", "d3d11va", "d3d12va"]
+        }
+        if framework == "Libavutil" {
+            return [
+                "hwcontext_vulkan",
+                "hwcontext_vdpau",
+                "hwcontext_vaapi",
+                "hwcontext_qsv",
+                "hwcontext_opencl",
+                "hwcontext_dxva2",
+                "hwcontext_d3d11va",
+                "hwcontext_d3d12va",
+                "hwcontext_cuda",
+                "hwcontext_amf"
+            ]
+        }
+        return []
+    }
+
     func nativeFingerprint() throws -> String {
-        struct Identity: Encodable { let lock: NativeLock
+        struct Identity: Encodable {
+
+            let lock: NativeLock.ResolvedAppleInputs
             let code: [String: String]
             let support: [String: String]
         }
         let code = try tree(graph.codeRoot).filter { !BuildGraph.operationalFiles.contains($0.key) }
-        return try fingerprint(Identity(lock: graph.native, code: code, support: tree(graph.root.appendingPathComponent("Build/Support"))))
+        return try fingerprint(Identity(
+            lock: graph.native.appleBuildInputs,
+            code: code,
+            support: tree(graph.root.appendingPathComponent("Build/Support"))
+        ))
     }
 
     func package(_ products: [ThinProduct], slices: [Slice], profile: String, fresh: Bool, tag: String? = nil) throws -> URL {
         let nativeID = try nativeFingerprint()
         if tag != nil {
             try require(
-                profile == "release" && slices == graph.native.slices,
+                profile == "release" && slices == graph.native.apple.slices,
                 "Versioned artifacts require the complete release profile"
             )
         }
@@ -90,9 +168,10 @@ struct Packager {
                 .map { .init(component: $0.component, slice: $0.slice, architecture: $0.architecture, digest: $0.contentDigest) },
             slices: slices,
             implementation: digest(graph.codeRoot.appendingPathComponent("Packaging.swift")),
-            metadataVersion: graph.native.metadataVersion,
-            epoch: graph.native.sourceDateEpoch,
+            metadataVersion: graph.native.apple.metadataVersion,
+            epoch: graph.native.apple.sourceDateEpoch,
             nativeInputFingerprint: nativeID,
+            nativeLockDigest: fingerprint(graph.native),
             notices: hash(notices),
             license: hash(license),
             releaseID: release
@@ -160,7 +239,7 @@ struct Packager {
                         "CFBundleName": product.framework,
                         "CFBundlePackageType": "FMWK",
                         "CFBundleVersion": "1",
-                        "CFBundleShortVersionString": graph.native.metadataVersion.components(separatedBy: "-")[0],
+                        "CFBundleShortVersionString": graph.native.apple.metadataVersion.components(separatedBy: "-")[0],
                         "MinimumOSVersion": slice.minimumOS,
                         "CFBundleSupportedPlatforms": [Self.platformName(slice)]
                     ]
@@ -212,7 +291,10 @@ struct Packager {
                     framework: product.framework,
                     module: product.framework,
                     archive: archive.lastPathComponent,
-                    url: "https://github.com/\(graph.native.publication.repository)/releases/download/\(release)/\(archive.lastPathComponent)",
+                    url: """
+                    https://github.com/\(graph.native.apple.publication.repository)/releases/download/\(release)/\
+                    \(archive.lastPathComponent)
+                    """,
                     sha256: sha,
                     slices: slices
                 ))
@@ -262,7 +344,7 @@ struct Packager {
         var libraries = [("mpv", mpvRoot.appendingPathComponent("lib/libmpv.a"))]
         libraries += FFmpegRecipe.libraries.map { ($0, ffRoot.appendingPathComponent("lib/lib" + $0 + ".a")) }
         let builder = DependencyBuilder(inputs: graph.inputs, runner: graph.runner, store: graph.store)
-        for dependency in graph.native.dependencies.filter({ $0.slices.contains(slice.id) }).sorted(by: { $0.id < $1.id }) {
+        for dependency in graph.native.apple.dependencies.filter({ $0.slices.contains(slice.id) }).sorted(by: { $0.id < $1.id }) {
             let root = try builder.materialize(dependency, slice: slice, arch: arch)
             try require(
                 record.dependencies[dependency.id] == fingerprint(tree(root, excluding: ["record.json"])),
@@ -291,11 +373,12 @@ struct Packager {
             "Final XCFramework inventory mismatch"
         )
         for slice in slices {
+            guard let architecture = slice.architectures.first else { throw BuildError("Empty architecture inventory for \(slice.id)") }
+            let library = try XCFLibrary.select(libraries, slice: slice, arch: architecture)
+            try require(Set(library.architectures) == Set(slice.architectures), "Final architecture inventory mismatch")
+            let binary = library.binary(xcf)
+            try MachO.validate(binary, slice: slice)
             for arch in slice.architectures {
-                let library = try XCFLibrary.select(libraries, slice: slice, arch: arch)
-                try require(Set(library.architectures) == Set(slice.architectures), "Final architecture inventory mismatch")
-                let binary = library.binary(xcf)
-                _ = try MachO.validate(binary, slice: slice, arch: arch, allowOtherArchitectures: true)
                 if product.component == "mpv" {
                     let thin = graph.runner.logs.appendingPathComponent("verify-\(slice.id)-\(arch).dylib")
                     let magic = try Data(contentsOf: binary, options: .mappedIfSafe).uint(0)
@@ -308,7 +391,7 @@ struct Packager {
                         try fm.copyItem(at: binary.resolvingSymlinksInPath(), to: thin)
                     }
                     defer { try? remove(thin) }
-                    try verifyMPV(thin, slice: slice, contracts: graph.native.contracts, runner: graph.runner, isolated: true)
+                    try verifyMPV(thin, slice: slice, contracts: graph.native.apple.contracts, runner: graph.runner, isolated: true)
                     let headers = binary.deletingLastPathComponent().appendingPathComponent("Headers")
                     try NativeLibrary.verify(thin, exports: NativeLibrary.publicSymbols(in: headers), runner: graph.runner)
                 }
@@ -359,72 +442,10 @@ struct Packager {
                 try require(lchmod(path.path, 0o755) == 0, "Failed to normalize symlink mode: \(path.path)")
             }
             var times = [
-                timeval(tv_sec: graph.native.sourceDateEpoch, tv_usec: 0),
-                timeval(tv_sec: graph.native.sourceDateEpoch, tv_usec: 0)
+                timeval(tv_sec: graph.native.apple.sourceDateEpoch, tv_usec: 0),
+                timeval(tv_sec: graph.native.apple.sourceDateEpoch, tv_usec: 0)
             ]
             try require(lutimes(path.path, &times) == 0, "Failed to normalize timestamp: \(path.path)")
         }
-    }
-
-    static func normalizeMetadata(_ file: URL) throws {
-        var metadata = try plist(file)
-        guard let available = metadata["AvailableLibraries"] as? [[String: Any]]
-        else { throw BuildError("Missing XCFramework library inventory") }
-        var libraries: [[String: Any]] = []
-        for var library in available {
-            guard library["LibraryIdentifier"] is String,
-                  let architectures = library["SupportedArchitectures"] as? [String]
-            else { throw BuildError("Invalid XCFramework library metadata") }
-            library["SupportedArchitectures"] = architectures.sorted()
-            libraries.append(library)
-        }
-        // xcodebuild uses an unordered internal collection even when its input arguments are sorted.
-        metadata["AvailableLibraries"] = libraries.sorted { ($0["LibraryIdentifier"] as! String) < ($1["LibraryIdentifier"] as! String) }
-        try put(PropertyListSerialization.data(fromPropertyList: metadata, format: .xml, options: 0), file)
-    }
-
-    static func platformName(_ slice: Slice) -> String {
-        [
-            "iphoneos": "iPhoneOS",
-            "iphonesimulator": "iPhoneSimulator",
-            "appletvos": "AppleTVOS",
-            "appletvsimulator": "AppleTVSimulator",
-            "macosx": "MacOSX",
-            "xros": "XROS",
-            "xrsimulator": "XRSimulator"
-        ][slice.sdk]!
-    }
-
-    static func versionFramework(_ root: URL, binary: String) throws {
-        let version = root.appendingPathComponent("Versions/A")
-        try mkdir(version.appendingPathComponent("Resources"))
-        for name in [binary, "Headers", "Modules"] {
-            try fm.moveItem(at: root.appendingPathComponent(name), to: version.appendingPathComponent(name))
-            try fm.createSymbolicLink(atPath: root.appendingPathComponent(name).path, withDestinationPath: "Versions/Current/" + name)
-        }
-        try fm.moveItem(at: root.appendingPathComponent("Info.plist"), to: version.appendingPathComponent("Resources/Info.plist"))
-        try fm.createSymbolicLink(atPath: root.appendingPathComponent("Versions/Current").path, withDestinationPath: "A")
-        try fm.createSymbolicLink(atPath: root.appendingPathComponent("Resources").path, withDestinationPath: "Versions/Current/Resources")
-    }
-
-    static func excludedHeaders(_ framework: String) -> [String] {
-        if framework == "Libavcodec" {
-            return ["xvmc", "vdpau", "qsv", "dxva2", "d3d11va", "d3d12va"]
-        }
-        if framework == "Libavutil" {
-            return [
-                "hwcontext_vulkan",
-                "hwcontext_vdpau",
-                "hwcontext_vaapi",
-                "hwcontext_qsv",
-                "hwcontext_opencl",
-                "hwcontext_dxva2",
-                "hwcontext_d3d11va",
-                "hwcontext_d3d12va",
-                "hwcontext_cuda",
-                "hwcontext_amf"
-            ]
-        }
-        return []
     }
 }

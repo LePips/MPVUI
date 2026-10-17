@@ -1,13 +1,32 @@
 import Dispatch
+import MPVCore
 import SwiftUI
 
 /// Bridges MPVUI's platform renderer into the SwiftUI player hierarchy.
 @MainActor
-struct MPVPlayerSurface: PlatformViewRepresentable {
+struct MPVPlayerSurface {
+
     let player: MPVPlayer
     var overlay: MPVVideoOverlay?
+
     @Environment(\.self)
     private var environment
+}
+
+extension MPVPlayerSurface: PlatformViewRepresentable {
+
+    static func dismantlePlatformView(_ platformView: MPVPlatformVideoPlayer) {
+        let player = platformView.player
+        let shouldRestorePreviousSurface = platformView.isActiveRenderingSurface
+        MPVPlayerSurfaceRegistry.shared.unregister(platformView, for: player)
+        platformView.detach()
+        platformView.swiftUISourceWasDismantled()
+
+        guard shouldRestorePreviousSurface else { return }
+        DispatchQueue.main.async {
+            MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
+        }
+    }
 
     func makePlatformView() -> MPVPlatformVideoPlayer {
         let platformView = MPVPlatformVideoPlayer(player: player)
@@ -25,27 +44,6 @@ struct MPVPlayerSurface: PlatformViewRepresentable {
     func updatePlatformView(_ platformView: MPVPlatformVideoPlayer) {
         updateOverlay(platformView)
         platformView.updateRenderingConfiguration()
-    }
-
-    private func updateOverlay(_ platformView: MPVPlatformVideoPlayer) {
-        platformView.setVideoOverlay(overlay.map {
-            MPVVideoOverlay(
-                content: AnyView($0.content.environment(\.self, environment))
-            )
-        })
-    }
-
-    static func dismantlePlatformView(_ platformView: MPVPlatformVideoPlayer) {
-        let player = platformView.player
-        let shouldRestorePreviousSurface = platformView.isActiveRenderingSurface
-        MPVPlayerSurfaceRegistry.shared.unregister(platformView, for: player)
-        platformView.detach()
-        platformView.swiftUISourceWasDismantled()
-
-        guard shouldRestorePreviousSurface else { return }
-        DispatchQueue.main.async {
-            MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
-        }
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
@@ -73,4 +71,12 @@ struct MPVPlayerSurface: PlatformViewRepresentable {
         dismantlePlatformView(uiView)
     }
     #endif
+
+    private func updateOverlay(_ platformView: MPVPlatformVideoPlayer) {
+        platformView.setVideoOverlay(overlay.map {
+            MPVVideoOverlay(
+                content: AnyView($0.content.environment(\.self, environment))
+            )
+        })
+    }
 }

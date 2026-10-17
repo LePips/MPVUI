@@ -1,9 +1,12 @@
 import Dispatch
+import MPVCore
 
 /// Tracks weak SwiftUI playback surfaces and restores the most recent live one.
 @MainActor
 final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
+
     private final class Entry {
+
         let surface: WeakBox<Surface>
         var isInWindow = false
 

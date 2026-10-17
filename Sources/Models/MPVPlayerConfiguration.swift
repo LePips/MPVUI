@@ -1,3 +1,5 @@
+import MPVCore
+
 /// Immutable playback defaults and output options for ``MPVPlayer``.
 ///
 /// Use the player's methods to change runtime controls such as volume and playback rate.
@@ -19,6 +21,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
     /// The hardware-decoding strategy requested from mpv.
     public enum HardwareDecoding: String, CaseIterable, Equatable, Sendable {
+
         /// Selects a safe hardware decoder, preferring VideoToolbox for Metal output.
         case automatic = "auto-safe"
 
@@ -27,61 +30,24 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
         /// Decodes video in software.
         case disabled = "no"
+        package var coreValue: MPVHardwareDecoding {
+            switch self {
+            case .automatic: .automatic
+            case .videoToolbox: .videoToolbox
+            case .disabled: .disabled
+            }
+        }
     }
 
     /// How MPVUI configures HDR output and tone mapping.
-    public enum HDRPolicy: String, CaseIterable, Equatable, Sendable {
-        /// Matches the source, display capabilities, and current output route.
-        case automatic
-
-        /// Requests HDR output whenever the platform permits it.
-        case always
-
-        /// Disables HDR output and tone-map HDR sources to SDR.
-        case disabled
-
-        /// Requests HDR with the system's constrained brightness policy when supported.
-        case constrained
-
-        /// Requests HDR when the display and platform support it.
-        public static let hdrWhenAvailable = Self.always
-
-        /// Requests SDR conversion when supported by the selected backend.
-        public static let sdr = Self.disabled
-    }
+    public typealias HDRPolicy = MPVHDRPolicy
 
     /// The minimum severity of forwarded log messages. Each level includes more severe messages.
-    public enum LogLevel: String, CaseIterable, Equatable, Sendable {
-        /// Disables mpv log forwarding.
-        case none = "no"
-
-        /// Forwards fatal errors only.
-        case fatal
-
-        /// Forwards errors and more severe messages.
-        case error
-
-        /// Forwards warnings and more severe messages.
-        case warning = "warn"
-
-        /// Forwards informational messages and more severe messages.
-        case info
-
-        /// Also forwards playback status updates.
-        case status
-
-        /// Also forwards verbose diagnostics.
-        case verbose = "v"
-
-        /// Also forwards debugging diagnostics.
-        case debug
-
-        /// Forwards all trace messages.
-        case trace
-    }
+    public typealias LogLevel = MPVLogLevel
 
     /// The video presentation backend used for the player's lifetime.
     public enum VideoOutput: String, CaseIterable, Equatable, Sendable {
+
         /// Full `gpu-next` rendering through Metal and MoltenVK.
         case metal
 
@@ -89,7 +55,16 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         /// AVFoundation handles color conversion, bypassing `gpu-next` shaders and tone mapping.
         /// Unsupported native formats report a playback error.
         case sampleBuffer
+        package var coreValue: MPVVideoOutput {
+            switch self {
+            case .metal: .metal
+            case .sampleBuffer: .sampleBuffer
+            }
+        }
     }
+
+    /// Whether the player requests platform display matching.
+    public typealias DisplayMatching = MPVDisplayMatching
 
     // MARK: - Defaults
 
@@ -152,6 +127,12 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// ``additionalOptions`` can override these defaults.
     public let audio: MPVAudioConfiguration
 
+    /// Demuxer cache policy and packet memory limits.
+    public let cache: MPVCacheConfiguration
+
+    /// Display matching policy. Automatic supplies criteria on tvOS.
+    public let displayMatching: DisplayMatching
+
     /// Ownership of display conversion and SDR reference viewing behavior.
     /// - Note: Overrides have no effect with sample-buffer output. AVFoundation owns conversion.
     public let colorManagement: MPVColorManagement
@@ -196,6 +177,32 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// ``MPVPlayer/textSubtitleStream()`` in your own UI.
     public let additionalOptions: [String: String]
 
+    // MARK: - Normalization
+
+    /// Resolves the shared playback settings without carrying Apple display objects.
+    package var sessionConfiguration: MPVSessionConfiguration {
+        MPVSessionConfiguration(
+            additionalOptions: additionalOptions,
+            audio: audio,
+            autoPlay: autoPlay,
+            cache: cache,
+            deinterlace: deinterlace,
+            dolbyVisionPolicy: dolbyVisionPolicy,
+            hardwareDecoding: hardwareDecoding.coreValue,
+            hdrPolicy: hdrPolicy,
+            initialBufferSeconds: initialBufferSeconds,
+            logLevel: logLevel,
+            loop: loop,
+            networkCacheSeconds: networkCacheSeconds,
+            playbackRate: playbackRate,
+            renderingQuality: renderingQuality,
+            startTime: startTime,
+            subtitleLuminance: subtitleLuminance,
+            videoOutput: videoOutput.coreValue,
+            volume: volume
+        )
+    }
+
     // MARK: - Initialization
 
     /// Creates a configuration using the normalization rules documented on each property.
@@ -204,15 +211,17 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         additionalOptions: [String: String] = [:],
         audio: MPVAudioConfiguration = .init(),
         autoPlay: Bool = true,
+        cache: MPVCacheConfiguration = .init(),
         colorManagement: MPVColorManagement = .init(),
         deinterlace: MPVDeinterlacePolicy = .init(),
+        displayMatching: DisplayMatching = .automatic,
         dolbyVisionPolicy: MPVDolbyVisionPolicy = .strict,
         hardwareDecoding: HardwareDecoding = .automatic,
         hdrPolicy: HDRPolicy = .automatic,
-        initialBufferSeconds: Duration = .seconds(1),
+        initialBufferSeconds: Duration = defaultInitialBufferSeconds,
         logLevel: LogLevel = .warning,
         loop: Bool = false,
-        networkCacheSeconds: Duration = .seconds(10),
+        networkCacheSeconds: Duration = defaultNetworkCacheSeconds,
         playbackRate: Double = 1,
         renderingQuality: MPVRenderingQuality = .init(),
         sdrOutput: MPVSDROutputPolicy = .automatic,
@@ -224,6 +233,8 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.additionalOptions = additionalOptions
         self.audio = audio
         self.autoPlay = autoPlay
+        self.cache = cache
+        self.displayMatching = displayMatching
         self.colorManagement = colorManagement
         self.deinterlace = deinterlace
         self.dolbyVisionPolicy = dolbyVisionPolicy
@@ -233,28 +244,12 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.logLevel = logLevel
         self.loop = loop
         self.networkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
-        self.playbackRate = Self.normalizedPlaybackRate(playbackRate)
+        self.playbackRate = MPVSessionConfiguration.normalizedPlaybackRate(playbackRate)
         self.renderingQuality = renderingQuality
         self.sdrOutput = sdrOutput
         self.startTime = startTime?.clampPositiveOrZero
-        self.subtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)
+        self.subtitleLuminance = MPVSessionConfiguration.normalizedSubtitleLuminance(subtitleLuminance)
         self.videoOutput = videoOutput
-        self.volume = Self.normalizedVolume(volume)
-    }
-
-    // MARK: - Normalization
-
-    private static func normalizedPlaybackRate(_ value: Double) -> Double {
-        guard value.isFinite, value > 0 else { return defaultPlaybackRate }
-        return clamp(value, to: minimumPlaybackRate ... maximumPlaybackRate)
-    }
-
-    private static func normalizedSubtitleLuminance(_ value: Double) -> Double {
-        value.isFinite ? clamp(value, to: 1 ... 1000) : 203
-    }
-
-    private static func normalizedVolume(_ value: Double) -> Double {
-        guard !value.isNaN else { return defaultVolume }
-        return clamp(value, to: 0 ... 100)
+        self.volume = MPVSessionConfiguration.normalizedVolume(volume)
     }
 }

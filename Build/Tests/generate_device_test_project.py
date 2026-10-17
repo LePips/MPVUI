@@ -7,9 +7,9 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
-import sys
 
 
 SCHEME = "MPVUIRegressionTests"
@@ -97,9 +97,9 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
                 "type": "bundle.unit-test",
                 "platform": "iOS",
                 "sources": [
-                    {"path": str(repository / "Tests")},
+                    {"path": str(repository / "Tests"), "excludes": ["Core"]},
                     {"path": str(output / "TestBundle.swift")},
-                    {"path": str(output / "GeneratedMedia"), "buildPhase": "resources"},
+                    {"path": str(output / "GeneratedMedia"), "type": "folder", "buildPhase": "resources"},
                 ],
                 "dependencies": [{"target": HOST_TARGET}, {"package": "MPVUI"}],
                 "settings": {
@@ -108,6 +108,7 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
                         "GENERATE_INFOPLIST_FILE": "YES",
                         "TEST_HOST": f"$(BUILT_PRODUCTS_DIR)/{HOST_TARGET}.app/{HOST_TARGET}",
                         "BUNDLE_LOADER": "$(TEST_HOST)",
+                        "OTHER_SWIFT_FLAGS": f"$(inherited) -package-name {shlex.quote(repository.name.lower())}",
                         **signing,
                     }
                 },
@@ -133,17 +134,9 @@ def generate(repository: Path, output: Path, team: str | None = None) -> Path:
         raise ValueError("Development team must be the 10-character Apple team identifier")
     xcodegen = shutil.which("xcodegen")
     if not xcodegen:
-        raise RuntimeError("XcodeGen is required; install it with brew install xcodegen")
-    output.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            sys.executable,
-            str(repository / "Build/Tests/prepare_test_media.py"),
-            "--output",
-            str(output / "GeneratedMedia"),
-        ],
-        check=True,
-    )
+        raise RuntimeError("XcodeGen is required. Run brew bundle.")
+    # A folder reference includes fixtures prepared later by the test runner.
+    (output / "GeneratedMedia").mkdir(parents=True, exist_ok=True)
     (output / "TestBundle.swift").write_text(BUNDLE_ACCESSOR)
     (output / "TestHost.swift").write_text(HOST_SOURCE)
     spec = output / "project.json"

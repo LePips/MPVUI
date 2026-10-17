@@ -1,5 +1,6 @@
 #if os(iOS)
 import AVFoundation
+@testable import MPVCore
 @testable import MPVUI
 import QuartzCore
 import SwiftUI
@@ -9,6 +10,7 @@ import UIKit
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVOrientationResizeTests {
+
     @Test(arguments: [false, true], [false, true])
     func `system rotation animates video through intermediate sizes`(metal: Bool, playing: Bool) async throws {
         for swiftUI in [false, true] {
@@ -18,11 +20,15 @@ struct MPVOrientationResizeTests {
 
     private func validateRotation(metal: Bool, playing: Bool, swiftUI: Bool) async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null", "loop-file": "inf"], autoPlay: false,
-            hardwareDecoding: .disabled, hdrPolicy: .disabled,
-            sdrOutput: .compatibility8Bit, videoOutput: metal ? .metal : .sampleBuffer
+            additionalOptions: ["ao": "null", "loop-file": "inf"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            hdrPolicy: .disabled,
+            sdrOutput: .compatibility8Bit,
+            videoOutput: metal ? .metal : .sampleBuffer
         ))
         defer { fixture.close() }
+
         let scene = try #require(fixture.window.windowScene)
         fixture.window.rootViewController?.view = UIView()
         let content: UIViewController
@@ -32,7 +38,9 @@ struct MPVOrientationResizeTests {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         MPVVideoPlayer(player: fixture.player)
-                        Color.gray.frame(width: geometry.size.width * 0.25)
+
+                        Color.gray
+                            .frame(width: geometry.size.width * 0.25)
                     }
                 }
             )
@@ -46,6 +54,7 @@ struct MPVOrientationResizeTests {
         fixture.window.makeKeyAndVisible()
         fixture.window.layoutIfNeeded()
         try await eventually("rotation surface is hosted") { findSurface(in: controller.view) != nil }
+
         let surface = try #require(findSurface(in: controller.view))
         surface.activateRenderingSurface()
         try await rotate(scene, controller: controller, to: .portrait)
@@ -61,7 +70,8 @@ struct MPVOrientationResizeTests {
 
         for orientation in [UIInterfaceOrientation.landscapeRight, .portrait] {
             let finalBefore = MPVRenderSurfaceConfiguration.drawableSize(
-                for: surface.bounds.size, scale: host.contentsScale
+                for: surface.bounds.size,
+                scale: host.contentsScale
             )
             if metal {
                 try await eventually("previous rotation settled") { host.drawableSize == finalBefore }
@@ -103,13 +113,15 @@ struct MPVOrientationResizeTests {
                 }
                 try await Task.sleep(for: .milliseconds(8))
             }
+
             #expect(!controller.isRotating)
             #expect(scene.interfaceOrientation == orientation)
             #expect(presentationWidths.count > 5, "Rotation must animate through intermediate sizes instead of snapping")
             if metal {
                 #expect(viewportWidths.count > 5, "mpv must follow the changing aspect ratio throughout rotation")
                 let finalSize = MPVRenderSurfaceConfiguration.drawableSize(
-                    for: surface.bounds.size, scale: host.contentsScale
+                    for: surface.bounds.size,
+                    scale: host.contentsScale
                 )
                 try await eventually("rotation restores exact resolution") {
                     host.drawableSize == finalSize && !surface.resizeDiagnosticSnapshot.finalCommitRequired
@@ -127,10 +139,15 @@ struct MPVOrientationResizeTests {
                 #expect(fixture.player.position == startPosition)
             }
             print(
-                "Rotation \(swiftUI ? "SwiftUI" : "UIKit") \(metal ? "metal" : "native") \(playing ? "playing" : "paused") \(orientation.rawValue): \(sampleCount) intermediate samples, \(presentationWidths.count) view widths, \(viewportWidths.count) viewport widths"
+                """
+                Rotation \(swiftUI ? "SwiftUI" : "UIKit") \(metal ? "metal" : "native") \(playing ? "playing" : "paused") \
+                \(orientation.rawValue): \(sampleCount) intermediate samples, \(presentationWidths.count) view widths, \
+                \(viewportWidths.count) viewport widths
+                """
             )
         }
         let after = await fixture.player.lifecycleDiagnostics()
+
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.loadCommands == before.loadCommands)
         #expect(fixture.player.videoOutput == (metal ? .metal : .sampleBuffer))
@@ -169,10 +186,15 @@ struct MPVOrientationResizeTests {
 
 @MainActor
 private final class OrientationHostingController: UIViewController {
-    private let content: UIViewController
+
     var transitionCount = 0
     var transitionDuration: TimeInterval = 0
     var isRotating = false
+    private let content: UIViewController
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        .allButUpsideDown
+    }
 
     init(content: UIViewController) {
         self.content = content
@@ -182,10 +204,6 @@ private final class OrientationHostingController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        .allButUpsideDown
     }
 
     override func loadView() {

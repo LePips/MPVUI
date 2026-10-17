@@ -1,0 +1,95 @@
+diff --git a/src/dispatch.c b/src/dispatch.c
+--- a/src/dispatch.c
++++ b/src/dispatch.c
+@@ -323,7 +323,7 @@
+ 
+     // Enable all extensions needed for different types of input
+     bool has_ssbo = false, has_ubo = false, has_img = false, has_texel = false,
+-         has_ext = false, has_nofmt = false, has_gather = false;
++         has_ext = false, has_yuv = false, has_nofmt = false, has_gather = false;
+     for (int i = 0; i < sh->descs.num; i++) {
+         switch (sh->descs.elem[i].desc.type) {
+         case PL_DESC_BUF_UNIFORM: has_ubo = true; break;
+@@ -348,6 +348,7 @@
+             case PL_SAMPLER_NORMAL: break;
+             case PL_SAMPLER_RECT: break;
+             case PL_SAMPLER_EXTERNAL: has_ext = true; break;
++            case PL_SAMPLER_EXTERNAL_YUV: has_yuv = true; break;
+             case PL_SAMPLER_TYPE_COUNT: pl_unreachable();
+             }
+             break;
+@@ -367,6 +368,8 @@
+         ADD(pre, "#extension GL_ARB_shader_storage_buffer_object : enable\n");
+     if (has_texel)
+         ADD(pre, "#extension GL_ARB_texture_buffer_object : enable\n");
++    if (has_yuv)
++        ADD(pre, "#extension GL_EXT_YUV_target : require\n");
+     if (has_ext) {
+         if (gpu->glsl.version >= 300) {
+             ADD(pre, "#extension GL_OES_EGL_image_external_essl3 : enable\n");
+@@ -475,6 +478,7 @@
+                 [PL_SAMPLER_NORMAL][3]  = "sampler3D",
+                 [PL_SAMPLER_RECT][2]    = "sampler2DRect",
+                 [PL_SAMPLER_EXTERNAL][2] = "samplerExternalOES",
++                [PL_SAMPLER_EXTERNAL_YUV][2] = "__samplerExternal2DY2YEXT",
+             };
+ 
+             pl_tex tex = sd->binding.object;
+diff --git a/src/include/libplacebo/gpu.h b/src/include/libplacebo/gpu.h
+--- a/src/include/libplacebo/gpu.h
++++ b/src/include/libplacebo/gpu.h
+@@ -735,6 +735,7 @@
+     PL_SAMPLER_NORMAL,      // gsampler2D, gsampler3D etc.
+     PL_SAMPLER_RECT,        // gsampler2DRect
+     PL_SAMPLER_EXTERNAL,    // gsamplerExternalOES
++    PL_SAMPLER_EXTERNAL_YUV, // __samplerExternal2DY2YEXT, unconverted YUV
+     PL_SAMPLER_TYPE_COUNT,
+ };
+ 
+diff --git a/src/include/libplacebo/opengl.h b/src/include/libplacebo/opengl.h
+--- a/src/include/libplacebo/opengl.h
++++ b/src/include/libplacebo/opengl.h
+@@ -201,6 +201,10 @@
+ 
+     // The texture's GLint sized internal format (e.g. GL_RGBA16F). Required.
+     int iformat;
++
++    // Sample an external YUV texture without RGB conversion. Requires
++    // GL_TEXTURE_EXTERNAL_OES and GL_EXT_YUV_target; unsupported imports fail.
++    bool external_yuv;
+ };
+ 
+ #define pl_opengl_wrap_params(...) (&(struct pl_opengl_wrap_params) { __VA_ARGS__ })
+diff --git a/src/opengl/gpu_tex.c b/src/opengl/gpu_tex.c
+--- a/src/opengl/gpu_tex.c
++++ b/src/opengl/gpu_tex.c
+@@ -720,10 +720,18 @@
+         }
+     }
+ 
++    if (params->external_yuv) {
++        if (tex->sampler_type != PL_SAMPLER_EXTERNAL ||
++            !gl_test_ext(gpu, "GL_EXT_YUV_target", 0, 0))
++            goto error;
++        tex->sampler_type = PL_SAMPLER_EXTERNAL_YUV;
++    }
++
+     // Create optional extra fbo if needed/possible
+     bool can_fbo = tex_gl->texture &&
+                    (fmt->caps & PL_FMT_CAP_RENDERABLE) &&
+                    tex->sampler_type != PL_SAMPLER_EXTERNAL &&
++                   tex->sampler_type != PL_SAMPLER_EXTERNAL_YUV &&
+                    dims < 3;
+ 
+     if (can_fbo && !tex_gl->fbo) {
+diff --git a/src/shaders.c b/src/shaders.c
+--- a/src/shaders.c
++++ b/src/shaders.c
+@@ -642,6 +642,7 @@
+     [PL_SAMPLER_NORMAL]     = "sampler2D",
+     [PL_SAMPLER_RECT]       = "sampler2DRect",
+     [PL_SAMPLER_EXTERNAL]   = "samplerExternalOES",
++    [PL_SAMPLER_EXTERNAL_YUV] = "__samplerExternal2DY2YEXT",
+ };
+ 
+ ident_t sh_subpass(pl_shader sh, pl_shader sub)

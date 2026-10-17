@@ -3,6 +3,7 @@ import AppKit
 import CryptoKit
 import Darwin
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -11,6 +12,7 @@ import Testing
 @Suite(.tags(.benchmark), .serialized)
 @MainActor
 struct MPVRenderingBenchmarkTests {
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MPVUI_RUN_RENDERER_BENCHMARK"] == "1"))
     func `measure presets`() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -35,12 +37,15 @@ struct MPVRenderingBenchmarkTests {
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = NSWindow(
                 contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
-                styleMask: [.titled], backing: .buffered, defer: false
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
             )
             window.contentView = surface
             window.orderFront(nil)
             surface.layoutSubtreeIfNeeded()
             surface.activateRenderingSurface()
+            player.setDiagnosticsEnabled(true)
             player.load(media)
             for _ in 0 ..< 100 {
                 if player.state == .playing || player.lastError != nil {
@@ -57,6 +62,7 @@ struct MPVRenderingBenchmarkTests {
             let cpuSeconds = Double(clock() - cpuStart) / Double(CLOCKS_PER_SEC)
             let wallSeconds = wallStart.duration(to: .now).seconds
             let observed = player.playbackDiagnostics
+
             #expect(observed.renderingQuality.resolvedPreset == preset)
             #expect(!observed.renderingQuality.effectiveOptions.isEmpty)
             #expect(player.renderColorStatus.precision == .unorm8)
@@ -107,7 +113,10 @@ struct MPVRenderingBenchmarkTests {
             "warmupSeconds": 1,
             "order": "Rotated: battery/balanced/highQuality; balanced/highQuality/battery; highQuality/battery/balanced",
             "outputPoints": "1280x720",
-            "limitations": "Local process CPU and GPU pass timing. Includes diagnostics polling and test process overhead. No measured energy, calibrated image quality or physical refresh guarantee.",
+            "limitations": """
+            Local process CPU and GPU pass timing. Includes diagnostics polling and test process overhead. No measured energy, \
+            calibrated image quality or physical refresh guarantee.
+            """,
             "measurements": measurements,
         ]
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])

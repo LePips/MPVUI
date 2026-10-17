@@ -3,7 +3,6 @@
 
 import argparse
 import hashlib
-import json
 import os
 from pathlib import Path
 import plistlib
@@ -16,12 +15,15 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prepare_test_media import prepare
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from native_inputs import inputs_for, load
+
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--libplacebo-include", type=Path)
 parser.add_argument("--ffmpeg-prefix", type=Path)
 args = parser.parse_args()
-lock = json.loads((root / "Build/Inputs.lock.json").read_text())
+lock = inputs_for(load(root), "apple")
 source = next(s for s in lock["sources"] if s["id"] == "mpv")
 for locked_source in lock["sources"]:
     for patch in locked_source["patches"]:
@@ -87,17 +89,9 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         end = vo_source.index("\n}", start) + 2
         upload_functions.append(vo_source[start:end])
     (work / "video/out/upload_cache_functions.h").write_text("\n\n".join(upload_functions))
-    pool_functions = []
-    for function in [
-        "avf_pool_get_buffer_with_limit",
-        "avf_pool_get_buffer",
-        "avf_pool_get_reserve_buffer",
-        "avf_pool_get_buffer_for_frame",
-    ]:
-        start = vo_source.index("static CVReturn " + function + "(")
-        end = vo_source.index("\n}", start) + 2
-        pool_functions.append(vo_source[start:end])
-    (work / "video/out/pool_functions.h").write_text("\n\n".join(pool_functions))
+    start = vo_source.index("// Presentation pool capacity")
+    end = vo_source.index("// Create pixel-buffer pool.", start)
+    (work / "video/out/pool_functions.h").write_text(vo_source[start:end])
     # Compile the actual locked FFmpeg parser and patched serializer under the
     # sanitizers, not an uninstrumented cached serializer or a test reimplementation.
     ffsource = next(s for s in lock["sources"] if s["id"] == "ffmpeg")

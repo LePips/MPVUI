@@ -2,17 +2,20 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVPlaybackControlTests {
+
     @Test
     func `chapter controls navigate authored boundaries in both directions`() async throws {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused(TestPaths.multitrackMedia)
+
         #expect(fixture.player.mediaInformation.chapters.map(\.title) == ["Opening", "Middle", "Ending"])
         fixture.player.nextChapter()
         try await eventually("next chapter begins at four seconds") { abs(fixture.player.position.seconds - 4) < 0.2 }
@@ -20,6 +23,7 @@ struct MPVPlaybackControlTests {
         try await eventually("next chapter begins at eight seconds") { abs(fixture.player.position.seconds - 8) < 0.2 }
         fixture.player.previousChapter()
         try await eventually("previous chapter returns to four seconds") { abs(fixture.player.position.seconds - 4) < 0.2 }
+
         #expect(fixture.player.isPaused)
         #expect(fixture.player.lastError == nil)
     }
@@ -51,6 +55,7 @@ struct MPVPlaybackControlTests {
         delay = nil
         player.command("expand-properties", arguments: ["print-text", "AUDIO_DELAY=${=audio-delay}"])
         try await eventually("audio delay survives recreation") { delay == 0.25 }
+
         #expect(player.lastError == nil)
     }
 
@@ -60,12 +65,14 @@ struct MPVPlaybackControlTests {
         defer { fixture.close() }
         try await fixture.loadPaused()
         let player = fixture.player
+
         let clock = try #require(player.sampleBufferDisplayLayer.controlTimebase)
 
         player.togglePlayback()
         try await eventually("toggle resumes clock") { player.state == .playing && CMTimebaseGetRate(clock) > 0 }
         player.togglePlayback()
         try await eventually("toggle pauses clock") { player.isPaused && CMTimebaseGetRate(clock) == 0 }
+
         #expect(player.lastError == nil)
         #expect(await player.lifecycleDiagnostics().loadCommands == 1)
     }
@@ -80,6 +87,7 @@ struct MPVPlaybackControlTests {
         try await eventually("forward relative seek") { player.isPaused && abs(player.position.seconds - 1.4) < 0.1 }
         player.seek(by: .milliseconds(-800))
         try await eventually("backward relative seek") { player.isPaused && abs(player.position.seconds - 0.6) < 0.1 }
+
         #expect(player.lastError == nil)
         #expect(await player.lifecycleDiagnostics().loadCommands == 1)
     }
@@ -96,6 +104,7 @@ struct MPVPlaybackControlTests {
         let advanced = player.position
         player.stepBackward()
         try await eventually("previous decoded frame") { player.isPaused && player.position < advanced }
+
         #expect(abs(player.position.seconds - position.seconds) < 0.1)
         #expect(player.lastError == nil)
     }
@@ -106,15 +115,18 @@ struct MPVPlaybackControlTests {
         defer { fixture.close() }
         try await fixture.loadPaused()
         let player = fixture.player
+
         let clock = try #require(player.sampleBufferDisplayLayer.controlTimebase)
         player.setPlaybackRate(1.5)
         player.play()
         try await eventually("native clock at requested rate") { player.state == .playing && abs(CMTimebaseGetRate(clock) - 1.5) < 0.01 }
         player.pause()
         try await eventually("rate change remains paused") { player.isPaused && CMTimebaseGetRate(clock) == 0 }
+
         #expect(player.playbackRate == 1.5)
         player.play()
         try await eventually("resumed clock retains rate") { player.state == .playing && abs(CMTimebaseGetRate(clock) - 1.5) < 0.01 }
+
         #expect(player.lastError == nil)
     }
 
@@ -132,6 +144,7 @@ struct MPVPlaybackControlTests {
         player.toggleMute()
         player.command("cycle", arguments: ["mute"])
         try await eventually("native mute cycle observation") { !player.isMuted }
+
         #expect(player.lastError == nil)
     }
 
@@ -140,7 +153,9 @@ struct MPVPlaybackControlTests {
         output: MPVPlayerConfiguration.VideoOutput
     ) async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false, videoOutput: output
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            videoOutput: output
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()
@@ -149,6 +164,7 @@ struct MPVPlaybackControlTests {
         player.stop()
         try await eventually("stop acknowledged") { player.state == .stopped }
         let stopped = await player.lifecycleDiagnostics()
+
         #expect(stopped.handlesDestroyed == before.handlesDestroyed + 1)
         #expect(stopped.handlesCreated == before.handlesCreated)
         #expect(player.isPaused && player.position == .zero)
@@ -157,9 +173,11 @@ struct MPVPlaybackControlTests {
         fixture.surface.activateRenderingSurface()
         fixture.surface.detach()
         fixture.surface.activateRenderingSurface()
+
         #expect(await player.lifecycleDiagnostics().handlesCreated == stopped.handlesCreated)
         player.togglePlayback()
         try await eventually("stopped media reloaded") { player.state == .playing && player.position.seconds < 0.8 }
+
         #expect(player.mediaInformation.sourceURL == TestPaths.baselineMedia)
         #expect(player.lastError == nil)
         #expect(await player.lifecycleDiagnostics().loadCommands == 2)
@@ -169,7 +187,10 @@ struct MPVPlaybackControlTests {
     @Test
     func `stop replay restores external selections and native runtime properties`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"], autoPlay: false, logLevel: .info, videoOutput: .sampleBuffer
+            additionalOptions: ["ao": "null"],
+            autoPlay: false,
+            logLevel: .info,
+            videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         let files = try TemporaryTestDirectory()
@@ -202,9 +223,11 @@ struct MPVPlaybackControlTests {
             }
         }
         player.command("expand-properties", arguments: [
-            "print-text", "REPLAY_RUNTIME volume=${=volume} mute=${mute} speed=${=speed} audio=${=audio-delay} sub=${=sub-delay}",
+            "print-text",
+            "REPLAY_RUNTIME volume=${=volume} mute=${mute} speed=${=speed} audio=${=audio-delay} sub=${=sub-delay}",
         ])
         try await eventually("native replay properties observed") { observed.count == 5 }
+
         #expect(observed["volume"].flatMap(Double.init) == 37)
         #expect(observed["mute"] == "yes")
         #expect(observed["speed"].flatMap(Double.init) == 1.25)
@@ -222,13 +245,15 @@ struct MPVPlaybackControlTests {
         let player = fixture.player
         player.load(files.url.appendingPathComponent("missing.mp4"))
         try await eventually("missing file failure") { player.state.error != nil }
-        guard case let .playbackFailed(code, message) = player.state.error else {
-            Issue.record("Expected mpv's end-file loading error, got \(String(describing: player.state.error))")
+        guard case let .loadFailed(code, message) = player.state.error else {
+            Issue.record("Expected a load failure before the source is loaded, got \(String(describing: player.state.error))")
             return
         }
+
         #expect(code == MPV_ERROR_LOADING_FAILED.rawValue)
         #expect(!message.isEmpty)
         try await fixture.loadPaused()
+
         #expect(player.lastError == nil)
         #expect(player.state.error == nil)
         #expect(player.mediaInformation.sourceURL == TestPaths.baselineMedia)

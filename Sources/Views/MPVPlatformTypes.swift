@@ -1,3 +1,4 @@
+import MPVCore
 #if canImport(UIKit)
 import SwiftUI
 import UIKit

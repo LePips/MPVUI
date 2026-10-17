@@ -122,7 +122,7 @@ class DeviceABTests(unittest.TestCase):
     def test_repository_root_skips_nested_build_package(self):
         self.assertTrue((ROOT / "Build/Package.swift").is_file())
         self.assertTrue((ROOT / "Build/Benchmarks/device_playback.py").is_file())
-        self.assertTrue((ROOT / "Example/MPVUIExample/Shared/PlaybackBenchmark.swift").is_file())
+        self.assertTrue((ROOT / "Example/Sources/MPVUIExample/PlaybackBenchmark.swift").is_file())
         self.assertEqual(self.harness.ROOT, ROOT)
 
     def test_raw_progress_fallback_and_metric_claims_are_revalidated(self):
@@ -217,7 +217,7 @@ class DeviceABTests(unittest.TestCase):
         bench.mkdir(parents=True)
         (bench / "device_playback.py").write_text('def source_identity(): return {"sourceSHA256":"synthetic-source","files":{}}\n')
         derived = self.directory / "build"
-        app = derived / "Build/Products/Release-iphoneos/MPVUIExample.app/MPVUIExample"
+        app = derived / "Build/Products/Release-iphoneos/MPVUI.app/MPVUI"
         app.parent.mkdir(parents=True)
         app.write_text("synthetic executable")
         stamp = derived / "mpvui-benchmark-build.json"

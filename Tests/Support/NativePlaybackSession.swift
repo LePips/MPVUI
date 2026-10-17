@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Libmpv
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
@@ -8,15 +9,22 @@ import Testing
 /// Call `close()` from `defer`. Keep assertions in the behavior's test suite.
 @MainActor
 final class NativePlaybackSession {
+
     private let handle: OpaquePointer
 
     init(options: [String: String] = [:]) throws {
         handle = try #require(mpv_create())
         do {
             for (name, value) in [
-                "vo": "null", "ao": "null", "idle": "yes", "pause": "yes",
-                "keep-open": "yes", "hwdec": "no", "audio": "no",
-                "image-display-duration": "inf", "msg-level": "all=error",
+                "vo": "null",
+                "ao": "null",
+                "idle": "yes",
+                "pause": "yes",
+                "keep-open": "yes",
+                "hwdec": "no",
+                "audio": "no",
+                "image-display-duration": "inf",
+                "msg-level": "all=error",
             ].merging(options, uniquingKeysWith: { _, new in new }) {
                 try #require(mpv_set_option_string(handle, name, value) >= 0)
             }
@@ -44,6 +52,18 @@ final class NativePlaybackSession {
         guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &node) >= 0 else { return nil }
         defer { mpv_free_node_contents(&node) }
         return MPVNodeValue(copying: node)
+    }
+
+    func consumePlaybackRestart() -> Bool {
+        while let event = mpv_wait_event(handle, 0)?.pointee {
+            if event.event_id == MPV_EVENT_NONE {
+                return false
+            }
+            if event.event_id == MPV_EVENT_PLAYBACK_RESTART {
+                return true
+            }
+        }
+        return false
     }
 
     @discardableResult

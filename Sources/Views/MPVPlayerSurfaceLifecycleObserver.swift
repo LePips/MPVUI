@@ -1,8 +1,10 @@
 import Foundation
+import MPVCore
 
 /// Mirrors window lifecycle changes for SwiftUI-created playback surfaces.
 @MainActor
 final class MPVPlayerSurfaceLifecycleObserver: PlatformView {
+
     private weak var surface: MPVPlatformVideoPlayer?
     private weak var player: MPVPlayer?
     private var shouldRestorePreviousSurface = false
@@ -20,25 +22,6 @@ final class MPVPlayerSurfaceLifecycleObserver: PlatformView {
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) is unavailable")
-    }
-
-    private func platformWillMove(toWindow newWindow: PlatformWindow?) {
-        if newWindow == nil {
-            shouldRestorePreviousSurface = surface?.isActiveRenderingSurface == true
-        }
-    }
-
-    private func platformDidMoveToWindow() {
-        guard let surface, let player else { return }
-        MPVPlayerSurfaceRegistry.shared.surfaceDidMoveToWindow(
-            surface,
-            player: player,
-            isInWindow: window != nil,
-            shouldRestorePreviousSurface: shouldRestorePreviousSurface
-        )
-        if window == nil {
-            shouldRestorePreviousSurface = false
-        }
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
@@ -62,4 +45,23 @@ final class MPVPlayerSurfaceLifecycleObserver: PlatformView {
         platformDidMoveToWindow()
     }
     #endif
+
+    private func platformWillMove(toWindow newWindow: PlatformWindow?) {
+        if newWindow == nil {
+            shouldRestorePreviousSurface = surface?.isActiveRenderingSurface == true
+        }
+    }
+
+    private func platformDidMoveToWindow() {
+        guard let surface, let player else { return }
+        MPVPlayerSurfaceRegistry.shared.surfaceDidMoveToWindow(
+            surface,
+            player: player,
+            isInWindow: window != nil,
+            shouldRestorePreviousSurface: shouldRestorePreviousSurface
+        )
+        if window == nil {
+            shouldRestorePreviousSurface = false
+        }
+    }
 }

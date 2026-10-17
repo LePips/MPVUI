@@ -1,10 +1,13 @@
 import Foundation
+import MPVCore
 
 /// Replays the latest subtitle snapshot to each subscriber.
 /// Independent newest-one buffers prevent slow renderers from blocking delivery
 /// or accumulating stale cues.
 final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
+
     private struct State {
+
         var latest = TextSubtitleSnapshot()
         var continuations: [UUID: AsyncStream<TextSubtitleSnapshot>.Continuation] = [:]
         var isTerminated = false

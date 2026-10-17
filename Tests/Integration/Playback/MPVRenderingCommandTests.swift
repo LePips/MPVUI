@@ -1,17 +1,22 @@
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration), .serialized)
 @MainActor
 struct MPVRenderingCommandTests {
+
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `rendering properties commands and feature requests keep the same client`(
         output: MPVPlayerConfiguration.VideoOutput
     ) async throws {
         let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null", "sid": "no"], autoPlay: false,
-            hardwareDecoding: .disabled, logLevel: .info, videoOutput: output
+            additionalOptions: ["ao": "null", "sid": "no"],
+            autoPlay: false,
+            hardwareDecoding: .disabled,
+            logLevel: .info,
+            videoOutput: output
         ))
         defer { fixture.close() }
         try await fixture.loadPaused(TestPaths.baselineMedia, at: .seconds(1))
@@ -31,8 +36,10 @@ struct MPVRenderingCommandTests {
         player.command("print-text", arguments: ["RENDERING_COMMANDS_COMPLETE"])
         try await eventually("rendering commands accepted") { completed }
         let result = player.requestVideoFeatures([.nativeSubtitles, .bakedOverlays, .zoomAndPan])
+
         #expect(result.outcome == .available)
         let after = await player.lifecycleDiagnostics()
+
         #expect(player.videoOutput == output)
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.handlesDestroyed == before.handlesDestroyed)
@@ -42,6 +49,7 @@ struct MPVRenderingCommandTests {
         #expect(player.lastError == nil)
         player.load(TestPaths.baselineMedia, autoPlay: false)
         try await eventually("same backend after another load") { player.state == .paused }
+
         #expect(player.videoOutput == output)
     }
 }

@@ -1,3 +1,4 @@
+import MPVCore
 #if os(macOS) && !targetEnvironment(macCatalyst)
 import _MPVUIPictureInPicture
 import AppKit
@@ -6,11 +7,17 @@ import AppKit
 /// in the controller. The adapter supplies only presentation and its callbacks.
 @MainActor
 protocol MPVMacPiPPresenting: AnyObject {
+
     var delegate: (any MPVMacPiPDelegate)? { get set }
+
     func present(_ content: NSViewController) throws
+
     func dismiss(_ content: NSViewController) throws
+
     func setReplacementWindow(_ window: NSWindow?, rect: NSRect)
+
     func updatePlaying(_ playing: Bool, aspectRatio: NSSize)
+
     func updatePlaybackRate(_ rate: Double, elapsedTime: TimeInterval, duration: TimeInterval)
 }
 
@@ -19,8 +26,15 @@ extension MPVMacPiP: MPVMacPiPPresenting {}
 /// Keeps one mpv session and its rendering view alive in the private system host.
 /// Public sample-buffer PiP is not the macOS implementation used here.
 @MainActor
-final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
+final class MPVMacPictureInPictureController: NSObject {
+
     let isSupported: Bool
+    private(set) var isActive = false
+    private(set) var isTransitioning = false
+    var onStateChange: (@MainActor () -> Void)?
+    var onFailure: (@MainActor (MPVPlayerError) -> Void)?
+    var restoreUserInterface: (@MainActor () async -> Bool)?
+
     private weak var player: MPVPlayer?
     private let systemController: (any MPVMacPiPPresenting)?
     private weak var sourceSurface: MPVPlatformVideoPlayer?
@@ -34,15 +48,9 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
     private var presentationGeneration = 0
     private let restorationTimeoutDuration: Duration
 
-    private(set) var isActive = false
-    private(set) var isTransitioning = false
     var presentsVideoOverlay: Bool {
         hosting?.surface.videoOverlay != nil
     }
-
-    var onStateChange: (@MainActor () -> Void)?
-    var onFailure: (@MainActor (MPVPlayerError) -> Void)?
-    var restoreUserInterface: (@MainActor () async -> Bool)?
 
     var hasInlineSource: Bool {
         let replacement = replacementSurface.flatMap { $0.window != nil ? $0 : nil }
@@ -89,6 +97,13 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
 
     isolated deinit {
         invalidate()
+    }
+
+    static func presentationSize(dimensions: MPVVideoDimensions?, rotation: Int) -> CGSize {
+        let width = max(dimensions?.effectiveWidth ?? 16, 1)
+        let height = max(dimensions?.effectiveHeight ?? 9, 1)
+        let swapsAxes = abs(rotation % 180) == 90
+        return CGSize(width: swapsAxes ? height : width, height: swapsAxes ? width : height)
     }
 
     func attach(to surface: MPVPlatformVideoPlayer) {
@@ -161,7 +176,8 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
                 armTransitionTimeout(generation: generation, starting: true)
             }
         } catch {
-            reportFailure(.pictureInPictureFailed(operation: .start, message: error.localizedDescription))
+            let description = (error as? MPVPlayerError)?.localizedDescription ?? error.localizedDescription
+            reportFailure(.pictureInPictureFailed(operation: .start, message: description))
             finishPresentation()
         }
     }
@@ -193,7 +209,8 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
                     self.armTransitionTimeout(generation: generation, starting: false)
                 }
             } catch {
-                self.reportFailure(.pictureInPictureFailed(operation: .stop, message: error.localizedDescription))
+                let description = (error as? MPVPlayerError)?.localizedDescription ?? error.localizedDescription
+                self.reportFailure(.pictureInPictureFailed(operation: .stop, message: description))
                 self.finishPresentation()
             }
         }
@@ -244,48 +261,6 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
         onStateChange?()
     }
 
-    func pictureInPictureShouldClose() -> Bool {
-        if isStopping || isInvalidated {
-            return true
-        }
-        // Restore the app before asking the framework to animate back to it.
-        stop()
-        return false
-    }
-
-    func pictureInPictureWillClose() {
-        isTransitioning = true
-        onStateChange?()
-    }
-
-    func pictureInPictureDidClose() {
-        finishPresentation()
-    }
-
-    func pictureInPictureSetPlaying(_ playing: Bool) {
-        guard let player, !isInvalidated else { return }
-        playing ? player.play() : player.pause()
-        systemController?.updatePlaying(
-            playing,
-            aspectRatio: Self.presentationSize(
-                dimensions: player.mediaInformation.dimensions,
-                rotation: player.mediaInformation.rotation
-            )
-        )
-    }
-
-    func pictureInPictureSkip(by interval: TimeInterval) {
-        guard let player, player.isSeekable, interval.isFinite, !isInvalidated else { return }
-        player.seek(to: (player.position + .seconds(interval)).clampPositiveOrZero)
-    }
-
-    static func presentationSize(dimensions: MPVVideoDimensions?, rotation: Int) -> CGSize {
-        let width = max(dimensions?.effectiveWidth ?? 16, 1)
-        let height = max(dimensions?.effectiveHeight ?? 9, 1)
-        let swapsAxes = abs(rotation % 180) == 90
-        return CGSize(width: swapsAxes ? height : width, height: swapsAxes ? width : height)
-    }
-
     private func updateReplacementWindow(bringForward: Bool) {
         let replacement = replacementSurface.flatMap { $0.window != nil ? $0 : nil }
         let inlineView: NSView? = replacement ?? hosting?.placeholder
@@ -294,7 +269,8 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
             return
         }
         systemController?.setReplacementWindow(
-            window, rect: inlineView.convert(inlineView.bounds, to: nil)
+            window,
+            rect: inlineView.convert(inlineView.bounds, to: nil)
         )
         if bringForward {
             window.deminiaturize(nil)
@@ -355,8 +331,47 @@ final class MPVMacPictureInPictureController: NSObject, MPVMacPiPDelegate {
     }
 }
 
+extension MPVMacPictureInPictureController: MPVMacPiPDelegate {
+
+    func pictureInPictureShouldClose() -> Bool {
+        if isStopping || isInvalidated {
+            return true
+        }
+        // Restore the app before asking the framework to animate back to it.
+        stop()
+        return false
+    }
+
+    func pictureInPictureWillClose() {
+        isTransitioning = true
+        onStateChange?()
+    }
+
+    func pictureInPictureDidClose() {
+        finishPresentation()
+    }
+
+    func pictureInPictureSetPlaying(_ playing: Bool) {
+        guard let player, !isInvalidated else { return }
+        playing ? player.play() : player.pause()
+        systemController?.updatePlaying(
+            playing,
+            aspectRatio: Self.presentationSize(
+                dimensions: player.mediaInformation.dimensions,
+                rotation: player.mediaInformation.rotation
+            )
+        )
+    }
+
+    func pictureInPictureSkip(by interval: TimeInterval) {
+        guard let player, player.isSeekable, interval.isFinite, !isInvalidated else { return }
+        player.seek(to: (player.position + .seconds(interval)).clampPositiveOrZero)
+    }
+}
+
 @MainActor
 private final class MPVMacPiPContentController: NSViewController {
+
     var onAppear: (@MainActor () -> Void)?
     var onLayout: (@MainActor () -> Void)?
 
@@ -375,6 +390,7 @@ private final class MPVMacPiPContentController: NSViewController {
 /// The placeholder preserves inline geometry while the exact Metal view moves.
 @MainActor
 final class MPVMacPiPViewHosting {
+
     let surface: MPVPlatformVideoPlayer
     let container: NSView
     let placeholder: NSView
@@ -469,6 +485,33 @@ final class MPVMacPiPViewHosting {
         surface.moveVideoOverlay(to: container)
     }
 
+    private static func canActivate(_ constraint: NSLayoutConstraint) -> Bool {
+        func view(_ item: AnyObject?) -> NSView? {
+            (item as? NSView) ?? (item as? NSLayoutGuide)?.owningView
+        }
+        guard let first = view(constraint.firstItem) else { return false }
+        guard let secondItem = constraint.secondItem else { return true }
+        guard let second = view(secondItem) else { return false }
+        var ancestor: NSView? = first
+        while let current = ancestor {
+            if second === current || second.isDescendant(of: current) {
+                return true
+            }
+            ancestor = current.superview
+        }
+        return false
+    }
+
+    private static func isPublicLayoutAttribute(_ attribute: NSLayoutConstraint.Attribute) -> Bool {
+        switch attribute {
+        case .notAnAttribute, .left, .right, .top, .bottom, .leading, .trailing,
+             .width, .height, .centerX, .centerY, .firstBaseline, .lastBaseline:
+            true
+        default:
+            false
+        }
+    }
+
     @discardableResult
     func restore() -> Bool {
         guard !didRestore else { return surface.window != nil }
@@ -495,33 +538,6 @@ final class MPVMacPiPViewHosting {
         placeholderConstraints = []
         surface.superview?.layoutSubtreeIfNeeded()
         return surface.window != nil
-    }
-
-    private static func canActivate(_ constraint: NSLayoutConstraint) -> Bool {
-        func view(_ item: AnyObject?) -> NSView? {
-            (item as? NSView) ?? (item as? NSLayoutGuide)?.owningView
-        }
-        guard let first = view(constraint.firstItem) else { return false }
-        guard let secondItem = constraint.secondItem else { return true }
-        guard let second = view(secondItem) else { return false }
-        var ancestor: NSView? = first
-        while let current = ancestor {
-            if second === current || second.isDescendant(of: current) {
-                return true
-            }
-            ancestor = current.superview
-        }
-        return false
-    }
-
-    private static func isPublicLayoutAttribute(_ attribute: NSLayoutConstraint.Attribute) -> Bool {
-        switch attribute {
-        case .notAnAttribute, .left, .right, .top, .bottom, .leading, .trailing,
-             .width, .height, .centerX, .centerY, .firstBaseline, .lastBaseline:
-            true
-        default:
-            false
-        }
     }
 }
 #endif

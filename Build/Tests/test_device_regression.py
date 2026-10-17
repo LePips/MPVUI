@@ -176,9 +176,9 @@ class DeviceRegressionTests(unittest.TestCase):
 
     def test_stale_source_xcode_or_app_prevents_skip_build(self):
         with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory) / "MPVUIExample.app"
+            app = Path(directory) / "MPVUI.app"
             app.mkdir()
-            binary = app / "MPVUIExample"
+            binary = app / "MPVUI"
             binary.write_bytes(b"built app")
             expected = {"source": "current-source", "xcode": "current-xcode"}
             saved = dict(expected, appSHA256=regression.digest(binary))

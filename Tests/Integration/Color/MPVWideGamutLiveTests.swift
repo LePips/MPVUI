@@ -1,18 +1,21 @@
 #if os(macOS)
 import AppKit
 import Foundation
+@testable import MPVCore
 @testable import MPVUI
 import Testing
 
 @Suite(.tags(.integration, .hdr), .serialized)
 @MainActor
 struct MPVWideGamutLiveTests {
+
     @Test
     func `calibrated ICC and LUT open the declared SDR renderer`() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let icc = directory.appendingPathComponent("display.icc")
+
         let profile = try #require(CGColorSpace(name: CGColorSpace.displayP3))
         try (#require(profile.copyICCData()) as Data).write(to: icc)
         let lut = directory.appendingPathComponent("identity.cube")
@@ -25,7 +28,8 @@ struct MPVWideGamutLiveTests {
             let player = MPVPlayer(configuration: .init(
                 autoPlay: false,
                 colorManagement: .init(displayProfile: mode),
-                hdrPolicy: .disabled, videoOutput: .metal
+                hdrPolicy: .disabled,
+                videoOutput: .metal
             ))
             let surface = MPVPlatformVideoPlayer(player: player)
             let window = makeWindow(surface)
@@ -37,6 +41,7 @@ struct MPVWideGamutLiveTests {
             try await eventually("live color configuration") {
                 player.state == .paused && player.mediaInformation.hdr.output.pixelFormat != nil
             }
+
             #expect(player.renderColorStatus.conversionOwner == owner)
             #expect(player.renderColorStatus.fallbackReason == nil)
             #expect(player.mediaInformation.hdr.output.pixelFormat?.contains("8") == true)
@@ -63,6 +68,7 @@ struct MPVWideGamutLiveTests {
             }
             let output = player.mediaInformation.hdr.output
             let expectedFloat = policy == .automatic
+
             #expect(player.mediaInformation.hdr.presentation.configuredDynamicRange == .sdr)
             #expect(player.renderColorStatus.precision == (expectedFloat ? .float16 : .unorm8))
             #expect(output.primaries == (expectedFloat ? "display-p3" : "bt.709"))
@@ -70,6 +76,7 @@ struct MPVWideGamutLiveTests {
                 output.pixelFormat?.contains(expectedFloat ? "16" : "8") == true,
                 "Actual renderer output format: \(String(describing: output.pixelFormat))"
             )
+
             #expect(player.lastError == nil)
         }
     }
@@ -95,6 +102,7 @@ struct MPVWideGamutLiveTests {
             player.renderColorStatus.precision == .unorm8 && player.mediaInformation.hdr.output.primaries == "bt.709"
         }
         let after = await player.lifecycleDiagnostics()
+
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(after.handlesDestroyed == before.handlesDestroyed)
         #expect(after.loadCommands == before.loadCommands)
@@ -110,6 +118,7 @@ struct MPVWideGamutLiveTests {
         try await eventually("live color configuration") {
             player.renderColorStatus.precision == .float16 && player.mediaInformation.hdr.output.primaries == "display-p3"
         }
+
         #expect(player.mediaInformation.hdr.output.pixelFormat?.contains("16") == true)
         #expect(await player.lifecycleDiagnostics().handlesCreated == before.handlesCreated)
     }
@@ -117,7 +126,9 @@ struct MPVWideGamutLiveTests {
     private func makeWindow(_ surface: MPVPlatformVideoPlayer) -> NSWindow {
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 640, height: 360),
-            styleMask: [.titled], backing: .buffered, defer: false
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
         )
         window.contentView = surface
         window.orderFront(nil)
