@@ -12,7 +12,8 @@ struct MPVEDRLiveUpdateTests {
     @Test
     func `constrained Metal HDR permits the requested compositor adaptation`() {
         guard #available(macOS 26.0, *) else { return }
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .constrained, videoOutput: .metal))
+
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, hdrPolicy: .constrained, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.configureMetalLayer(usesExtendedDynamicRange: true, scale: 1, outputHeadroom: 2)
 
@@ -27,13 +28,16 @@ struct MPVEDRLiveUpdateTests {
     @Test
     func `native sample buffer layer receives the explicit dynamic range policy`() {
         guard #available(macOS 26.0, *) else { return }
+
         for policy in MPVPlayerConfiguration.HDRPolicy.allCases {
             let player = MPVPlayer(configuration: .init(
-                autoPlay: false,
+                automaticallyPlays: false,
                 hdrPolicy: policy,
                 videoOutput: .sampleBuffer
             ))
+
             let surface = MPVPlatformVideoPlayer(player: player)
+
             let window = NSWindow(
                 contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
                 styleMask: [.titled],
@@ -43,6 +47,7 @@ struct MPVEDRLiveUpdateTests {
             window.contentView = surface
             surface.layoutSubtreeIfNeeded()
             surface.activateRenderingSurface()
+
             let expected: CALayer.DynamicRange = switch policy {
             case .automatic: .automatic
             case .always: .high
@@ -53,16 +58,20 @@ struct MPVEDRLiveUpdateTests {
             #expect(player.sampleBufferDisplayLayer.preferredDynamicRange == expected)
             #expect(player.sampleBufferDisplayLayer.toneMapMode == .ifSupported)
             #expect(player.videoOutput == .sampleBuffer)
+
             let layer = player.sampleBufferDisplayLayer
             let scaleChanges = OSAllocatedUnfairLock(initialState: 0)
+
             let scaleObservation = layer.observe(\.contentsScale) { _, _ in
                 scaleChanges.withLock { $0 += 1 }
             }
+
             for _ in 0 ..< 10 {
                 surface.updateRenderingConfiguration()
             }
 
             #expect(scaleChanges.withLock { $0 } == 0)
+
             // Equality checks must read the layer's current policy rather than
             // cache a previous write: native lifecycle work can replace it.
             layer.contentsScale = 0.5
@@ -81,9 +90,10 @@ struct MPVEDRLiveUpdateTests {
 
     @Test
     func `brightness changes use current headroom without reloading playback`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .always, videoOutput: .metal))
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, hdrPolicy: .always, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         surface.edrHeadroomOverrideForTesting = (current: 2, potential: 8)
+
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 640, height: 360),
             styleMask: [.titled],
@@ -93,39 +103,52 @@ struct MPVEDRLiveUpdateTests {
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
         surface.activateRenderingSurface()
+
         defer {
             surface.detach()
             window.contentView = nil
         }
+
         for _ in 0 ..< 100 {
             if await player.lifecycleDiagnostics().handlesCreated > 0 {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
-        player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .milliseconds(400))
+
+        player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .milliseconds(400))
+
         for _ in 0 ..< 100 {
             if player.state == .paused {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         try #require(player.state == .paused)
+
         let before = await player.lifecycleDiagnostics()
         try #require(before.handlesCreated == 1)
+
         let layer = surface.metalLayer
+
         if #available(macOS 26.0, *) {
             #expect(layer.contentsHeadroom == 2)
         }
 
         surface.edrHeadroomOverrideForTesting = (current: 1.5, potential: 8)
         surface.updateRenderingConfiguration()
+
         for _ in 0 ..< 100 {
             if await player.lifecycleDiagnostics().liveColorUpdates > before.liveColorUpdates {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         let changed = await player.lifecycleDiagnostics()
 
         #expect(changed.liveColorUpdates > before.liveColorUpdates)
@@ -136,6 +159,7 @@ struct MPVEDRLiveUpdateTests {
         #expect(abs(player.position.seconds - 0.4) < 0.15)
         #expect(player.lastError == nil)
         #expect(surface.metalLayer === layer)
+
         if #available(macOS 26.0, *) {
             #expect(layer.contentsHeadroom == 1.5)
         }

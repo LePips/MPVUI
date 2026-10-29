@@ -15,6 +15,7 @@ struct MPVSemanticSubtitleIntegrationTests {
     func `query reads unselected embedded cues beyond playback cache`() throws {
         let handle = try #require(mpv_create())
         defer { mpv_terminate_destroy(handle) }
+
         for (name, value) in [
             ("vo", "null"),
             ("ao", "null"),
@@ -25,6 +26,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         ] {
             #expect(mpv_set_option_string(handle, name, value) >= 0)
         }
+
         try #require(mpv_initialize(handle) >= 0)
         try #require(runCommand(handle, ["loadfile", TestPaths.multitrackMedia.path]) >= 0)
         try #require(waitForEvent(handle, id: MPV_EVENT_FILE_LOADED, timeout: 10))
@@ -41,7 +43,9 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+
         let external = directory.appendingPathComponent("query.vtt")
+
         try """
         WEBVTT
 
@@ -55,12 +59,14 @@ struct MPVSemanticSubtitleIntegrationTests {
         try #require(runCommand(handle, ["sub-add", external.path, "auto"]) >= 0)
 
         let externalTrack = try #require(waitForSubtitleTracks(handle, minimumCount: 4, timeout: 5)?.first { $0.isExternal })
+
         let externalTimeline = try #require(MPVTextSubtitleTimeline.snapshots(from: commandValue(
             handle,
             ["sub-text-cues", String(externalTrack.mpvID)]
         )))
 
         #expect(externalTimeline.map(\.snapshot.text) == ["external cue", "external last"])
+
         guard case .webVTT = externalTimeline.first?.snapshot.regions.first?.placement else {
             Issue.record("External WebVTT settings were lost")
             return
@@ -70,12 +76,15 @@ struct MPVSemanticSubtitleIntegrationTests {
     @Test
     @MainActor
     func `public queries and paused seeks include cues containing the destination`() async throws {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled))
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled))
         let recorder = SemanticSubtitleRecorder()
         player.setTextSubtitleInterceptionEnabled(true)
-        let observation = record(player.textSubtitleStream(), in: recorder)
+
+        let observation = record(player.makeTextSubtitleStream(), in: recorder)
         defer { observation.cancel() }
+
         let surface = MPVPlatformVideoPlayer(player: player)
+
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
             styleMask: [.titled],
@@ -85,16 +94,20 @@ struct MPVSemanticSubtitleIntegrationTests {
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
         surface.updateRenderingConfiguration()
+
         defer { surface.detach()
             window.contentView = nil
         }
-        player.load(TestPaths.multitrackMedia, autoPlay: false)
+
+        player.load(TestPaths.multitrackMedia, playAutomatically: false)
         try #require(try await waitForPlayer(player) { !$0.subtitleTracks.isEmpty && $0.state == .paused })
 
         let track = try #require(player.subtitleTracks.first { $0.title == "Overlapping cues" })
+
         player.disableTrack(.subtitle)
         try #require(try await waitForPlayer(player) { !$0.subtitleTracks.contains(where: \.isSelected) })
         player.setSubtitleDelay(.seconds(2))
+
         let position = player.position
         let all = try await player.textSubtitleSnapshots(for: track.id)
 
@@ -104,6 +117,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         #expect(player.position == position)
         #expect(player.isPaused)
         #expect(!player.subtitleTracks.contains { $0.isSelected })
+
         let cancelled = Task { try await player.textSubtitleSnapshots(for: track.id) }
         cancelled.cancel()
         await #expect(throws: CancellationError.self) { try await cancelled.value }
@@ -111,10 +125,13 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         // Start in the middle of a cue that began far before the seek target.
         try #require(await player.seekForPictureInPicture(to: .seconds(15)))
+
         let beforeEnable = recorder.values.count
+
         player.selectTrack(track.id)
 
         #expect(await waitForSnapshot(in: recorder, after: beforeEnable) { $0.text == "long cue" } != nil)
+
         for (destination, expected) in [
             (3.0, "first cue\nlong cue\noverlap"),
             (3, "first cue\nlong cue\noverlap"),
@@ -123,6 +140,7 @@ struct MPVSemanticSubtitleIntegrationTests {
             (1, "first cue\nlong cue")
         ] {
             let beforeSeek = recorder.values.count
+
             try #require(await player.seekForPictureInPicture(to: .seconds(destination)))
 
             #expect(
@@ -132,6 +150,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
             #expect(player.isPaused)
         }
+
         #expect(player.lastError == nil)
     }
 
@@ -141,18 +160,23 @@ struct MPVSemanticSubtitleIntegrationTests {
         let player = MPVPlayer(configuration: .init(
             // The shared baseline also has example sidecars; this test supplies its own.
             additionalOptions: ["ao": "null", "sub-auto": "no"],
-            autoPlay: false,
+            automaticallyPlays: false,
             hardwareDecoding: .disabled,
             videoOutput: .sampleBuffer
         ))
+
         let recorder = SemanticSubtitleRecorder()
         player.setTextSubtitleInterceptionEnabled(true)
-        let observation = record(player.textSubtitleStream(), in: recorder)
+
+        let observation = record(player.makeTextSubtitleStream(), in: recorder)
         defer { observation.cancel() }
+
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+
         let firstFile = directory.appendingPathComponent("primary.srt")
         let secondFile = directory.appendingPathComponent("secondary.srt")
+
         for (url, start, text) in [(firstFile, "05", "primary later"), (secondFile, "07", "secondary later")] {
             try """
             1
@@ -165,11 +189,14 @@ struct MPVSemanticSubtitleIntegrationTests {
 
             """.write(to: url, atomically: true, encoding: .utf8)
         }
+
         // Queue both external selections before a surface exists.
-        player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(2))
+        player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(2))
         player.loadExternalSubtitle(firstFile)
         player.loadExternalSubtitle(secondFile, selecting: .secondary)
+
         let surface = MPVPlatformVideoPlayer(player: player)
+
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 320, height: 180),
             styleMask: [.titled],
@@ -179,10 +206,12 @@ struct MPVSemanticSubtitleIntegrationTests {
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
         surface.updateRenderingConfiguration()
+
         defer { player.stop()
             surface.detach()
             window.contentView = nil
         }
+
         try #require(try await waitForPlayer(player) {
             $0.state == .paused && $0.selectedSubtitle() != nil && $0.selectedSubtitle(for: .secondary) != nil
         })
@@ -190,11 +219,13 @@ struct MPVSemanticSubtitleIntegrationTests {
         let primary = try #require(player.selectedSubtitle())
         let secondary = try #require(player.selectedSubtitle(for: .secondary))
         #expect(primary.id != secondary.id)
+
         let initial = try #require(await waitForSnapshot(in: recorder) { $0.text == "shared\nshared" })
         #expect(initial.regions.map(\.role) == [.primary, .secondary])
         #expect(initial.regions.map(\.trackID) == [primary.id, secondary.id])
 
         var before = recorder.values.count
+
         player.selectSubtitle(nil)
 
         let secondaryOnly = try #require(await waitForSnapshot(in: recorder, after: before) { $0.text == "shared" })
@@ -210,6 +241,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         #expect(await waitForSnapshot(in: recorder, after: before) {
             $0.regions.map(\.role) == [.secondary]
         } != nil)
+
         player.setSubtitleDelay(.zero)
         before = recorder.values.count
         player.setSubtitleDelay(.seconds(-5), for: .secondary)
@@ -223,6 +255,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         #expect(await waitForSnapshot(in: recorder, after: before) {
             $0.text == "shared" && $0.regions.first?.role == .secondary
         } != nil)
+
         player.setSubtitlesVisible(false, for: .secondary)
 
         #expect(await waitForSnapshot(in: recorder, after: before) { $0.isEmpty } != nil)
@@ -241,6 +274,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         // Moving a track disables its old slot, even when the text is identical.
         before = recorder.values.count
         player.selectSubtitle(primary.id, for: .secondary)
+
         try #require(try await waitForPlayer(player) {
             $0.selectedSubtitle() == nil && $0.selectedSubtitle(for: .secondary)?.id == primary.id
         })
@@ -248,6 +282,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         #expect(await waitForSnapshot(in: recorder, after: before) {
             $0.regions.count == 1 && $0.regions.first?.trackID == primary.id && $0.regions.first?.role == .secondary
         } != nil)
+
         player.selectSubtitle(secondary.id)
         try #require(try await waitForPlayer(player) { $0.selectedSubtitle()?.id == secondary.id })
 
@@ -260,6 +295,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         player.play()
         player.pause()
         player.seek(to: .seconds(2))
+
         try #require(try await waitForPlayer(player) {
             $0.videoOutput == .sampleBuffer && $0.state == .paused
                 && abs($0.position.seconds - 2) < 0.2
@@ -282,6 +318,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         #expect(timeline.first?.snapshot.regions.first?.trackID == primary.id)
         #expect(timeline.first?.snapshot.regions.first?.role == nil)
+
         // Seeking can deliver the desired snapshot before its async completion.
         // Resetting an already-inactive primary cue need not emit it again.
         before = recorder.values.count
@@ -295,7 +332,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         player.setSubtitleDelay(.seconds(4))
         player.setSubtitleDelay(.seconds(4), for: .secondary)
         _ = await player.lifecycleDiagnostics()
-        player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(2))
+        player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(2))
         try #require(try await waitForPlayer(player) { $0.state == .paused && $0.subtitleTracks.isEmpty })
 
         #expect(player.selectedSubtitle(for: .secondary) == nil)
@@ -305,6 +342,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         #expect(await waitForSnapshot(in: recorder, after: before) { $0.text == "shared\nshared" } != nil)
         try #require(try await waitForPlayer(player) { $0.selectedSubtitle(for: .secondary) != nil })
+
         let selected = player.selectedSubtitle(for: .secondary)?.id
         let unselected = directory.appendingPathComponent("unselected.srt")
         try FileManager.default.copyItem(at: firstFile, to: unselected)
@@ -326,6 +364,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         let handle = try #require(mpv_create())
         var initialized = false
+
         defer {
             if initialized {
                 mpv_terminate_destroy(handle)
@@ -349,6 +388,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
+
         initialized = true
 
         #expect(FileManager.default.fileExists(atPath: media.path))
@@ -358,6 +398,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         let tracks = try #require(
             waitForSubtitleTracks(handle, minimumCount: 4, timeout: 5)
         )
+
         for codec in [
             "ass",
             "hdmv_pgs_subtitle",
@@ -365,6 +406,7 @@ struct MPVSemanticSubtitleIntegrationTests {
             "dvb_subtitle",
         ] {
             let track = try #require(tracks.first { $0.codec == codec })
+
             #expect(
                 mpv_set_property_string(handle, "sid", String(track.mpvID)) >= 0
             )
@@ -379,6 +421,7 @@ struct MPVSemanticSubtitleIntegrationTests {
     func `native snapshots preserve primary secondary order and visibility`() throws {
         let handle = try #require(mpv_create())
         var initialized = false
+
         defer {
             if initialized {
                 mpv_terminate_destroy(handle)
@@ -402,6 +445,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
+
         initialized = true
 
         let video = TestPaths.baselineMedia
@@ -469,11 +513,13 @@ struct MPVSemanticSubtitleIntegrationTests {
         )
 
         #expect(mpv_set_property_string(handle, "sub-visibility", "no") >= 0)
+
         #expect(
             waitForSubtitleTexts(handle, expected: ["secondary semantic cue"])
         )
 
         #expect(mpv_set_property_string(handle, "sub-visibility", "yes") >= 0)
+
         #expect(
             waitForSubtitleTexts(handle, expected: [
                 "primary semantic cue",
@@ -505,18 +551,23 @@ struct MPVSemanticSubtitleIntegrationTests {
         let player = MPVPlayer(
             configuration: .init(
                 additionalOptions: ["sub-auto": "no"],
-                autoPlay: false,
+                automaticallyPlays: false,
                 hdrPolicy: .disabled
             )
         )
+
         let firstRecorder = SemanticSubtitleRecorder()
         let secondRecorder = SemanticSubtitleRecorder()
         player.setTextSubtitleInterceptionEnabled(true)
-        let firstStream = player.textSubtitleStream()
+
+        let firstStream = player.makeTextSubtitleStream()
+
         player.setTextSubtitleInterceptionEnabled(true)
-        let secondStream = player.textSubtitleStream()
+
+        let secondStream = player.makeTextSubtitleStream()
         let firstObservation = record(firstStream, in: firstRecorder)
         let secondObservation = record(secondStream, in: secondRecorder)
+
         defer {
             firstObservation.cancel()
             secondObservation.cancel()
@@ -531,6 +582,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         )
 
         let surface = MPVPlatformVideoPlayer(player: player)
+
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 640, height: 360),
             styleMask: [.titled],
@@ -541,6 +593,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         window.contentView = surface
         surface.layoutSubtreeIfNeeded()
         surface.updateRenderingConfiguration()
+
         defer {
             surface.detach()
             window.contentView = nil
@@ -548,7 +601,9 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         let temporaryDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
         let subtitle = temporaryDirectory.appendingPathComponent("public-stream.srt")
+
         try """
         1
         00:00:00,000 --> 00:00:03,000
@@ -563,7 +618,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         let video = TestPaths.baselineMedia
 
         #expect(FileManager.default.fileExists(atPath: video.path))
-        player.load(video, autoPlay: false)
+        player.load(video, playAutomatically: false)
         player.loadExternalTrack(subtitle, type: .subtitle, select: true)
 
         #expect(
@@ -573,6 +628,7 @@ struct MPVSemanticSubtitleIntegrationTests {
                 }
             }
         )
+
         player.seek(to: .seconds(1))
 
         let firstCue = try #require(
@@ -588,7 +644,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         )
 
         let lateRecorder = SemanticSubtitleRecorder()
-        let lateObservation = record(player.textSubtitleStream(), in: lateRecorder)
+        let lateObservation = record(player.makeTextSubtitleStream(), in: lateRecorder)
         defer { lateObservation.cancel() }
 
         #expect(
@@ -617,6 +673,7 @@ struct MPVSemanticSubtitleIntegrationTests {
 
         let secondCountBeforeClear = secondRecorder.values.count
         let lateCountBeforeClear = lateRecorder.values.count
+
         player.setProperty("sub-visibility", to: "no")
 
         #expect(
@@ -636,6 +693,7 @@ struct MPVSemanticSubtitleIntegrationTests {
         )
 
         let secondCountBeforeRestore = secondRecorder.values.count
+
         player.setProperty("sub-visibility", to: "yes")
         player.seek(to: .seconds(5))
 
@@ -651,15 +709,20 @@ struct MPVSemanticSubtitleIntegrationTests {
     private func commandValue(_ handle: OpaquePointer, _ arguments: [String]) -> MPVNodeValue? {
         var pointers: [UnsafePointer<CChar>?] = arguments.map { argument in
             guard let duplicate = strdup(argument) else { return nil }
+
             return UnsafePointer(duplicate)
         }
         pointers.append(nil)
+
         defer { for case let pointer? in pointers {
             free(UnsafeMutablePointer(mutating: pointer))
         } }
+
         var result = mpv_node()
         guard mpv_command_ret(handle, &pointers, &result) >= 0 else { return nil }
+
         defer { mpv_free_node_contents(&result) }
+
         return MPVNodeValue(copying: result)
     }
 
@@ -667,10 +730,12 @@ struct MPVSemanticSubtitleIntegrationTests {
         let directory = FileManager.default
             .temporaryDirectory
             .appendingPathComponent("MPVUI-semantic-subtitles-\(UUID().uuidString)")
+
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
         )
+
         return directory
     }
 
@@ -689,14 +754,17 @@ struct MPVSemanticSubtitleIntegrationTests {
     ) -> Int32 {
         var cArguments: [UnsafePointer<CChar>?] = arguments.map { argument in
             guard let duplicate = strdup(argument) else { return nil }
+
             return UnsafePointer(duplicate)
         }
         cArguments.append(nil)
+
         defer {
             for case let pointer? in cArguments {
                 free(UnsafeMutablePointer(mutating: pointer))
             }
         }
+
         return mpv_command(handle, &cArguments)
     }
 
@@ -706,12 +774,15 @@ struct MPVSemanticSubtitleIntegrationTests {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             guard let event = mpv_wait_event(handle, 0.05) else { continue }
+
             if event.pointee.event_id == id {
                 return true
             }
         }
+
         return false
     }
 
@@ -721,16 +792,20 @@ struct MPVSemanticSubtitleIntegrationTests {
         timeout: TimeInterval
     ) -> [MPVMediaTrack]? {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             let tracks = MPVSession.parseTracks(
                 copiedNode(handle, property: "track-list")
             )
             .filter { $0.type == .subtitle }
+
             if tracks.count >= minimumCount {
                 return tracks
             }
+
             _ = mpv_wait_event(handle, 0.05)
         }
+
         return nil
     }
 
@@ -740,15 +815,19 @@ struct MPVSemanticSubtitleIntegrationTests {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             let tracks = MPVSession.parseTracks(
                 copiedNode(handle, property: "track-list")
             )
+
             if tracks.first(where: { $0.id == id })?.isSelected == true {
                 return true
             }
+
             _ = mpv_wait_event(handle, 0.05)
         }
+
         return false
     }
 
@@ -758,14 +837,17 @@ struct MPVSemanticSubtitleIntegrationTests {
         timeout: TimeInterval = 5
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             if subtitleTexts(
                 from: copiedNode(handle, property: "sub-text-snapshot")
             ) == expected {
                 return true
             }
+
             _ = mpv_wait_event(handle, 0.05)
         }
+
         return false
     }
 
@@ -774,10 +856,13 @@ struct MPVSemanticSubtitleIntegrationTests {
         property: String
     ) -> MPVNodeValue? {
         var node = mpv_node()
+
         guard mpv_get_property(handle, property, MPV_FORMAT_NODE, &node) >= 0 else {
             return nil
         }
+
         defer { mpv_free_node_contents(&node) }
+
         return MPVNodeValue(copying: node)
     }
 
@@ -809,8 +894,10 @@ struct MPVSemanticSubtitleIntegrationTests {
             if let snapshot = recorder.values.dropFirst(previousCount).first(where: predicate) {
                 return snapshot
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return recorder.values.dropFirst(previousCount).first(where: predicate)
     }
 
@@ -823,8 +910,10 @@ struct MPVSemanticSubtitleIntegrationTests {
             if predicate(player) {
                 return true
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return predicate(player)
     }
 }

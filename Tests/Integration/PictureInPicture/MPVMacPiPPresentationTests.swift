@@ -14,6 +14,7 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
+
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: nil)
         var failure: MPVPlayerError?
         controller.onFailure = { failure = $0 }
@@ -31,14 +32,19 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
         presenter.appearsImmediately = false
+
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
+
         let initial = await fixture.player.lifecycleDiagnostics()
         let layer = fixture.surface.metalLayer
+
         controller.attach(to: fixture.surface)
 
         #expect(controller.hasInlineSource)
@@ -53,6 +59,7 @@ struct MPVMacPiPPresentationTests {
         controller.start()
 
         #expect(presenter.presentCount == 1)
+
         let content = try #require(presenter.content)
         content.viewDidAppear()
         content.viewDidLayout()
@@ -73,6 +80,7 @@ struct MPVMacPiPPresentationTests {
         content.viewDidAppear()
 
         #expect(!controller.isActive)
+
         let final = await fixture.player.lifecycleDiagnostics()
 
         #expect(final.handlesCreated == initial.handlesCreated)
@@ -84,20 +92,25 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
         controller.attach(to: fixture.surface)
+
         var failure: MPVPlayerError?
         controller.onFailure = { failure = $0 }
         presenter.failsToPresent = starting
         presenter.failsToDismiss = !starting
         controller.start()
+
         if !starting {
             controller.stop()
         }
+
         try await eventually("presenter failure is reported") { failure != nil }
 
         #expect(failure == .pictureInPictureFailed(
@@ -121,21 +134,27 @@ struct MPVMacPiPPresentationTests {
         let presenter = ControlledPiPPresenter()
         presenter.appearsImmediately = !starting
         presenter.closesImmediately = false
+
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
         controller.attach(to: fixture.surface)
+
         var failure: MPVPlayerError?
         controller.onFailure = { failure = $0 }
         controller.start()
 
         let content = try #require(presenter.content)
+
         if !starting {
             controller.stop()
         }
+
         try await eventually("missing system callback times out", timeout: .seconds(7)) { failure != nil }
 
         #expect(failure == .pictureInPictureTimedOut(operation: starting ? .start : .stop))
@@ -150,24 +169,31 @@ struct MPVMacPiPPresentationTests {
     func `stalled interface restoration is cancelled and releases the surface`() async throws {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
+
         let controller = MPVMacPictureInPictureController(
             player: fixture.player,
             restorationTimeout: .milliseconds(30),
             systemController: presenter
         )
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
+
         var failure: MPVPlayerError?
         var cancelled = false
         controller.onFailure = { failure = $0 }
-        controller.restoreUserInterface = {
+
+        controller.userInterfaceRestorationHandler = {
             do { try await Task.sleep(for: .seconds(60)) }
             catch { cancelled = true }
+
             return true
         }
+
         controller.attach(to: fixture.surface)
         controller.start()
         controller.stop()
@@ -184,12 +210,14 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
-        controller.restoreUserInterface = { false }
+        controller.userInterfaceRestorationHandler = { false }
         controller.attach(to: fixture.surface)
         controller.start()
         controller.stop()
@@ -206,11 +234,13 @@ struct MPVMacPiPPresentationTests {
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
         let replacement = MPVPlatformVideoPlayer(player: fixture.player)
+
         defer {
             controller.invalidate()
             replacement.detach()
             fixture.close()
         }
+
         try await fixture.loadPaused()
         controller.attach(to: fixture.surface)
         controller.start()
@@ -236,11 +266,13 @@ struct MPVMacPiPPresentationTests {
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
         let replacement = MPVPlatformVideoPlayer(player: fixture.player)
+
         defer {
             controller.invalidate()
             replacement.detach()
             fixture.close()
         }
+
         try await fixture.loadPaused()
         controller.attach(to: fixture.surface)
         controller.start()
@@ -263,25 +295,34 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
+
         let (decisions, continuation) = AsyncStream<Bool>.makeStream()
         defer { continuation.finish() }
+
         var enteredRestoration = false
-        controller.restoreUserInterface = {
+
+        controller.userInterfaceRestorationHandler = {
             enteredRestoration = true
+
             for await decision in decisions {
                 return decision
             }
+
             return false
         }
+
         controller.attach(to: fixture.surface)
         controller.start()
 
         let content = try #require(presenter.content)
+
         controller.stop()
         try await eventually("restoration has suspended") { enteredRestoration }
         controller.invalidate()
@@ -291,7 +332,7 @@ struct MPVMacPiPPresentationTests {
 
         #expect(presenter.delegate == nil)
         #expect(!controller.isActive && !controller.isTransitioning)
-        #expect(controller.onStateChange == nil && controller.restoreUserInterface == nil)
+        #expect(controller.onStateChange == nil && controller.userInterfaceRestorationHandler == nil)
         #expect(fixture.surface.window === fixture.window)
     }
 
@@ -300,10 +341,12 @@ struct MPVMacPiPPresentationTests {
         let fixture = PlaybackFixture()
         let presenter = ControlledPiPPresenter()
         let controller = MPVMacPictureInPictureController(player: fixture.player, systemController: presenter)
+
         defer {
             controller.invalidate()
             fixture.close()
         }
+
         try await fixture.loadPaused()
         controller.attach(to: fixture.surface)
         controller.pictureInPictureSetPlaying(true)
@@ -362,10 +405,13 @@ extension ControlledPiPPresenter: MPVMacPiPPresenting {
 
     func present(_ content: NSViewController) throws {
         presentCount += 1
+
         if failsToPresent {
             throw failure
         }
+
         self.content = content
+
         if appearsImmediately {
             content.viewDidAppear()
         }
@@ -373,9 +419,11 @@ extension ControlledPiPPresenter: MPVMacPiPPresenting {
 
     func dismiss(_ content: NSViewController) throws {
         dismissCount += 1
+
         if failsToDismiss {
             throw failure
         }
+
         if closesImmediately {
             delegate?.pictureInPictureWillClose()
             delegate?.pictureInPictureDidClose()

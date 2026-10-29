@@ -55,6 +55,7 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
     ) {
         let key = ObjectIdentifier(player)
         var surfaces = liveSurfaces(for: key)
+
         guard let entry = surfaces.first(where: { $0.surface.value === surface }) else {
             return
         }
@@ -65,6 +66,7 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
             surfaces.removeAll { $0 === entry }
             surfaces.append(entry)
         }
+
         surfacesByPlayer[key] = surfaces
 
         if !isInWindow, shouldRestorePreviousSurface {
@@ -79,14 +81,17 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
 
         let key = ObjectIdentifier(player)
         let surfaces = liveSurfaces(for: key)
+
         guard !surfaces.isEmpty else {
             surfacesByPlayer.removeValue(forKey: key)
             return
         }
+
         surfacesByPlayer[key] = surfaces
 
         guard let entry = surfaces.reversed().first(where: {
             guard let surface = $0.surface.value else { return false }
+
             return $0.isInWindow && isAttachedToWindow(surface)
         }),
             let surface = entry.surface.value
@@ -108,6 +113,7 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
     private func scheduleRestoringMostRecentSurface(for player: MPVPlayer) {
         DispatchQueue.main.async { [weak self, weak player] in
             guard let self, let player else { return }
+
             self.activateMostRecentSurface(for: player)
         }
     }

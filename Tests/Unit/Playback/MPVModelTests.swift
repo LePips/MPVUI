@@ -8,23 +8,24 @@ struct MPVModelTests {
     @Test
     func `timing configuration keeps negative durations out of native options`() {
         let configuration = MPVPlayerConfiguration(
-            initialBufferSeconds: .seconds(-2),
-            networkCacheSeconds: .seconds(-10),
+            initialBufferDuration: .seconds(-2),
+            networkCacheDuration: .seconds(-10),
             startTime: .seconds(-1)
         )
 
         #expect(configuration.startTime == .zero)
-        #expect(configuration.networkCacheSeconds == .zero)
-        #expect(configuration.initialBufferSeconds == .zero)
+        #expect(configuration.networkCacheDuration == .zero)
+        #expect(configuration.initialBufferDuration == .zero)
+
         let positive = MPVPlayerConfiguration(
-            initialBufferSeconds: .seconds(3),
-            networkCacheSeconds: .seconds(30),
+            initialBufferDuration: .seconds(3),
+            networkCacheDuration: .seconds(30),
             startTime: nil
         )
 
         #expect(positive.startTime == nil)
-        #expect(positive.networkCacheSeconds == .seconds(30))
-        #expect(positive.initialBufferSeconds == .seconds(3))
+        #expect(positive.networkCacheDuration == .seconds(30))
+        #expect(positive.initialBufferDuration == .seconds(3))
     }
 
     @Test
@@ -54,7 +55,7 @@ struct MPVModelTests {
 
         #expect(failed.isTerminal)
         #expect(failed.error == error)
-        #expect(error.localizedDescription == "Load media: Could not open media")
+        #expect(error.message == "Load media: Could not open media")
     }
 
     @Test

@@ -1,5 +1,7 @@
-/// Playback and picture-in-picture failures. mpv API errors retain their native code and message.
-public enum MPVPlayerError: Equatable, Sendable {
+/// A playback, external playback, or picture-in-picture failure.
+///
+/// Native failures retain their error code. ``message`` provides diagnostic context.
+public enum MPVPlayerError: Error, Equatable, Sendable {
 
     /// The picture-in-picture operation that failed or timed out.
     public enum PictureInPictureOperation: Equatable, Sendable {
@@ -47,8 +49,8 @@ public enum MPVPlayerError: Equatable, Sendable {
     /// The specified picture-in-picture operation timed out.
     case pictureInPictureTimedOut(operation: PictureInPictureOperation)
 
-    /// A readable description of the failure.
-    public var localizedDescription: String {
+    /// A diagnostic message describing the failure.
+    public var message: String {
         switch self {
         case .clientCreationFailed:
             "Unable to create the mpv client."
@@ -70,7 +72,7 @@ public enum MPVPlayerError: Equatable, Sendable {
         case .invalidSubtitleTrack:
             "Choose a subtitle track from the currently loaded media."
         case .eventQueueOverflow:
-            "The mpv event queue overflowed; player state was refreshed."
+            "The mpv event queue overflowed. Player state was refreshed."
         case .pictureInPictureUnsupported:
             "Picture in Picture requires native sample-buffer output on a supported iOS device, or the macOS PiP host."
         case .pictureInPictureNotReady:
@@ -88,5 +90,3 @@ public enum MPVPlayerError: Equatable, Sendable {
         }
     }
 }
-
-extension MPVPlayerError: Error {}

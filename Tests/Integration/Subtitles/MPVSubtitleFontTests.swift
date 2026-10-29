@@ -22,8 +22,10 @@ struct MPVSubtitleFontTests {
     ) async throws {
         let directory = try TemporaryTestDirectory()
         defer { directory.remove() }
+
         let fonts = try SubtitleFontFixture(in: directory.url)
         let authoredFamily = useCase == .authoredASSFont ? fonts.authored.family : "MissingTestSubtitleFont"
+
         let subtitle = try directory.write(
             useCase == .plainText ? "client.srt" : "client.ass",
             contents: useCase == .plainText ? """
@@ -58,7 +60,7 @@ struct MPVSubtitleFontTests {
                 // Only the files supplied by this client may satisfy font selection.
                 "sub-font-provider": "none",
             ],
-            autoPlay: false,
+            automaticallyPlays: false,
             hardwareDecoding: .disabled,
             logLevel: .verbose,
             videoOutput: videoOutput
@@ -76,7 +78,7 @@ struct MPVSubtitleFontTests {
         var observation: Task<Void, Never>?
         if useCase != .plainText {
             player.setTextSubtitleInterceptionEnabled(true)
-            let stream = player.textSubtitleStream()
+            let stream = player.makeTextSubtitleStream()
             observation = Task { @MainActor in
                 for await snapshot in stream where !snapshot.isEmpty {
                     sawSemanticText = true

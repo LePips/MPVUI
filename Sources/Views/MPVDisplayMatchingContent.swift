@@ -26,6 +26,7 @@ struct MPVDisplayMatchingContent {
             // Dolby Vision configuration record v1.0, in network byte order.
             // Validated native output has an RPU and base layer, with no EL.
             let flags = UInt16(profile << 9 | level << 3 | 0b101)
+
             return Data([
                 1,
                 0,
@@ -43,6 +44,7 @@ struct MPVDisplayMatchingContent {
                   (profile == 5 && compatibilityID == 0)
                   || (profile == 8 && [1, 4].contains(compatibilityID))
             else { return nil }
+
             self.profile = profile
             self.level = level
             self.compatibilityID = compatibilityID
@@ -64,6 +66,7 @@ struct MPVDisplayMatchingContent {
         dolbyVisionStatus: MPVDolbyVisionStatus = .unknown
     ) {
         let selectedCodec = media.tracks.first { $0.type == .video && $0.isSelected }?.codec
+
         guard let dimensions = media.dimensions,
               let width = Int32(exactly: dimensions.width), width > 0,
               let height = Int32(exactly: dimensions.height), height > 0,
@@ -74,15 +77,19 @@ struct MPVDisplayMatchingContent {
         self.width = width
         self.height = height
         self.refreshRate = refreshRate
+
         let decoded = media.hdr.decoded
         signal = decoded == .unknown ? media.hdr.source : decoded
+
         convertsHDRToSDR = !outputUsesHDR
             && (signal.transferFunction.isHDR || media.hdr.source.dolbyVisionProfile != nil)
+
         dolbyVision = outputUsesHDR && videoOutput == .sampleBuffer && codec == kCMVideoCodecType_HEVC
             ? DolbyVision(
                 status: dolbyVisionStatus,
                 level: media.hdr.source.dolbyVisionLevel ?? decoded.dolbyVisionLevel
             ) : nil
+
         self.codec = dolbyVision == nil ? codec : kCMVideoCodecType_DolbyVisionHEVC
     }
 
@@ -92,6 +99,7 @@ struct MPVDisplayMatchingContent {
         guard let value = framesPerSecond, value.isFinite,
               value > 0, value <= 240
         else { return nil }
+
         let standardRates = [
             24000.0 / 1001,
             24,
@@ -107,7 +115,9 @@ struct MPVDisplayMatchingContent {
             120_000.0 / 1001,
             120,
         ]
+
         let rate = standardRates.first { abs($0 - value) < 0.001 } ?? value
+
         return Float(rate)
     }
 
@@ -158,11 +168,13 @@ struct MPVDisplayMatchingContent {
 
     func makeFormatDescription() -> CMVideoFormatDescription? {
         var extensions: [String: Any] = [:]
+
         if convertsHDRToSDR {
             // The renderer's SDR contract is BT.709/sRGB. Do not copy mastering,
             // content-light or Dolby Vision metadata across this conversion.
             extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] =
                 kCMFormatDescriptionColorPrimaries_ITU_R_709_2
+
             extensions[kCMFormatDescriptionExtension_TransferFunction as String] =
                 kCMFormatDescriptionTransferFunction_sRGB
         } else {
@@ -171,15 +183,19 @@ struct MPVDisplayMatchingContent {
                     dolbyVision.atomName: dolbyVision.configurationRecord,
                 ]
             }
+
             if let primaries = Self.colorPrimaries(signal.primaries) {
                 extensions[kCMFormatDescriptionExtension_ColorPrimaries as String] = primaries
             }
+
             if let transfer = Self.transferFunction(signal.transferFunction) {
                 extensions[kCMFormatDescriptionExtension_TransferFunction as String] = transfer
             }
+
             if let matrix = Self.colorMatrix(signal.matrix) {
                 extensions[kCMFormatDescriptionExtension_YCbCrMatrix as String] = matrix
             }
+
             switch signal.range?.lowercased() {
             case "full", "pc":
                 extensions[kCMFormatDescriptionExtension_FullRangeVideo as String] = true
@@ -188,9 +204,11 @@ struct MPVDisplayMatchingContent {
             default:
                 break
             }
+
             if let depth = signal.bitDepth {
                 extensions[kCMFormatDescriptionExtension_BitsPerComponent as String] = depth
             }
+
             if signal.transferFunction.isHDR,
                let maxCLL = signal.maxContentLightLevel,
                let maxFALL = signal.maxFrameAverageLightLevel,
@@ -200,6 +218,7 @@ struct MPVDisplayMatchingContent {
             {
                 let cll = UInt16(maxCLL.rounded())
                 let fall = UInt16(maxFALL.rounded())
+
                 extensions[kCMFormatDescriptionExtension_ContentLightLevelInfo as String] = Data([
                     UInt8(cll >> 8),
                     UInt8(cll & 0xFF),
@@ -210,6 +229,7 @@ struct MPVDisplayMatchingContent {
         }
 
         var description: CMVideoFormatDescription?
+
         let status = CMVideoFormatDescriptionCreate(
             allocator: kCFAllocatorDefault,
             codecType: codec,
@@ -218,6 +238,7 @@ struct MPVDisplayMatchingContent {
             extensions: extensions as CFDictionary,
             formatDescriptionOut: &description
         )
+
         return status == noErr ? description : nil
     }
 }
@@ -230,9 +251,11 @@ extension MPVDisplayMatchingContent: Equatable {
               lhs.convertsHDRToSDR == rhs.convertsHDRToSDR,
               lhs.dolbyVision == rhs.dolbyVision
         else { return false }
+
         if lhs.convertsHDRToSDR {
             return true
         }
+
         // Dynamic scene metadata and signal-peak changes do not select a new
         // HDMI mode. Compare only fields represented by this display hint.
         return lhs.signal.primaries == rhs.signal.primaries

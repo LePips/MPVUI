@@ -43,8 +43,52 @@ static int rpu_is_compressed(const uint8_t *rpu, int size) {
     return native_dovi_rpu_is_compressed(unit, unescape(unit + 2, size) + 2);
 }
 
+static void profile_matrix(void) {
+    assert(!videotoolbox_dovi_is_apple_hevc(NULL));
+    for (int profile = 0; profile <= 31; profile++) {
+        for (int compatibility = 0; compatibility <= 15; compatibility++) {
+            for (int compression = 0; compression <= 7; compression++) {
+                for (int flags = 0; flags < 8; flags++) {
+                    AVDOVIDecoderConfigurationRecord conf = {
+                        .dv_profile = profile,
+                        .dv_bl_signal_compatibility_id = compatibility,
+                        .dv_md_compression = compression,
+                        .rpu_present_flag = !!(flags & 4),
+                        .el_present_flag = !!(flags & 2),
+                        .bl_present_flag = !!(flags & 1),
+                    };
+                    int supported =
+                        flags == 5 && ((profile == 5 && compatibility == 0 && compression == AV_DOVI_COMPRESSION_NONE) ||
+                                       (profile == 8 && (compatibility == 1 || compatibility == 4) &&
+                                        (compression == AV_DOVI_COMPRESSION_NONE || compression == AV_DOVI_COMPRESSION_LIMITED ||
+                                         compression == AV_DOVI_COMPRESSION_EXTENDED)));
+                    assert(videotoolbox_dovi_is_apple_hevc(&conf) == supported);
+                    assert(!videotoolbox_dovi_p7_allowed(1, 0, &conf));
+                    assert(!videotoolbox_dovi_p7_allowed(0, 1, &conf));
+                    assert(videotoolbox_dovi_p7_allowed(1, 1, &conf) ==
+                           (profile == 7 && compatibility == 6 && compression == AV_DOVI_COMPRESSION_NONE && (flags & 5) == 5));
+                }
+            }
+        }
+    }
+}
+
+static void recovered_profile(AVCodecParameters *par, const AVDOVIMetadata *metadata, int profile, int compatibility) {
+    AVDOVIDecoderConfigurationRecord conf = {.dv_profile = 99};
+    assert(videotoolbox_dovi_configure_from_metadata(NULL, par, metadata, &conf) == 0);
+    assert(conf.dv_profile == profile);
+    if (profile) {
+        assert(conf.dv_bl_signal_compatibility_id == compatibility);
+        assert(conf.rpu_present_flag && conf.bl_present_flag);
+        assert(conf.el_present_flag == (profile == 7));
+        assert(conf.dv_level > 0 && conf.dv_md_compression == AV_DOVI_COMPRESSION_NONE);
+    }
+    av_packet_side_data_free(&par->coded_side_data, &par->nb_coded_side_data);
+}
+
 int main(int argc, char **argv) {
-    assert(argc == 3);
+    assert(argc == 4);
+    profile_matrix();
     AVDOVIDecoderConfigurationRecord conf = {0};
     conf.rpu_present_flag = conf.bl_present_flag = 1;
     conf.dv_profile = 5;
@@ -106,6 +150,17 @@ int main(int argc, char **argv) {
     assert(ff_dovi_rpu_parse(&context, rpu, size, strict) == 0);
     assert(ff_dovi_guess_profile_hevc(&context.header) == 5);
     assert(context.mapping && context.color);
+    AVDOVIMetadata *p5_metadata = NULL;
+    assert(ff_dovi_get_metadata(&context, &p5_metadata) > 0);
+    AVCodecParameters p5_par = {
+        .codec_id = AV_CODEC_ID_HEVC,
+        .format = AV_PIX_FMT_YUV420P10,
+        .width = 320,
+        .height = 180,
+        .framerate = {120, 1},
+    };
+    recovered_profile(&p5_par, p5_metadata, 5, 0);
+    av_free(p5_metadata);
     ff_dovi_ctx_flush(&context);
     assert(!context.mapping && !context.color);
     assert(ff_dovi_rpu_parse(&context, rpu, size, strict) == 0);
@@ -124,6 +179,78 @@ int main(int argc, char **argv) {
     AVDOVIMetadata *source = NULL;
     assert(ff_dovi_rpu_parse(&decoder, rpu, size, strict) == 0);
     assert(ff_dovi_get_metadata(&decoder, &source) > 0);
+    AVCodecParameters par = {
+        .codec_id = AV_CODEC_ID_HEVC,
+        .format = AV_PIX_FMT_YUV420P10,
+        .width = 320,
+        .height = 180,
+        .framerate = {120, 1},
+        .color_space = AVCOL_SPC_BT2020_NCL,
+        .color_primaries = AVCOL_PRI_BT2020,
+        .color_trc = AVCOL_TRC_SMPTE2084,
+    };
+    recovered_profile(&par, source, 8, 1);
+    par.color_trc = AVCOL_TRC_ARIB_STD_B67;
+    recovered_profile(&par, source, 8, 4);
+    par.color_space = AVCOL_SPC_BT709;
+    par.color_primaries = AVCOL_PRI_BT709;
+    par.color_trc = AVCOL_TRC_BT709;
+    recovered_profile(&par, source, 8, 2); // Detected, but rejected by the native profile gate.
+    par.color_space = AVCOL_SPC_BT2020_NCL;
+    par.color_primaries = AVCOL_PRI_BT2020;
+    par.color_trc = AVCOL_TRC_SMPTE2084;
+    recovered_profile(&par, NULL, 0, 0); // HDR tags alone cannot establish DV.
+    par.format = AV_PIX_FMT_YUV420P;
+    recovered_profile(&par, source, 0, 0);
+    par.format = AV_PIX_FMT_YUV420P10;
+    par.codec_id = AV_CODEC_ID_AV1;
+    recovered_profile(&par, source, 0, 0);
+    par.codec_id = AV_CODEC_ID_HEVC;
+
+    // Synthetic P7 MEL metadata: identity mapping plus zero enhancement residual.
+    // Only metadata is generated here, not a full enhancement-layer image.
+    AVDOVIRpuDataHeader *header = av_dovi_get_header(source);
+    AVDOVIRpuDataHeader original_header = *header;
+    header->vdr_bit_depth = 12;
+    header->el_spatial_resampling_filter_flag = 1;
+    header->disable_residual_flag = 0;
+    recovered_profile(&par, source, 7, 6);
+    par.color_trc = AVCOL_TRC_ARIB_STD_B67;
+    recovered_profile(&par, source, 0, 0);
+    par.color_trc = AVCOL_TRC_SMPTE2084;
+    header->vdr_bit_depth = 10; // Profile 4 is not native-compatible.
+    recovered_profile(&par, source, 0, 0);
+    header->vdr_rpu_profile = 2;
+    recovered_profile(&par, source, 0, 0);
+    header->vdr_rpu_profile = 1;
+    header->vdr_bit_depth = 12;
+    AVDOVIDataMapping *mapping = av_dovi_get_mapping(source);
+    AVDOVIDataMapping original_mapping = *mapping;
+    mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
+    mapping->nlq_pivots[0] = 0;
+    mapping->nlq_pivots[1] = 1023;
+    for (int c = 0; c < 3; c++) {
+        mapping->nlq[c].nlq_offset = 0;
+        mapping->nlq[c].vdr_in_max = 1ULL << header->coef_log2_denom;
+        mapping->nlq[c].linear_deadzone_slope = 0;
+        mapping->nlq[c].linear_deadzone_threshold = 0;
+    }
+    DOVIContext p7writer = {.cfg = {.dv_profile = 7, .dv_bl_signal_compatibility_id = 6}};
+    uint8_t *p7 = NULL;
+    int p7_size = 0;
+    assert(ff_dovi_rpu_generate(&p7writer, source, FF_DOVI_WRAP_NAL, &p7, &p7_size) == 0);
+    int p7_payload_size = unescape(p7, p7_size);
+    uint8_t p7_fixture[4096];
+    size_t p7_fixture_size = read_rpu(argv[3], p7_fixture, sizeof(p7_fixture));
+    assert(p7_fixture_size == (size_t)p7_payload_size && !memcmp(p7_fixture, p7, p7_fixture_size));
+    DOVIContext p7decoder = {0};
+    assert(ff_dovi_rpu_parse(&p7decoder, p7, p7_payload_size, strict) == 0);
+    assert(ff_dovi_guess_profile_hevc(&p7decoder.header) == 7);
+    av_free(p7);
+    ff_dovi_ctx_unref(&p7writer);
+    ff_dovi_ctx_unref(&p7decoder);
+    *header = original_header;
+    *mapping = original_mapping;
     uint8_t *standalone = NULL, *compressed = NULL;
     int standalone_size = 0, compressed_size = 0;
     assert(ff_dovi_rpu_generate(&writer, source, FF_DOVI_WRAP_NAL, &standalone, &standalone_size) == 0);
@@ -159,6 +286,6 @@ int main(int argc, char **argv) {
     ff_dovi_ctx_unref(&decoder);
     ff_dovi_ctx_unref(&writer);
     ff_dovi_ctx_unref(&expander);
-    puts("Native DV: strict/opt-in profile contract, original/current association, generated P5 RPU parse/flush/malformed checks, P8.1 "
-         "compression detection and expansion passed");
+    puts("Native DV: profile/compatibility matrix, in-band P5/P7/P8 recovery, strict/opt-in policy, synthetic P7 fixture, "
+         "original/current association, P5 parse/flush/malformed checks, P8.1 compression detection and expansion passed");
 }

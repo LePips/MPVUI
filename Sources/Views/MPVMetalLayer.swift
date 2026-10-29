@@ -46,42 +46,54 @@ final class MPVMetalLayer: CAMetalLayer {
 
     override var colorspace: CGColorSpace? {
         get { super.colorspace }
+
         set {
             colorStateLock.lock()
             defer { colorStateLock.unlock() }
+
             if let hostColorSpace, !Self.matchesColorSpace(hostColorSpace, newValue) {
                 return
             }
+
             guard !Self.matchesColorSpace(super.colorspace, newValue) else { return }
+
             super.colorspace = newValue
         }
     }
 
     override var pixelFormat: MTLPixelFormat {
         get { super.pixelFormat }
+
         set {
             colorStateLock.lock()
             defer { colorStateLock.unlock() }
+
             if let hostPixelFormat, hostPixelFormat != newValue {
                 return
             }
+
             guard super.pixelFormat != newValue else { return }
+
             super.pixelFormat = newValue
         }
     }
 
     override var isOpaque: Bool {
         get { true }
+
         set {
             guard !super.isOpaque else { return }
+
             super.isOpaque = true
         }
     }
 
     override var contentsGravity: CALayerContentsGravity {
         get { .resize }
+
         set {
             guard super.contentsGravity != .resize else { return }
+
             super.contentsGravity = .resize
         }
     }
@@ -92,6 +104,7 @@ final class MPVMetalLayer: CAMetalLayer {
     /// on main, so preserve the request without blocking the renderer.
     override var minificationFilter: CALayerContentsFilter {
         get { super.minificationFilter }
+
         set {
             if Thread.isMainThread {
                 applyMinificationFilter(newValue)
@@ -107,6 +120,7 @@ final class MPVMetalLayer: CAMetalLayer {
 
     override var magnificationFilter: CALayerContentsFilter {
         get { super.magnificationFilter }
+
         set {
             if Thread.isMainThread {
                 applyMagnificationFilter(newValue)
@@ -127,6 +141,7 @@ final class MPVMetalLayer: CAMetalLayer {
             defer { drawableStateLock.unlock() }
             return super.drawableSize
         }
+
         set {
             guard newValue.width.isFinite, newValue.height.isFinite else { return }
 
@@ -138,6 +153,7 @@ final class MPVMetalLayer: CAMetalLayer {
                       storedLastValidDrawableSize != nil,
                       nativeResizeTransactionCount > 0
                 else { return }
+
                 super.drawableSize = newValue
                 return
             }
@@ -155,12 +171,14 @@ final class MPVMetalLayer: CAMetalLayer {
     override func add(_ animation: CAAnimation, forKey key: String?) {
         super.add(animation, forKey: key)
         guard let geometry = Self.geometryAnimation(animation) else { return }
+
         // Copy the actual animation, preserving spring parameters, keyframes,
         // timing, and interactive interruption. A new default-duration implicit
         // animation would visibly lag behind the hosting view.
         if let videoSublayer, videoSublayer.superlayer === self {
             videoSublayer.add(geometry, forKey: key)
         }
+
         if Thread.isMainThread {
             let didStart = geometryAnimationDidStart
             MainActor.assumeIsolated { didStart?() }
@@ -173,6 +191,7 @@ final class MPVMetalLayer: CAMetalLayer {
         {
             videoSublayer?.removeAnimation(forKey: key)
         }
+
         super.removeAnimation(forKey: key)
     }
 
@@ -180,6 +199,7 @@ final class MPVMetalLayer: CAMetalLayer {
         for key in animationKeys() ?? [] {
             removeAnimation(forKey: key)
         }
+
         super.removeAllAnimations()
     }
 
@@ -196,13 +216,17 @@ final class MPVMetalLayer: CAMetalLayer {
         if let group = animation as? CAAnimationGroup {
             let children = group.animations?.compactMap(geometryAnimation) ?? []
             guard !children.isEmpty, let copy = group.copy() as? CAAnimationGroup else { return nil }
+
             copy.animations = children
+
             return copy
         }
+
         guard let property = animation as? CAPropertyAnimation,
               let path = property.keyPath,
               path == "bounds" || path.hasPrefix("bounds.")
         else { return nil }
+
         return animation
     }
 
@@ -217,11 +241,14 @@ final class MPVMetalLayer: CAMetalLayer {
         switch (lhs, rhs) {
         case (nil, nil):
             return true
+
         case let (lhs?, rhs?):
             if lhs === rhs {
                 return true
             }
+
             return CFEqual(lhs, rhs)
+
         default:
             return false
         }
@@ -240,8 +267,11 @@ final class MPVMetalLayer: CAMetalLayer {
         let drawable = super.nextDrawable()
         #if !targetEnvironment(simulator)
         presentationObserverLock.lock()
+
         let observer = presentationObserver
+
         presentationObserverLock.unlock()
+
         if let observer {
             drawable?.addPresentedHandler { presented in
                 observer(presented.presentedTime)
@@ -261,9 +291,11 @@ final class MPVMetalLayer: CAMetalLayer {
         defer { colorStateLock.unlock() }
         hostColorSpace = colorSpace
         hostPixelFormat = pixelFormat
+
         if !Self.matchesColorSpace(super.colorspace, colorSpace) {
             super.colorspace = colorSpace
         }
+
         if super.pixelFormat != pixelFormat {
             super.pixelFormat = pixelFormat
         }
@@ -287,8 +319,10 @@ final class MPVMetalLayer: CAMetalLayer {
         drawableStateLock.lock()
         defer { drawableStateLock.unlock() }
         guard nativeResizeTransactionCount > 0, let storedLastValidDrawableSize else { return false }
+
         super.drawableSize = CGSize(width: 1, height: 1)
         super.drawableSize = storedLastValidDrawableSize
+
         return true
     }
 
@@ -307,6 +341,7 @@ final class MPVMetalLayer: CAMetalLayer {
         {
             super.drawableSize = storedLastValidDrawableSize
         }
+
         drawableStateLock.unlock()
     }
 
@@ -315,9 +350,11 @@ final class MPVMetalLayer: CAMetalLayer {
     func configureExtendedDynamicRangeContent(_ newValue: Bool) {
         precondition(Thread.isMainThread)
         hostExtendedDynamicRangeContent = newValue
+
         if #available(iOS 26.0, *) {
             return
         }
+
         setExtendedDynamicRangeContent(newValue)
     }
 
@@ -325,6 +362,7 @@ final class MPVMetalLayer: CAMetalLayer {
     /// writes are ignored and valid writes are marshalled without blocking it.
     override var wantsExtendedDynamicRangeContent: Bool {
         get { super.wantsExtendedDynamicRangeContent }
+
         set {
             if Thread.isMainThread {
                 applyExtendedDynamicRangeRequest(newValue)
@@ -341,20 +379,24 @@ final class MPVMetalLayer: CAMetalLayer {
     private func applyExtendedDynamicRangeRequest(_ newValue: Bool) {
         precondition(Thread.isMainThread)
         guard hostExtendedDynamicRangeContent == newValue else { return }
+
         if #available(iOS 26.0, *) {
             return
         }
+
         setExtendedDynamicRangeContent(newValue)
     }
 
     private func setExtendedDynamicRangeContent(_ newValue: Bool) {
         guard super.wantsExtendedDynamicRangeContent != newValue else { return }
+
         super.wantsExtendedDynamicRangeContent = newValue
     }
     #endif
 
     private func layoutVideoSublayer() {
         guard let videoSublayer, videoSublayer.superlayer === self else { return }
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         videoSublayer.anchorPoint = .zero
@@ -367,12 +409,14 @@ final class MPVMetalLayer: CAMetalLayer {
     private func applyMinificationFilter(_ newValue: CALayerContentsFilter) {
         precondition(Thread.isMainThread)
         guard super.minificationFilter != newValue else { return }
+
         super.minificationFilter = newValue
     }
 
     private func applyMagnificationFilter(_ newValue: CALayerContentsFilter) {
         precondition(Thread.isMainThread)
         guard super.magnificationFilter != newValue else { return }
+
         super.magnificationFilter = newValue
     }
     #endif

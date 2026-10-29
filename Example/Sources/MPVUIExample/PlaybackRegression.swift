@@ -23,6 +23,7 @@ extension PlaybackRegressionView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black
+
             if let player = regression.player {
                 MPVVideoPlayer(player: player)
             }
@@ -63,11 +64,13 @@ private struct RegressionSettings {
 
     static var failureOutput: URL {
         let arguments = ProcessInfo.processInfo.arguments
+
         if let index = arguments.firstIndex(of: "--regression-output"), index + 1 < arguments.count,
            let url = try? outputURL(arguments[index + 1])
         {
             return url
         }
+
         return documents.appendingPathComponent("Benchmarks/playback-regression-error-\(UUID().uuidString).json")
     }
 
@@ -80,7 +83,7 @@ private struct RegressionSettings {
     var configuration: MPVPlayerConfiguration {
         .init(
             audio: .init(audioSession: .hostManaged),
-            autoPlay: true,
+            automaticallyPlays: true,
             hardwareDecoding: softwareDecoding ? .disabled : .automatic,
             logLevel: .none,
             videoOutput: backend ?? .sampleBuffer
@@ -93,6 +96,7 @@ private struct RegressionSettings {
         components?.password = nil
         components?.query = nil
         components?.fragment = nil
+
         return [
             "media": components?.string ?? media.lastPathComponent,
             "backend": requestedBackend,
@@ -108,13 +112,16 @@ private struct RegressionSettings {
         var values: [String: String] = [:]
         var software = false
         var index = 1
+
         while index < arguments.count {
             let argument = arguments[index]
+
             if argument == "--regression-software-decoding" {
                 software = true
                 index += 1
                 continue
             }
+
             guard argument.hasPrefix("--regression-") else { index += 1
                 continue
             }
@@ -123,27 +130,35 @@ private struct RegressionSettings {
             else {
                 throw RegressionFailure(message: "Unknown or incomplete argument: \(argument)")
             }
+
             values[argument] = arguments[index + 1]
             index += 2
         }
+
         guard let source = values["--regression-media"], !source.isEmpty else {
             throw RegressionFailure(message: "--regression-media URL or Documents-relative path is required")
         }
+
         if let url = URL(string: source), let scheme = url.scheme {
             guard ["file", "http", "https"].contains(scheme.lowercased()) else {
                 throw RegressionFailure(message: "Media must be a file, HTTP, or HTTPS URL")
             }
+
             media = url
         } else {
             media = source.hasPrefix("/") ? URL(fileURLWithPath: source) : Self.documents.appendingPathComponent(source)
         }
+
         if media.isFileURL, !FileManager.default.fileExists(atPath: media.path) {
             throw RegressionFailure(message: "Media file does not exist: \(media.lastPathComponent)")
         }
+
         requestedBackend = values["--regression-backend"] ?? "default"
+
         guard ["default", "sampleBuffer", "metal"].contains(requestedBackend) else {
             throw RegressionFailure(message: "Backend must be default, sampleBuffer or metal")
         }
+
         backend = MPVPlayerConfiguration.VideoOutput(rawValue: requestedBackend)
         softwareDecoding = software
         output = try Self.outputURL(values["--regression-output"] ?? "playback-regression.json")
@@ -153,6 +168,7 @@ private struct RegressionSettings {
         guard !filename.isEmpty, filename != ".", filename != "..", !filename.contains("/"), !filename.contains("\\") else {
             throw RegressionFailure(message: "--regression-output must be a filename")
         }
+
         return documents.appendingPathComponent("Benchmarks", isDirectory: true).appendingPathComponent(filename)
     }
 }
@@ -163,6 +179,7 @@ private final class PlaybackRegression {
 
     var player: MPVPlayer?
     var status = "Preparing playback regression"
+
     @ObservationIgnored
     var lostForeground = false
     @ObservationIgnored
@@ -196,40 +213,54 @@ private final class PlaybackRegression {
 
     private var decoderMatchesExpectation: Bool {
         guard let diagnostics = player?.playbackDiagnostics, diagnostics.fallbackReasons.isEmpty else { return false }
+
         let decoder = diagnostics.decoder
+
         if expectsSoftwareDecoding {
             let selected = decoder.selectedDecoder?.lowercased()
             guard let pixelFormat = decoder.decodedPixelFormat?.lowercased(), !pixelFormat.isEmpty else { return false }
+
             return decoder.session == .software && decoder.videoToolboxSessionUsesHardware != true
                 && (selected == nil || selected == "" || selected == "no")
                 && !pixelFormat.contains("videotoolbox") && decoder.fallbackReason == nil
         }
+
         guard case .hardware = decoder.session else { return false }
+
         return decoder.videoToolboxSessionUsesHardware == true && decoder.fallbackReason == nil
     }
 
     func run() async {
         guard !hasRun else { return }
+
         hasRun = true
         startUptime = ProcessInfo.processInfo.systemUptime
+
         let oldIdleTimer = UIApplication.shared.isIdleTimerDisabled
+
         UIApplication.shared.isIdleTimerDisabled = true
+
         var settings: RegressionSettings?
         var failure: String?
+
         defer {
             release()
             _ = ExampleAudioSession.deactivate()
             UIApplication.shared.isIdleTimerDisabled = oldIdleTimer
         }
+
         do {
             let parsed = try RegressionSettings()
             settings = parsed
+
             guard !FileManager.default.fileExists(atPath: parsed.output.path) else {
                 throw RegressionFailure(message: "Report already exists; choose another --regression-output")
             }
+
             if let error = ExampleAudioSession.activate() {
                 throw RegressionFailure(message: error)
             }
+
             let configuration = parsed.configuration
             expectedBackend = configuration.videoOutput
             expectsSoftwareDecoding = parsed.softwareDecoding
@@ -237,12 +268,15 @@ private final class PlaybackRegression {
             player?.setDiagnosticsEnabled(true)
             releasedPlayer = player
             player?.load(parsed.media)
+
             for cycle in 1 ... 3 {
                 setStage("cycle-\(cycle)-start")
+
                 try await wait(timeout: 30) {
                     self.player?.state == .playing && self.position > 0.15
                         && self.player?.mediaInformation.dimensions != nil
                 }
+
                 try require(duration.isFinite && duration >= 30, "Use seekable VOD at least 30 seconds long for rate-change checks")
                 try require(player?.isSeekable == true, "Media is not seekable")
                 try await advancingPlayback(seconds: 3)
@@ -252,35 +286,45 @@ private final class PlaybackRegression {
                 player?.pause()
                 try await wait(timeout: 5) { self.player?.isPaused == true && self.player?.state == .paused }
                 try await observe(seconds: 0.5)
+
                 let pausePosition = position
+
                 try await observe(seconds: 1.5)
+
                 let pausedMovement = abs(position - pausePosition)
                 try require(player?.isPaused == true && pausedMovement < 0.15, "Paused playback position moved")
                 checks.append(["stage": stage, "positionDeltaSeconds": pausedMovement])
                 checkpoint()
 
                 setStage("cycle-\(cycle)-seek")
+
                 let target = min(max(2, duration * 0.35), duration - 5)
                 let previousSampleCount = player?.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount
                 player?.seek(to: .seconds(target))
+
                 try await wait(timeout: 15) {
                     self.player?.isPaused == true && self.player?.state == .paused && abs(self.position - target) < 0.15
                 }
+
                 if player?.videoOutput == .sampleBuffer {
                     guard let previousSampleCount, previousSampleCount > 1 else {
                         throw RegressionFailure(message: "\(stage): native pre-seek sample baseline is unavailable")
                     }
+
                     // VOCTRL_RESET zeros the native counter on exact seek. A
                     // positive smaller value in a fresh snapshot establishes
                     // a new generation; timing/copy changes alone cannot pass.
                     let previousSnapshot = player?.playbackDiagnostics.engineActivity.diagnosticsSnapshots ?? 0
+
                     try await wait(timeout: 5) {
                         guard let current = self.player?.playbackDiagnostics,
                               current.engineActivity.diagnosticsSnapshots > previousSnapshot,
                               let count = current.nativeOutputStatistics?.sampleBuildCount else { return false }
+
                         return count > 0 && count < previousSampleCount
                     }
                 }
+
                 checks.append([
                     "stage": stage,
                     "targetSeconds": target,
@@ -291,10 +335,13 @@ private final class PlaybackRegression {
                     "nativePostSeekSampleBuildCount": regressionNullable(player?.playbackDiagnostics.nativeOutputStatistics?
                         .sampleBuildCount)
                 ])
+
                 checkpoint()
 
                 setStage("cycle-\(cycle)-resume")
+
                 let resumedPosition = position
+
                 player?.play()
                 try await wait(timeout: 15) { self.player?.state == .playing && self.position > resumedPosition + 0.15 }
                 try await advancingPlayback(seconds: 3)
@@ -303,30 +350,37 @@ private final class PlaybackRegression {
                 setStage("cycle-\(cycle)-stop-retained")
                 player?.stop()
                 try await wait(timeout: 10) { self.player?.state == .stopped && self.player?.isPaused == true }
+
                 // Let any already-published final diagnostics settle. Public
                 // diagnostics are cached; unchanged values cannot prove that
                 // an unreported native handle was never recreated.
                 try await observe(seconds: 0.5)
+
                 let stoppedPosition = position
                 let activity = player?.playbackDiagnostics.engineActivity
                 let nativeSamples = player?.playbackDiagnostics.nativeOutputStatistics
+
                 try await observe(seconds: 3) {
                     try self
                         .require(
                             self.player?.state == .stopped && self.player?.isPaused == true,
                             "Retained stopped player restarted without a request"
                         )
+
                     try self
                         .require(abs(self.position - stoppedPosition) < 0.15, "Stopped clock advanced")
                 }
+
                 try require(
                     player?.playbackDiagnostics.engineActivity == activity,
                     "Stopped player published new native engine activity"
                 )
+
                 try require(
                     player?.playbackDiagnostics.nativeOutputStatistics == nativeSamples,
                     "Stopped player published new native video samples"
                 )
+
                 checks.append([
                     "stage": stage,
                     "stateRemainedStopped": true,
@@ -334,13 +388,16 @@ private final class PlaybackRegression {
                     "publishedNativeSamplesUnchanged": true,
                     "nativeHandleLifecycleAvailable": false
                 ])
+
                 checkpoint()
 
                 setStage("cycle-\(cycle)-replay")
                 player?.play()
+
                 try await wait(timeout: 30) {
                     self.player?.state == .playing && self.position > 0.15 && self.position < 1.5
                 }
+
                 checks.append(["stage": stage, "replayInitialPositionSeconds": position])
                 try await advancingPlayback(seconds: 3)
                 checkpoint()
@@ -351,17 +408,20 @@ private final class PlaybackRegression {
             try await wait(timeout: 10) { self.player?.state == .stopped && self.player?.isPaused == true }
             checkpoint()
             setStage("typed-load-while-stopped")
-            player?.load(parsed.media, autoPlay: false, startTime: .seconds(1))
+            player?.load(parsed.media, playAutomatically: false, startTime: .seconds(1))
+
             try await wait(timeout: 30) {
                 self.player?.state == .paused && self.player?.isPaused == true && abs(self.position - 1) < 0.15
                     && self.player?.mediaInformation.dimensions != nil
             }
+
             checkpoint()
             setStage("typed-load-resume")
             player?.play()
             try await wait(timeout: 15) { self.player?.state == .playing && self.position > 1.15 }
             try await advancingPlayback(seconds: 3)
             checkpoint()
+
             for (name, rate) in [("slow", 0.5), ("fast", 1.5), ("normal", 1.0)] {
                 setStage("rate-\(name)")
                 player?.setPlaybackRate(rate)
@@ -369,6 +429,7 @@ private final class PlaybackRegression {
                 try await advancingPlayback(seconds: 3, expectedRate: rate)
                 checkpoint()
             }
+
             setStage("release")
             release()
             try await wait(timeout: 5) { self.releasedPlayer == nil }
@@ -378,9 +439,11 @@ private final class PlaybackRegression {
             failure = error is CancellationError
                 ? "Regression cancelled"
                 : (error as? RegressionFailure)?.localizedDescription ?? error.localizedDescription
+
             checkpoint()
             release()
         }
+
         let report: [String: Any] = [
             "schemaVersion": 2,
             "status": failure == nil ? "passed" : "failed",
@@ -425,9 +488,12 @@ private final class PlaybackRegression {
                 "Footprint snapshots are context only and include the app and this scenario's report allocations.",
             ],
         ]
+
         let output = settings?.output ?? RegressionSettings.failureOutput
+
         do {
             try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+
             let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: output, options: .withoutOverwriting)
             status = failure.map { "FAILED: \($0)\n\(output.lastPathComponent)" } ?? "PASSED: \(output.lastPathComponent)"
@@ -457,9 +523,11 @@ private final class PlaybackRegression {
     private func checkFailure() throws {
         try Task.checkCancellation()
         try require(!lostForeground, "App left the foreground")
+
         if let error = player?.lastError {
             throw RegressionFailure(message: "\(stage): \(error)")
         }
+
         if let player, let expectedBackend {
             try require(player.videoOutput == expectedBackend, "Playback changed the expected video backend")
             try require(player.lastError == nil, "Unexpected playback error")
@@ -468,19 +536,24 @@ private final class PlaybackRegression {
 
     private func wait(timeout: Double, until: () -> Bool) async throws {
         let start = ProcessInfo.processInfo.systemUptime
+
         repeat {
             try checkFailure()
             sample()
+
             if until() {
                 return
             }
+
             try await Task.sleep(for: .milliseconds(100))
         } while ProcessInfo.processInfo.systemUptime - start < timeout
+
         throw RegressionFailure(message: "Timed out during \(stage)")
     }
 
     private func observe(seconds interval: Double, check: (() throws -> Void)? = nil) async throws {
         let start = ProcessInfo.processInfo.systemUptime
+
         repeat {
             try checkFailure()
             try check?()
@@ -494,47 +567,64 @@ private final class PlaybackRegression {
         // after the current playing generation has resolved. Old cached
         // counters from a retired handle cannot become this segment's baseline.
         try await observe(seconds: 1)
+
         let previousSnapshot = player?.playbackDiagnostics.engineActivity.diagnosticsSnapshots ?? 0
+
         try await wait(timeout: 5) {
             (self.player?.playbackDiagnostics.engineActivity.diagnosticsSnapshots ?? 0) > previousSnapshot
                 && self.decoderMatchesExpectation
         }
+
         if player?.videoOutput == .sampleBuffer {
             try await wait(timeout: 5) { (self.player?.playbackDiagnostics.nativeOutputStatistics?.sampleBuildCount ?? 0) > 0 }
         }
+
         let before = player?.playbackDiagnostics
         let beforePosition = position
         let segmentStart = ProcessInfo.processInfo.systemUptime
         var driftSamples: [[String: Any]] = []
         var lastDriftSnapshot: Int64?
+
         func collectDrift() {
             guard let diagnostics = player?.playbackDiagnostics,
                   lastDriftSnapshot != diagnostics.engineActivity.diagnosticsSnapshots else { return }
+
             lastDriftSnapshot = diagnostics.engineActivity.diagnosticsSnapshots
+
             driftSamples.append([
                 "elapsedSeconds": ProcessInfo.processInfo.systemUptime - segmentStart,
                 "seconds": regressionFinite(diagnostics.audioVideoDriftSeconds)
             ])
         }
+
         collectDrift()
+
         try await observe(seconds: interval) {
             try self
                 .require(self.player?.isPaused == false, "Playback unexpectedly paused")
+
             try self
                 .require(self.player?.state != .ended, "Playback ended during the progression check")
+
             try self
                 .require(self.decoderMatchesExpectation, "Decoder changed during settled playback")
+
             collectDrift()
         }
+
         let finalSnapshot = player?.playbackDiagnostics.engineActivity.diagnosticsSnapshots ?? 0
+
         try await wait(timeout: 2) {
             (self.player?.playbackDiagnostics.engineActivity.diagnosticsSnapshots ?? 0) > finalSnapshot
         }
+
         collectDrift()
+
         let after = player?.playbackDiagnostics
         let progress = position - beforePosition
         let elapsed = ProcessInfo.processInfo.systemUptime - segmentStart
         let finiteDrift = driftSamples.compactMap { $0["seconds"] as? Double }
+
         var check: [String: Any] = [
             "stage": stage,
             "playbackProgressSeconds": progress,
@@ -550,39 +640,49 @@ private final class PlaybackRegression {
             "audioVideoDriftMaxSeconds": regressionFinite(finiteDrift.max()),
             "audioVideoDriftMaxAbsoluteSeconds": regressionFinite(finiteDrift.map { abs($0) }.max()),
         ]
+
         if player?.videoOutput == .sampleBuffer {
             check["nativeSampleBuildCountStart"] = regressionNullable(before?.nativeOutputStatistics?.sampleBuildCount)
             check["nativeSampleBuildCountEnd"] = regressionNullable(after?.nativeOutputStatistics?.sampleBuildCount)
+
             check["nativeSampleBuildCountDelta"] = regressionDelta(
                 before?.nativeOutputStatistics?.sampleBuildCount,
                 after?.nativeOutputStatistics?.sampleBuildCount
             )
         }
+
         checks.append(check)
+
         try require(
             player?.playbackRate == expectedRate && (0.8 ... 1.2).contains(progress / elapsed / expectedRate),
             "Playback failed to advance at the requested rate through the observation interval"
         )
+
         try require(decoderMatchesExpectation, "Decoder changed during settled playback")
+
         guard let firstDecoder = before?.decoderDroppedFrames, let lastDecoder = after?.decoderDroppedFrames,
               let firstOutput = before?.outputDroppedFrames, let lastOutput = after?.outputDroppedFrames
         else {
             throw RegressionFailure(message: "\(stage): decoder/output drop counters are unavailable")
         }
+
         try require(
             lastDecoder >= firstDecoder && lastOutput >= firstOutput,
             "Drop counters reset during settled playback"
         )
+
         try require(
             lastDecoder == firstDecoder && lastOutput == firstOutput,
             "Decoder/output frames dropped during settled playback"
         )
+
         if player?.videoOutput == .sampleBuffer {
             guard let first = before?.nativeOutputStatistics?.sampleBuildCount,
                   let last = after?.nativeOutputStatistics?.sampleBuildCount
             else {
                 throw RegressionFailure(message: "\(stage): native sample counters are unavailable")
             }
+
             try require(last > first, "Native sample-build attempts did not advance with the playback clock")
         }
     }
@@ -590,8 +690,11 @@ private final class PlaybackRegression {
     private func sample() {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastSampleUptime >= 0.5, samples.count < 480 else { return }
+
         lastSampleUptime = now
+
         let d = player?.playbackDiagnostics
+
         samples.append([
             "elapsedSeconds": now - startUptime,
             "stage": stage,
@@ -608,11 +711,13 @@ private final class PlaybackRegression {
 
     private func checkpoint() {
         let d = player?.playbackDiagnostics
+
         let session: String = switch d?.decoder.session {
         case .software: "software"
         case let .hardware(value): value
         default: "unknown"
         }
+
         checkpoints.append([
             "elapsedSeconds": ProcessInfo.processInfo.systemUptime - startUptime,
             "stage": stage,
@@ -667,17 +772,20 @@ private func regressionFinite(_ value: Double?) -> Any {
 
 private func regressionDelta(_ first: Int64?, _ last: Int64?) -> Any {
     guard let first, let last, last >= first else { return NSNull() }
+
     return last - first
 }
 
 private func regressionFootprint() -> UInt64? {
     var info = task_vm_info_data_t()
     var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+
     let status = withUnsafeMutablePointer(to: &info) { pointer in
         pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
             task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
         }
     }
+
     return status == KERN_SUCCESS ? info.phys_footprint : nil
 }
 #endif

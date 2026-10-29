@@ -96,55 +96,83 @@ indirect enum CoreValue {
 
     static func decode(_ bytes: UnsafeBufferPointer<UInt8>) throws -> Self {
         struct InvalidRecord: Error {}
+
         guard bytes.count <= 32 * 1024 * 1024, bytes.count >= 9,
               Array(bytes.prefix(8)) == [77, 80, 86, 67, 1, 0, 0, 0] else { throw InvalidRecord() }
+
         var offset = 8
+
         func scalar<T: FixedWidthInteger>(_: T.Type) throws -> T {
             let count = MemoryLayout<T>.size
             guard offset <= bytes.count - count else { throw InvalidRecord() }
+
             var value: T = 0
+
             for index in 0 ..< count {
                 value |= T(truncatingIfNeeded: bytes[offset + index]) << (index * 8)
             }
+
             offset += count
+
             return value
         }
+
         func read(_ depth: Int) throws -> Self {
             guard depth < 32, offset < bytes.count else { throw InvalidRecord() }
+
             let tag = bytes[offset]
+
             offset += 1
+
             switch tag {
             case 0: return .null
+
             case 1, 2: return .flag(tag == 2)
+
             case 3: return try .integer(scalar(Int64.self))
+
             case 4:
                 let number = try Double(bitPattern: scalar(UInt64.self))
                 guard number.isFinite else { throw InvalidRecord() }
+
                 return .number(number)
+
             case 5:
                 let length = try Int(scalar(UInt32.self))
+
                 guard length <= bytes.count - offset,
                       let string = String(bytes: bytes[offset ..< (offset + length)], encoding: .utf8)
                 else { throw InvalidRecord() }
+
                 offset += length
+
                 return .string(string)
+
             case 6, 7:
                 let count = try Int(scalar(UInt32.self))
                 guard count <= bytes.count - offset else { throw InvalidRecord() }
+
                 if tag == 6 {
                     return try .list((0 ..< count).map { _ in try read(depth + 1) })
                 }
+
                 var fields: [String: Self] = [:]
+
                 for _ in 0 ..< count {
                     guard let key = try read(depth + 1).text, fields[key] == nil else { throw InvalidRecord() }
+
                     fields[key] = try read(depth + 1)
                 }
+
                 return .record(fields)
+
             default: throw InvalidRecord()
             }
         }
+
         let result = try read(0)
         guard offset == bytes.count else { throw InvalidRecord() }
+
         return result
     }
 
@@ -158,6 +186,7 @@ indirect enum CoreValue {
         let bytes = encoded()
         let pointer = UnsafeMutablePointer<UInt8>.allocate(capacity: bytes.count)
         pointer.initialize(from: bytes, count: bytes.count)
+
         return .init(data: pointer, length: bytes.count)
     }
 
@@ -166,11 +195,15 @@ indirect enum CoreValue {
             var bits = value.littleEndian
             withUnsafeBytes(of: &bits) { output.append(contentsOf: $0) }
         }
+
         switch self {
         case .null: output.append(0)
+
         case let .flag(value): output.append(value ? 2 : 1)
+
         case let .integer(value): output.append(3)
             scalar(value)
+
         case let .number(value):
             if value.isFinite {
                 output.append(4)
@@ -178,19 +211,24 @@ indirect enum CoreValue {
             } else {
                 output.append(0)
             }
+
         case let .string(value):
             output.append(5)
             scalar(UInt32(value.utf8.count))
             output.append(contentsOf: value.utf8)
+
         case let .list(values):
             output.append(6)
             scalar(UInt32(values.count))
+
             for value in values {
                 value.append(to: &output)
             }
+
         case let .record(fields):
             output.append(7)
             scalar(UInt32(fields.count))
+
             for key in fields.keys.sorted() {
                 Self.string(key).append(to: &output)
                 fields[key]!.append(to: &output)
@@ -204,6 +242,7 @@ extension CoreValue {
     static func subtitles(_ snapshot: TextSubtitleSnapshot) -> Self {
         .list(snapshot.regions.map { region in
             var placement: Self = .null
+
             if case let .webVTT(value) = region.placement {
                 placement = .record([
                     "horizontalPosition": .number(Double(value.horizontalPosition)),
@@ -218,6 +257,7 @@ extension CoreValue {
                         .writingDirection == .verticalGrowingLeft ? "VERTICAL_GROWING_LEFT" : "VERTICAL_GROWING_RIGHT"),
                 ])
             }
+
             return .record([
                 "text": .string(region.text),
                 "trackID": .value(region.trackID?.mpvID),
@@ -252,6 +292,7 @@ extension CoreValue {
         case .hlg: "HLG"
         case .other: "OTHER"
         }
+
         return .record([
             "primaries": .value(value.primaries),
             "transferFunction": .string(transfer),
@@ -273,31 +314,44 @@ extension CoreValue {
 
     static func failure(_ error: MPVPlayerError?) -> Self {
         guard let error else { return .null }
-        var fields: [String: Self] = ["message": .string(error.localizedDescription)]
+
+        var fields: [String: Self] = ["message": .string(error.message)]
+
         switch error {
         case .clientCreationFailed: fields["type"] = .string("clientCreationFailed")
+
         case .clientUnavailable: fields["type"] = .string("clientUnavailable")
+
         case let .initializationFailed(context, code, _): fields.merge([
                 "type": .string("initializationFailed"),
                 "context": .string(context),
                 "code": .integer(Int64(code))
             ]) { _, new in new }
+
         case let .loadFailed(code, _): fields.merge(["type": .string("loadFailed"), "code": .integer(Int64(code))]) { _, new in new }
+
         case let .playbackFailed(code, _): fields
             .merge(["type": .string("playbackFailed"), "code": .integer(Int64(code))]) { _, new in new }
+
         case let .commandFailed(context, code, _): fields.merge([
                 "type": .string("commandFailed"),
                 "context": .string(context),
                 "code": .integer(Int64(code))
             ]) { _, new in new }
+
         case .nativeVideoOutputUnavailable: fields["type"] = .string("nativeVideoOutputUnavailable")
+
         case let .reservedProperty(name): fields["type"] = .string("reservedProperty")
             fields["name"] = .string(MPVOptionOwnership.normalizedProperty(name))
+
         case let .invalidSubtitleTrack(track): fields["type"] = .string("invalidSubtitleTrack")
             fields["track"] = .identifier(track)
+
         case .eventQueueOverflow: fields["type"] = .string("eventQueueOverflow")
+
         default: fields["type"] = .string("platformFailure")
         }
+
         return .record(fields)
     }
 
@@ -313,6 +367,7 @@ extension CoreValue {
         let diagnostics = value.diagnostics
         let buffer = value.buffer
         let dovi = value.dolbyVision
+
         let state: String = switch value.state {
         case .idle: "IDLE"
         case .loading: "LOADING"
@@ -325,6 +380,7 @@ extension CoreValue {
         case .stopped: "STOPPED"
         case .failed: "FAILED"
         }
+
         var result: [String: Self] = [
             "state": .string(state),
             "position": .number(value.position.seconds),
@@ -347,7 +403,9 @@ extension CoreValue {
             "subtitles": .subtitles(value.subtitles),
             "error": .failure(value.error),
         ]
+
         let dimensions = media.dimensions ?? .empty
+
         result["dimensions"] = .record([
             "width": .value(dimensions.width),
             "height": .value(dimensions.height),
@@ -355,6 +413,7 @@ extension CoreValue {
             "displayWidth": .value(dimensions.displayWidth),
             "displayHeight": .value(dimensions.displayHeight)
         ])
+
         result["tracks"] = .list(media.tracks.map { track in .record([
             "id": .identifier(track.id),
             "title": .value(track.title),
@@ -367,16 +426,18 @@ extension CoreValue {
             "requiresSubtitleRenderer": .flag(track.requiresSubtitleRenderer),
             "subtitleRole": .value(track.subtitleRole.map { $0 == .primary ? "PRIMARY" : "SECONDARY" }),
         ]) })
+
         result["chapters"] = .list(media.chapters.map { .record([
             "id": .value($0.id),
             "title": .value($0.title),
             "startTime": .number($0.startTime.seconds),
             "endTime": .value($0.endTime?.seconds)
         ]) })
+
         result["buffer"] = .record([
             "isBuffering": .flag(buffer.isBuffering),
             "progress": .number(buffer.progress),
-            "secondsBufferedAhead": .number(buffer.secondsBufferedAhead.seconds),
+            "secondsBufferedAhead": .number(buffer.bufferedDurationAhead.seconds),
             "bufferedEnd": .value(buffer.bufferedEnd?.seconds),
             "bytesAhead": .integer(buffer.bytesAhead),
             "totalBytes": .value(buffer.totalBytes),
@@ -386,6 +447,7 @@ extension CoreValue {
                 "end": .number($0.upperBound.seconds)
             ]) }),
         ])
+
         result["dolbyVision"] = .record([
             "requestedPolicy": .string(dovi.requestedPolicy == .strict ? "STRICT" : "PROFILE7_COMPATIBILITY"),
             "sourceProfile": .value(dovi.sourceProfile),
@@ -397,7 +459,9 @@ extension CoreValue {
             "enhancementLayer": .string(dovi.enhancementLayer.rawValue.uppercased()),
             "reason": .value(dovi.reason),
         ])
+
         let presentation = media.hdr.presentation
+
         result["hdr"] = .record([
             "source": .signal(media.hdr.source),
             "decoded": .signal(media.hdr.decoded),
@@ -417,6 +481,7 @@ extension CoreValue {
                 "actualDynamicRange": .string("UNKNOWN"),
             ]),
         ])
+
         result["diagnostics"] = .record([
             "videoCodec": .value(media.videoCodec),
             "audioCodec": .value(media.audioCodec),
@@ -439,7 +504,7 @@ extension CoreValue {
             "interop": .value(diagnostics.decoder.interop),
             "decoder": .value(diagnostics.decoder.selectedDecoder),
             "deinterlaceActive": .value(diagnostics.deinterlace.isActive),
-            "interlaced": .value(diagnostics.deinterlace.outputFrameIsInterlaced),
+            "interlaced": .value(diagnostics.deinterlace.isOutputFrameInterlaced),
             "filters": .list(diagnostics.deinterlace.effectiveFilter.map { [.string($0)] } ?? []),
             "effectiveOptions": .strings(diagnostics.renderingQuality.effectiveOptions),
             "renderPasses": .list((diagnostics.freshRenderPasses ?? []).map { .record([
@@ -456,11 +521,14 @@ extension CoreValue {
                 .uppercased()),
             "unsupportedFeatures": .list(diagnostics.renderingQuality.unsupportedFeatures.map(Self.string)),
         ])
+
         result["videoFeatureCapabilities"] = .capabilities(
             value.videoFeatureCapabilities,
             hasVideo: media.tracks.contains { $0.type == .video }
         )
+
         result["videoFeatureRequestResult"] = value.videoFeatureRequestResult.map(Self.featureResult) ?? .null
+
         return .record(result)
     }
 
@@ -474,6 +542,7 @@ extension CoreValue {
             "hasVideo": .flag(hasVideo),
             "features": .record(Dictionary(uniqueKeysWithValues: MPVVideoFeature.allCases.map { feature in
                 let capability = value[feature]
+
                 return (wireName(feature.rawValue), .record([
                     "availability": .string(wireName(capability.availability.rawValue)),
                     "restriction": .value(capability.restriction

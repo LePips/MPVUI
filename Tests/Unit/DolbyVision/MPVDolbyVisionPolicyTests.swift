@@ -11,11 +11,13 @@ struct MPVDolbyVisionPolicyTests {
     @Test
     func `duplicate diagnostic fields use the last valid value without inventing source metadata`() {
         var resolver = MPVDolbyVisionStatusResolver(policy: .strict)
+
         let consumed = resolver.consume(log: log(
             "MPVUI_NATIVE_DOLBY_VISION_VALIDATED: ignored profile7-to81=no session-profile=5 session-profile=8 session-compatibility=4"
         ))
 
         #expect(consumed)
+
         let status = resolver.status(source: .unknown, backend: .sampleBuffer)
 
         #expect(status.effectiveProfile == 8)
@@ -40,6 +42,7 @@ struct MPVDolbyVisionPolicyTests {
 
         #expect(resolver.status(source: source, backend: .sampleBuffer).effectiveProfile == nil)
         resolver.consume(log: validated())
+
         let status = resolver.status(source: source, backend: .sampleBuffer)
 
         #expect(status.sourceProfile == profile)
@@ -59,6 +62,7 @@ struct MPVDolbyVisionPolicyTests {
         #expect(pending.effectiveProfile == nil)
         #expect(pending.enhancementLayer == .unknown)
         resolver.consume(log: validated(converted: true))
+
         let status = resolver.status(source: source, backend: .sampleBuffer)
 
         #expect(status.sourceProfile == 7)
@@ -74,11 +78,13 @@ struct MPVDolbyVisionPolicyTests {
     func `missing profile and subtype stay unknown even with native validation`() {
         var resolver = MPVDolbyVisionStatusResolver(policy: .strict)
         resolver.consume(log: validated())
+
         let missing = resolver.status(source: .unknown, backend: .sampleBuffer)
 
         #expect(missing.nativeValidation == .validated)
         #expect(missing.sourceProfile == nil)
         #expect(missing.effectiveProfile == nil)
+
         let profile8 = resolver.status(source: MPVVideoSignal(dolbyVisionProfile: 8), backend: .sampleBuffer)
 
         #expect(profile8.effectiveBaseLayerCompatibilityID == nil)
@@ -88,6 +94,7 @@ struct MPVDolbyVisionPolicyTests {
     func `native effective session metadata does not invent source metadata`() {
         var resolver = MPVDolbyVisionStatusResolver(policy: .strict)
         resolver.consume(log: log("MPVUI_NATIVE_DOLBY_VISION_VALIDATED: profile7-to81=no session-profile=8 session-compatibility=4"))
+
         let status = resolver.status(source: .unknown, backend: .sampleBuffer)
 
         #expect(status.sourceProfile == nil)
@@ -100,6 +107,7 @@ struct MPVDolbyVisionPolicyTests {
     @Test
     func `unrelated channels and quoted sentinel text cannot validate native Dolby Vision`() {
         var resolver = MPVDolbyVisionStatusResolver(policy: .strict)
+
         for message in [
             MPVLogMessage(prefix: "ffmpeg/demuxer", level: .info, message: "MPVUI_NATIVE_DOLBY_VISION_VALIDATED: profile7-to81=no"),
             MPVLogMessage(prefix: "ffmpeg/video", level: .info, message: "hevc: MPVUI_NATIVE_DOLBY_VISION_VALIDATED: profile7-to81=no"),
@@ -109,7 +117,9 @@ struct MPVDolbyVisionPolicyTests {
 
             #expect(!consumed)
         }
+
         #expect(resolver.status(source: .unknown, backend: .sampleBuffer).nativeValidation == .unknown)
+
         let rejected = resolver.consume(log: MPVLogMessage(
             prefix: "ffmpeg/video",
             level: .error,
@@ -128,12 +138,14 @@ struct MPVDolbyVisionPolicyTests {
         ]))
 
         #expect(tagged.dolbyVisionBaseLayerCompatibilityID == 4)
+
         let unspecified = MPVVideoSignalParser.parse(.map([
             "gamma": .string("hlg"),
             "dolby-vision-profile": .integer(8),
         ]))
 
         #expect(unspecified.dolbyVisionBaseLayerCompatibilityID == nil)
+
         let malformed = MPVVideoSignalParser.parse(.map([
             "dolby-vision-bl-signal-compatibility-id": .integer(1000),
         ]))
@@ -149,6 +161,7 @@ struct MPVDolbyVisionPolicyTests {
         #expect(!consumed)
         #expect(resolver.status(source: .unknown, backend: .sampleBuffer).nativeValidation == .unknown)
         resolver.consume(log: validated(converted: true))
+
         let status = resolver.status(source: MPVVideoSignal(dolbyVisionProfile: 7), backend: .sampleBuffer)
 
         #expect(status.nativeValidation == .rejected)
@@ -163,6 +176,7 @@ struct MPVDolbyVisionPolicyTests {
 
         #expect(resolver.status(source: source, backend: .sampleBuffer).conversion == .converted)
         resolver.consume(log: log("MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED: malformed RPU in subsequent scene"))
+
         let failed = resolver.status(source: source, backend: .metal)
 
         #expect(failed.nativeValidation == .rejected)
@@ -170,6 +184,7 @@ struct MPVDolbyVisionPolicyTests {
         #expect(failed.effectiveProfile == nil)
         #expect(failed.enhancementLayer == .unknown)
         resolver.reset()
+
         let next = resolver.status(source: .unknown, backend: .sampleBuffer)
 
         #expect(next.nativeValidation == .unknown)
@@ -185,6 +200,29 @@ struct MPVDolbyVisionPolicyTests {
 
         #expect(status.enhancementLayer == .unknown)
         #expect(status.effectiveProfile == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func `ordinary native frames clear prior validation and conversion`(converted: Bool) {
+        var resolver = MPVDolbyVisionStatusResolver(policy: .profile7Compatibility)
+        resolver.consume(log: validated(converted: converted))
+
+        let message = "MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame"
+        let ignored = resolver.consume(log: .init(prefix: "ffmpeg/video", level: .info, message: message))
+        #expect(!ignored)
+        #expect(resolver.status(source: .unknown, backend: .sampleBuffer).nativeValidation == .validated)
+
+        let consumed = resolver.consume(log: log(message))
+        #expect(consumed)
+
+        let status = resolver.status(source: .unknown, backend: .sampleBuffer)
+        #expect(status.requestedPolicy == .profile7Compatibility)
+        #expect(status.nativeValidation == .unknown)
+        #expect(status.effectiveProfile == nil)
+        #expect(status.effectiveBaseLayerCompatibilityID == nil)
+        #expect(status.conversion == .notRequested)
+        #expect(status.enhancementLayer == .unknown)
+        #expect(status.reason == nil)
     }
 
     private func validated(converted: Bool = false) -> MPVLogMessage {

@@ -5,6 +5,27 @@ import Testing
 struct ReleaseCandidateTests {
 
     @Test
+    func `release simulator overrides select only the requested platform destinations`() throws {
+        let inventory = [
+            ConsumerTests.Simulator(id: "ios-new", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-1", state: "Booted"),
+            ConsumerTests.Simulator(id: "ios-phone", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-0", state: "Shutdown"),
+            ConsumerTests.Simulator(id: "tv", runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-26-5", state: "Shutdown"),
+        ]
+
+        #expect(try ConsumerTests.selectSimulators(inventory, environment: [:]).map(\.id) == ["ios-new", "ios-phone", "tv"])
+        #expect(try ConsumerTests.selectSimulators(inventory, environment: ["MPVUI_IOS_SIMULATOR": "ios-phone"]).map(\.id) == [
+            "ios-phone",
+            "tv",
+        ])
+
+        for overrides in [["MPVUI_IOS_SIMULATOR": "missing"], ["MPVUI_IOS_SIMULATOR": "tv"], ["MPVUI_TVOS_SIMULATOR": "ios-phone"]] {
+            #expect(throws: BuildError.self) {
+                try ConsumerTests.selectSimulators(inventory, environment: overrides)
+            }
+        }
+    }
+
+    @Test
     func `playback validation rejects locked or inactive desktop sessions`() throws {
         let session: [String: Any] = [
             "kCGSSessionUserNameKey": "tester",
@@ -12,6 +33,7 @@ struct ReleaseCandidateTests {
             "kCGSessionLoginDoneKey": true,
         ]
         try ConsumerTests.validateConsoleSession(["IOConsoleUsers": [session]], user: "tester")
+
         for properties: [String: Any] in [
             [:],
             ["IOConsoleUsers": [session], "IOConsoleLocked": true],
@@ -32,9 +54,11 @@ struct ReleaseCandidateTests {
         let index = candidate(native: native, fingerprint: fingerprint)
         try ReleaseManager.validateCandidate(index, native: native, fingerprint: fingerprint, tag: "0.7.0")
         try ReleaseManager.validateCandidate(index, native: native, fingerprint: fingerprint, tag: nil)
+
         #expect(throws: BuildError.self) {
             try ReleaseManager.validateCandidate(index, native: native, fingerprint: String(repeating: "b", count: 64), tag: nil)
         }
+
         #expect(throws: BuildError.self) {
             try ReleaseManager.validateCandidate(index, native: native, fingerprint: fingerprint, tag: "0.8.0")
         }
@@ -45,6 +69,7 @@ struct ReleaseCandidateTests {
         let native = try lock()
         let fingerprint = String(repeating: "a", count: 64)
         let index = candidate(native: native, fingerprint: fingerprint, slices: [native.apple.slices[0]])
+
         #expect(throws: BuildError.self) {
             try ReleaseManager.validateCandidate(index, native: native, fingerprint: fingerprint, tag: nil)
         }
@@ -74,6 +99,7 @@ struct ReleaseCandidateTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+
         return try JSONDecoder().decode(NativeLock.self, from: Data(contentsOf: root.appendingPathComponent("Build/Inputs.lock.json")))
     }
 }

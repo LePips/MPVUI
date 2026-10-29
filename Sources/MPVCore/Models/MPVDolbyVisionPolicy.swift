@@ -1,4 +1,6 @@
 /// Dolby Vision behavior requested when creating a native decoder.
+/// Native sample-buffer output accepts validated HEVC Profiles 5, 8.1, and 8.4
+/// on supported hardware. Profile 7 requires explicit compatibility conversion.
 public enum MPVDolbyVisionPolicy: String, CaseIterable, Equatable, Sendable {
 
     /// Disables native Profile 7 conversion. Unsupported streams fail native
@@ -9,8 +11,8 @@ public enum MPVDolbyVisionPolicy: String, CaseIterable, Equatable, Sendable {
     /// Conversion discards the enhancement layer and does not reproduce full FEL video.
     case profile7Compatibility
 
-    /// The decoder uses this policy for its lifetime. Create a player
-    /// with the new policy and reload the item to change it.
+    /// Whether changing this policy requires recreating the decoder and reloading media.
+    /// Always `true`. Create a player with the new policy to apply it.
     public var changesRequireReload: Bool {
         true
     }

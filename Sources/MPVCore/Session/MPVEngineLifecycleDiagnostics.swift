@@ -13,5 +13,6 @@ package struct MPVEngineLifecycleDiagnostics: Equatable, Sendable {
     package var loadingStateTransitions: UInt64 = 0
     package var bufferingStateTransitions: UInt64 = 0
     package var seekingStateTransitions: UInt64 = 0
+
     package init() {}
 }

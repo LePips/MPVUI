@@ -54,18 +54,22 @@ package enum MPVOptionOwnership {
 
     package static func normalizedProperty(_ name: String) -> String {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
         for prefix in ["options/", "file-local-options/"] where name.hasPrefix(prefix) {
             return String(name.dropFirst(prefix.count))
         }
+
         return name
     }
 
     package static func rendererPropertyModified(by rawName: String, arguments: [String]) -> String? {
         let (name, arguments) = commandComponents(rawName, arguments: arguments)
+
         guard ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(name),
               let property = arguments.first,
               rendererProperties.union(["sub-text-intercept", "sub-text-snapshot"]).contains(normalizedProperty(property))
         else { return nil }
+
         return property
     }
 
@@ -86,10 +90,13 @@ package enum MPVOptionOwnership {
             "async",
             "sync",
         ]
+
         var components = ([name] + arguments)[...]
+
         while let first = components.first, prefixes.contains(first) {
             components = components.dropFirst()
         }
+
         return (
             (components.first ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -101,12 +108,15 @@ package enum MPVOptionOwnership {
 
     package static func isManaged(_ rawName: String, deinterlace: MPVDeinterlacePolicy) -> Bool {
         let name = normalizedProperty(rawName)
+
         if Self.managedOptions.contains(name) {
             return true
         }
+
         if name == "vf" || name.hasPrefix("vf-") {
             return deinterlace.mode != .disabled
         }
+
         return name.hasPrefix("glsl-shaders-")
     }
 }

@@ -18,6 +18,7 @@ struct MPVRenderColorConfigurationTests {
         #expect(!color.usesExtendedDynamicRange)
         #expect(color.outputHeadroom == 1)
         #expect(color.layerColorSpace.name == CGColorSpace.extendedLinearDisplayP3)
+
         let options = Dictionary(uniqueKeysWithValues: color.options)
 
         #expect(options["icc-profile-auto"] == "no")
@@ -32,6 +33,7 @@ struct MPVRenderColorConfigurationTests {
         #expect(compatibility.pixelFormat == .bgra8Unorm)
         #expect(compatibility.status.targetPrimaries == "bt.709")
         #expect(Dictionary(uniqueKeysWithValues: compatibility.options)["dither-depth"] == "8")
+
         let preciseNarrow = resolve(.init(sdrOutput: .highPrecision), wide: false)
 
         #expect(preciseNarrow.pixelFormat == .rgba16Float)
@@ -47,6 +49,7 @@ struct MPVRenderColorConfigurationTests {
         ))
 
         #expect(Dictionary(uniqueKeysWithValues: legacy.options)["sdr-adjust-gamma"] == "no")
+
         let reference = resolve(.init(colorManagement: .init(referenceWhite: 100)), hdr: true)
 
         #expect(Dictionary(uniqueKeysWithValues: reference.options)["target-peak"] == "200")
@@ -76,12 +79,14 @@ struct MPVRenderColorConfigurationTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("icc")
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
+
         let config = MPVPlayerConfiguration(colorManagement: .init(displayProfile: .calibratedICC(url)))
         let result = resolve(config)
 
         #expect(result.status.conversionOwner == .libplaceboCalibratedICC)
         #expect(result.status.calibratedProfileURL == url)
         #expect(CFEqual(result.layerColorSpace, profile))
+
         let options = Dictionary(uniqueKeysWithValues: result.options)
 
         #expect(options["icc-profile"] == url.path)
@@ -126,15 +131,18 @@ struct MPVRenderColorConfigurationTests {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".cube")
         try cube.write(to: url, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
+
         let config = MPVPlayerConfiguration(colorManagement: .init(displayProfile: .calibratedLUT(url)))
         let color = resolve(config)
 
         #expect(color.status.conversionOwner == .libplaceboCalibratedLUT)
+
         let options = Dictionary(uniqueKeysWithValues: color.options)
 
         #expect(options["target-lut"] == url.path)
         #expect(options["target-trc"] == "gamma2.4")
         #expect(options["icc-profile"] == "")
+
         let invalidCubes = [
             "LUT_3D_SIZE 2\n0 0 0", // Truncated table.
             cube.replacingOccurrences(of: "DOMAIN_MIN 0.0 0.0 0.0", with: "DOMAIN_MIN invalid"),
@@ -147,6 +155,7 @@ struct MPVRenderColorConfigurationTests {
             cube.replacingOccurrences(of: "\n0 0 0", with: "\n 0 0 0"),
             cube.replacingOccurrences(of: "0 0 0\n1 0 0", with: "0 0 0\nTITLE \"Late header\"\n1 0 0"),
         ]
+
         for invalid in invalidCubes {
             try invalid.write(to: url, atomically: true, encoding: .utf8)
 

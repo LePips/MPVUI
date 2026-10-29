@@ -26,7 +26,7 @@ public struct MPVAudioStatus: Equatable, Sendable {
     public var allowsMultichannelSpatialization: Bool?
     /// Whether any active output on iOS or tvOS supports Spatial Audio with the feature enabled.
     /// The value is `nil` on macOS or when unavailable. It does not distinguish Fixed from Head Tracked.
-    public var routeSpatialAudioEnabled: Bool?
+    public var isSpatialAudioEnabledForRoute: Bool?
 
     /// Creates audio status with no observations.
     public init() {}

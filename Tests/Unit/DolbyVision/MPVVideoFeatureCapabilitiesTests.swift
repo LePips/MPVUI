@@ -9,10 +9,12 @@ struct MPVVideoFeatureCapabilitiesTests {
     @Test
     func `native DV blocks frame modification but preserves inline UI`() {
         let capabilities = resolve(.sampleBuffer, profile: 5)
+
         for feature in [MPVVideoFeature.nativeSubtitles, .bakedOverlays, .zoomAndPan, .pictureInPictureSubtitles] {
             #expect(capabilities[feature].availability == .unavailable)
             #expect(capabilities[feature].restriction == .nativeDolbyVisionPreservesRPU)
         }
+
         #expect(capabilities.inlineOverlays.availability == .available)
     }
 
@@ -67,7 +69,8 @@ struct MPVVideoFeatureCapabilitiesTests {
         #expect(capabilities.pictureInPictureSubtitles.restriction == .pictureInPictureUnavailableOnPlatform)
         #expect(capabilities.inlineOverlays.availability == .available)
         #expect(capabilities.nativeSubtitles.availability == .available)
-        let result = capabilities.resolve([.pictureInPictureSubtitles, .inlineOverlays])
+
+        let result = capabilities.requestResult(for: [.pictureInPictureSubtitles, .inlineOverlays])
         #expect(result.outcome == .unavailable)
         #expect(result.unavailableFeatures == [.pictureInPictureSubtitles])
         #expect(result.reason?.contains("picture-in-picture") == true)

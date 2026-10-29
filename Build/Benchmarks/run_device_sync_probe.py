@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "Build/Benchmarks"))
 sys.path.insert(0, str(ROOT / "Build/Tests"))
 from benchmark import measurement_lock
 from device_playback import command, digest, source_identity
+from generate_device_test_project import add_team_argument, generate
 from run_xcode_tests import result_summary, test_command
 
 HOST_BUNDLE = "com.lepips.MPVUIRegressionTests.Host"
@@ -209,6 +210,7 @@ def main():
     p.add_argument("--configuration", type=Path, default=ROOT / ".build/device-tests/GeneratedMedia/native-sync-configuration.json")
     p.add_argument("--project", type=Path, default=ROOT / ".build/device-tests/MPVUIRegressionTests.xcodeproj")
     p.add_argument("--derived-data", type=Path, default=ROOT / ".build/device-tests/DerivedData")
+    add_team_argument(p)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
@@ -219,8 +221,6 @@ def main():
     config = json.loads(args.configuration.read_text())
     serve_settings(args.hls, config, args.host)
     before = fixture.recheck(args.direct, args.hls, args.configuration)
-    if not args.project.is_dir():
-        raise ValueError("Generate the device test project first")
     if not args.execute:
         print(
             json.dumps(
@@ -235,6 +235,8 @@ def main():
         return
     with measurement_lock():
         args.output.mkdir(parents=True)
+        # Regenerate so the project includes the current tests and prepared resources.
+        generate(ROOT, args.project.parent, args.team)
         # A unique resource nonce prevents prior device reports from passing as
         # this execution; the rebuilt test bundle hashes this exact config.
         (args.output / "configuration-before.json").write_bytes(args.configuration.read_bytes())

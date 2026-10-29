@@ -32,12 +32,15 @@ package final class MPVRenderTarget: @unchecked Sendable {
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
         self.displaySupportsExtendedDynamicRange = displaySupportsExtendedDynamicRange
         self.outputHeadroom = outputHeadroom.isFinite ? max(1, outputHeadroom) : 1
+
         self.displayCapabilities = displayCapabilities ?? MPVDisplayCapabilities(
             hdrSupport: displaySupportsExtendedDynamicRange ? .supported : .unsupported,
             currentEDRHeadroom: self.outputHeadroom
         )
+
         self.configuredDynamicRange = configuredDynamicRange
             ?? (usesExtendedDynamicRange ? .hdr : .sdr)
+
         self.policyFallbackReason = policyFallbackReason
         self.colorConfiguration = colorConfiguration
     }

@@ -55,6 +55,7 @@ struct PlayerChrome: View {
                 #if os(iOS)
                 if showsAirPlaySurface {
                     AppleAirPlaySurface(model: model)
+
                     TransportControls(model: model)
                         .padding(.bottom, 12)
                         .playerControlsVisible(showControls)
@@ -80,6 +81,7 @@ struct PlayerChrome: View {
                         }
                         #endif
                         Button("Open URL…") { showURL = true }
+
                         if !media.isEmpty {
                             Divider()
 
@@ -146,6 +148,7 @@ struct PlayerChrome: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
         }
+
         // Keep both video outputs attached beneath the AirPlay screen so playback can switch back to mpv.
         // Keep the same route picker instance alive while its sheet is open.
         .background {
@@ -202,6 +205,7 @@ struct TrackMenu: View {
         Menu {
             trackSection("Video", kind: .video)
             trackSection("Audio", kind: .audio)
+
             Section("Subtitles") {
                 subtitleMenu("Primary subtitles", role: .primary)
                 subtitleMenu("Secondary subtitles", role: .secondary)
@@ -223,6 +227,7 @@ struct TrackMenu: View {
     func trackSection(_ title: String, kind: MPVTrackType) -> some View {
         Section(title) {
             let tracks = model.details.tracks.filter { $0.type == kind }
+
             if tracks.isEmpty {
                 Text("No tracks")
             }

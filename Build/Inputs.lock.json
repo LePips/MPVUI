@@ -977,12 +977,12 @@
           "version": "27.0"
         },
         "iphoneos": {
-          "build": "24A430",
-          "version": "27.0"
+          "build": "24A94232",
+          "version": "27.1"
         },
         "iphonesimulator": {
-          "build": "24A430",
-          "version": "27.0"
+          "build": "24A94232",
+          "version": "27.1"
         },
         "macosx": {
           "build": "26A425",
@@ -1008,10 +1008,10 @@
         "zip": "This is Zip 3.0 (July 5th 2008), by Info-ZIP, with modifications by Apple Inc."
       },
       "xcode": {
-        "build": "27A266a",
+        "build": "27A9275",
         "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
         "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)",
-        "version": "27.0"
+        "version": "27.1"
       }
     }
   },
@@ -1201,6 +1201,14 @@
             "android"
           ],
           "sha256": "b0052c925b4f1aef639cf6e455e7c78c9158498078c4c011bc939808692c8009"
+        },
+        {
+          "id": "0021-avfoundation-validate-dolby-vision-side-data",
+          "path": "Build/Patches/mpv/0021-avfoundation-validate-dolby-vision-side-data.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "587896bbd8626e41bfec6edf125f130bc5e65230f1de360a21e50dbf3c096512"
         }
       ],
       "ref": "v0.41.0",
@@ -1250,6 +1258,14 @@
             "apple"
           ],
           "sha256": "15088a10676c4d3c4862e58e54be7902714f9040ed633b5ad8801851fdd5c026"
+        },
+        {
+          "id": "0006-videotoolbox-inband-dolby-vision",
+          "path": "Build/Patches/ffmpeg/0006-videotoolbox-inband-dolby-vision.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "bc76709c109c0de0e9721753732e69b1989159c453c8ca028ae0000b21ef3e5a"
         },
         {
           "id": "0001-mediacodec-dolby-vision",

@@ -11,11 +11,13 @@ package extension MPVSession {
         if let liveFailure {
             return .liveConfigurationFailed(liveFailure)
         }
+
         // A missing optional native option must not hide a policy the operating
         // system cannot enforce. Backend replacement reasons preserve the original cause.
         if backend == .unsupportedSubtitleLuminance {
             return policy ?? backend
         }
+
         return backend ?? policy
     }
 
@@ -28,12 +30,15 @@ package extension MPVSession {
         guard requestedPolicy != .disabled,
               source.isHDR || requestedPolicy == .always || requestedPolicy == .constrained
         else { return nil }
+
         if display.hdrSupport == .unsupported {
             return .displayDoesNotSupportHDR
         }
+
         if let currentHeadroom = display.currentEDRHeadroom, currentHeadroom <= 1 {
             return .insufficientCurrentHeadroom
         }
+
         return nil
     }
 
@@ -57,6 +62,7 @@ package extension MPVSession {
             else { return nil }
 
             let type: MPVTrackType
+
             switch rawType {
             case "video": type = .video
             case "audio": type = .audio
@@ -69,6 +75,7 @@ package extension MPVSession {
             case 1: .secondary
             default: nil
             }
+
             return MPVMediaTrack(
                 id: Int(id),
                 type: type,
@@ -89,28 +96,36 @@ package extension MPVSession {
 
         var chapters: [MPVChapter] = []
         chapters.reserveCapacity(values.count)
+
         var nextStart: Duration?
+
         // A reverse scan finds the next valid boundary once per chapter,
         // including when malformed entries must be skipped.
         for (index, value) in values.enumerated().reversed() {
             guard let chapter = value.mapValue else { continue }
+
             let start = chapter["time"]?.doubleValue.flatMap(Duration.init(mpvSeconds:))
+
             chapters.append(MPVChapter(
                 id: index,
                 title: chapter["title"]?.stringValue,
                 startTime: start ?? .zero,
                 endTime: nextStart
             ))
+
             if let start {
                 nextStart = start
             }
         }
+
         chapters.reverse()
+
         return chapters
     }
 
     static func parseMetadata(_ node: MPVNodeValue?) -> [String: String] {
         guard let values = node?.mapValue else { return [:] }
+
         return values.reduce(into: [:]) { result, pair in
             if let string = pair.value.stringValue {
                 result[pair.key] = string
@@ -120,6 +135,7 @@ package extension MPVSession {
 
     static func normalizedFrameRate(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value > 0, value <= 1000 else { return nil }
+
         return (value * 1000).rounded() / 1000
     }
 
@@ -164,9 +180,12 @@ package extension MPVSession {
             lastPublishedPaused = isPaused
             publish(.paused(isPaused))
         }
+
         startDiagnosticsTimer()
         guard state != lastState else { return }
+
         lastState = state
+
         switch state {
         case .loading:
             lifecycleDiagnostics.loadingStateTransitions &+= 1
@@ -177,6 +196,7 @@ package extension MPVSession {
         default:
             break
         }
+
         publish(.state(state))
     }
 
@@ -199,16 +219,18 @@ package extension MPVSession {
 
     func refreshBuffer() {
         lifecycleDiagnostics.engineActivity.bufferSnapshots &+= 1
+
         let cache = getNode("demuxer-cache-state")?.mapValue ?? [:]
         let ranges = Self.parseSeekableRanges(cache["seekable-ranges"])
 
         let resumeProgress = Double(getInt64("cache-buffering-state") ?? 0) / 100
+
         publish(
             .buffer(
                 MPVBufferStatus(
                     isBuffering: isPausedForCache,
                     progress: resumeProgress,
-                    secondsBufferedAhead: (cache["cache-duration"]?.doubleValue
+                    bufferedDurationAhead: (cache["cache-duration"]?.doubleValue
                         ?? getDouble("demuxer-cache-duration")).flatMap(Duration.init(mpvSeconds:))
                         ?? .zero,
                     bufferedEnd: cache["cache-end"]?.doubleValue.flatMap(
@@ -224,7 +246,7 @@ package extension MPVSession {
     }
 
     func refreshAudioState() {
-        let volume = clamp(getDouble("volume") ?? desiredProperties["volume"].flatMap(Double.init) ?? configuration.volume, to: 0 ... 100)
+        let volume = clamped(getDouble("volume") ?? desiredProperties["volume"].flatMap(Double.init) ?? configuration.volume, to: 0 ... 100)
         let isMuted = getFlag("mute") ?? (desiredProperties["mute"] == "yes")
         let playbackRate = getDouble("speed") ?? desiredProperties["speed"].flatMap(Double.init) ?? configuration.playbackRate
         desiredProperties["volume"] = Self.format(volume)
@@ -236,11 +258,14 @@ package extension MPVSession {
     func refreshMediaInformation() {
         latestSnapshot.nativeVideoOutput = getString("current-vo")
         lifecycleDiagnostics.engineActivity.mediaSnapshots &+= 1
+
         let tracks = Self.parseTracks(getNode("track-list"))
+
         // Keep discovered tracks while a pending load waits for a surface.
         if isLoading, tracks.isEmpty {
             return
         }
+
         let chapters = Self.parseChapters(getNode("chapter-list"))
         let metadata = Self.parseMetadata(getNode("metadata"))
 
@@ -253,6 +278,7 @@ package extension MPVSession {
         let decoded = MPVVideoSignalParser.parse(videoParameters)
         let videoOutputInput = MPVVideoSignalParser.parse(videoOutputParameters)
         let output = MPVVideoSignalParser.parse(getNode("video-target-params"))
+
         // Dimensions and rotation are part of these nodes. Reuse the same
         // snapshots instead of making another libmpv call for each field.
         let parameters = videoParameters?.mapValue
@@ -260,8 +286,10 @@ package extension MPVSession {
         let width = parameters?["w"]?.integerValue ?? outputParameters?["w"]?.integerValue ?? 0
         let height = parameters?["h"]?.integerValue ?? outputParameters?["h"]?.integerValue ?? 0
         let display = renderTarget?.displayCapabilities ?? .unknown
+
         let configured: MPVPresentationStatus.DynamicRange = liveConfigurationFailure == nil
             ? renderTarget?.configuredDynamicRange ?? .unknown : .unknown
+
         let fallback = Self.resolvedPresentationFallback(
             backend: presentationFallbackReason,
             policy: renderTarget?.policyFallbackReason,
@@ -273,6 +301,7 @@ package extension MPVSession {
                 configuredDynamicRange: configured,
                 requestedPolicy: configuration.hdrPolicy
             )
+
         let hdr = MPVHDRStatus(
             source: source,
             decoded: decoded,
@@ -299,6 +328,7 @@ package extension MPVSession {
                         ?? outputParameters?["dh"]?.integerValue).map(Int.init)
                 )
                 : nil
+
         let reportedDuration: Duration? =
             if let duration = getDouble("duration").flatMap(Duration.init(mpvSeconds:)) {
                 duration
@@ -308,7 +338,9 @@ package extension MPVSession {
 
         lastContainerFramesPerSecond = Self.normalizedFrameRate(getDouble("container-fps"))
         lastEstimatedFramesPerSecond = Self.normalizedFrameRate(getDouble("estimated-vf-fps"))
+
         let framesPerSecond = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
+
         publish(
             .media(
                 MPVMediaInformation(
@@ -334,7 +366,9 @@ package extension MPVSession {
                 )
             )
         )
+
         publish(.dolbyVision(dolbyVisionResolver.status(source: source, backend: videoOutput)))
+
         if let color = renderTarget?.colorConfiguration?.status {
             publish(.color(color))
         }
@@ -343,6 +377,7 @@ package extension MPVSession {
     func publish(_ update: MPVEngineUpdate) {
         record(update)
         lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
+
         updateContinuation.yield(
             MPVEngineEmission(
                 generation: currentGeneration,
@@ -356,7 +391,9 @@ package extension MPVSession {
         completePiPSeek(false)
         fatalPlaybackError = error
         lastState = .failed(error)
+
         let update = MPVEngineUpdate.error(error, fatal: true)
+
         if globally {
             publishGlobally(update)
         } else {
@@ -376,6 +413,7 @@ package extension MPVSession {
     private func publishGlobally(_ update: MPVEngineUpdate) {
         record(update)
         lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
+
         updateContinuation.yield(
             MPVEngineEmission(
                 generation: nil,

@@ -16,6 +16,7 @@ public struct MPVChapter: Equatable, Hashable, Sendable {
     /// The nonnegative chapter duration, when an end time is available.
     public var duration: Duration? {
         guard let endTime else { return nil }
+
         return (endTime - startTime).clampPositiveOrZero
     }
 

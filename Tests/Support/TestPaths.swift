@@ -19,6 +19,7 @@ enum TestPaths {
         if let path = ProcessInfo.processInfo.environment["MPVUI_DOLBY_VISION_CHART"] {
             return URL(fileURLWithPath: path)
         }
+
         return repositoryRoot.appendingPathComponent(
             "Example/Sources/MPVUIExample/Resources/Media/dolby-vision-p5-chart.mp4"
         )
@@ -37,10 +38,12 @@ enum TestPaths {
 
     static func testMedia(_ name: String) throws -> URL {
         let url = generatedMediaDirectory.appendingPathComponent(name)
+
         try #require(
             FileManager.default.fileExists(atPath: url.path),
-            "Missing test media: \(name). Use the make test targets to prepare fixtures, or make media before direct SwiftPM tests."
+            "Missing test media: \(name). Run make test, or run make setup before direct SwiftPM tests."
         )
+
         return url
     }
 }

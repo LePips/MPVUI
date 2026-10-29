@@ -54,14 +54,17 @@ struct PlayerScreen: View {
     #if !os(Android)
     private var subtitleVideoSize: CGSize? {
         guard let dimensions = model.player.mediaInformation.dimensions else { return nil }
+
         var width = CGFloat(dimensions.effectiveWidth)
         var height = CGFloat(dimensions.effectiveHeight)
         guard width > 0, height > 0 else { return nil }
 
         let rotation = ((model.player.mediaInformation.rotation % 360) + 360) % 360
+
         if rotation == 90 || rotation == 270 {
             swap(&width, &height)
         }
+
         return CGSize(width: width, height: height)
     }
     #endif
@@ -96,6 +99,7 @@ struct PlayerScreen: View {
                     .accessibilityLabel("Audio playback")
                     .accessibilityIdentifier("exampleAudioArtwork")
             }
+
             if !model.inPictureInPicture {
                 PlayerChrome(
                     model: model,
@@ -123,6 +127,7 @@ struct PlayerScreen: View {
         .task {
             for await snapshot in model.subtitleStream {
                 guard !Task.isCancelled else { return }
+
                 textSubtitles = snapshot
             }
         }
@@ -143,7 +148,7 @@ struct PlayerScreen: View {
         )) {
             Button("OK") { model.player.pictureInPicture.clearLastError() }
         } message: {
-            Text(model.player.pictureInPicture.lastError?.localizedDescription ?? "Picture in picture could not start.")
+            Text(model.player.pictureInPicture.lastError?.message ?? "Picture in picture could not start.")
         }
         #if os(tvOS)
         .onPlayPauseCommand { model.player.togglePlayback() }

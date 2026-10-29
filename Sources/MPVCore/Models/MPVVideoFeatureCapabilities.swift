@@ -17,7 +17,9 @@ public enum MPVVideoFeature: String, CaseIterable, Hashable, Sendable {
     case pictureInPictureSubtitles
 }
 
-/// Renderer capabilities, not AVKit's current ability to start PiP. Consult
+/// Capabilities for composing video features on the current renderer.
+///
+/// Platform picture-in-picture readiness is separate. On Apple platforms, consult
 /// `player.pictureInPicture.isSupported` and `isPossible` for device and session state.
 public struct MPVVideoFeatureCapabilities: Equatable, Sendable {
 
@@ -78,8 +80,10 @@ public struct MPVVideoFeatureCapabilities: Equatable, Sendable {
         supportsPictureInPicture: Bool
     ) {
         self.backend = backend
+
         let modifiesNativeDolbyVision = backend == .sampleBuffer
             && (dolbyVision.sourceProfile != nil || dolbyVision.nativeValidation == .validated)
+
         let videoCapability: Capability = if modifiesNativeDolbyVision {
             Capability(availability: .unavailable, restriction: .nativeDolbyVisionPreservesRPU)
         } else if backend == .nativeSurface, hasVideo {
@@ -93,6 +97,7 @@ public struct MPVVideoFeatureCapabilities: Equatable, Sendable {
         bakedOverlays = videoCapability
         zoomAndPan = videoCapability
         inlineOverlays = .available
+
         if !supportsPictureInPicture {
             pictureInPictureSubtitles = Capability(availability: .unavailable, restriction: .pictureInPictureUnavailableOnPlatform)
         } else if pictureInPictureRequiresNativeOutput && backend != .sampleBuffer {
@@ -140,8 +145,14 @@ public struct MPVVideoFeatureRequestResult: Equatable, Sendable {
     public let unavailableFeatures: Set<MPVVideoFeature>
     /// An explanation of the request outcome, if available.
     public let reason: String?
-    /// Records the feature request and the result for the active backend.
-    public init(outcome: Outcome, requestedFeatures: Set<MPVVideoFeature>, unavailableFeatures: Set<MPVVideoFeature>, reason: String?) {
+
+    /// Creates a feature request result for the active renderer.
+    public init(
+        outcome: Outcome,
+        requestedFeatures: Set<MPVVideoFeature>,
+        unavailableFeatures: Set<MPVVideoFeature>,
+        reason: String? = nil
+    ) {
         self.outcome = outcome
         self.requestedFeatures = requestedFeatures
         self.unavailableFeatures = unavailableFeatures
@@ -151,14 +162,17 @@ public struct MPVVideoFeatureRequestResult: Equatable, Sendable {
 
 public extension MPVVideoFeatureCapabilities {
 
-    /// Evaluates a request using the current copied renderer capabilities.
-    func resolve(_ features: Set<MPVVideoFeature>) -> MPVVideoFeatureRequestResult {
+    /// Returns the result of evaluating a request against the current renderer capabilities.
+    /// Evaluating a request does not enable features or change the renderer.
+    func requestResult(for features: Set<MPVVideoFeature>) -> MPVVideoFeatureRequestResult {
         let unavailable = Set(features.filter { self[$0].availability == .unavailable })
         let unknown = features.contains { self[$0].availability == .unknown }
         let outcome: MPVVideoFeatureRequestResult.Outcome
         let reason: String?
+
         if !unavailable.isEmpty {
             outcome = .unavailable
+
             if unavailable.contains(where: { self[$0].restriction == .nativeDolbyVisionPreservesRPU }) {
                 reason = "Native Dolby Vision preserves unmodified RPU frames; baked subtitles, overlays, and geometry are unavailable."
             } else if unavailable.contains(where: { self[$0].restriction == .nativeSurfaceCompositionUnavailable }) {
@@ -173,6 +187,7 @@ public extension MPVVideoFeatureCapabilities {
             outcome = .available
             reason = nil
         }
+
         return .init(outcome: outcome, requestedFeatures: features, unavailableFeatures: unavailable, reason: reason)
     }
 }

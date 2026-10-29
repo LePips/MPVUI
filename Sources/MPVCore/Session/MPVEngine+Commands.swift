@@ -38,8 +38,10 @@ package extension MPVSession {
                     )
                 )
             }
+
             return
         }
+
         setProperty(propertyName, to: value)
     }
 
@@ -53,13 +55,17 @@ package extension MPVSession {
             queue.async { [weak self] in self?.publishCommandError(MPV_ERROR_INVALID_PARAMETER.rawValue, context: "Command") }
             return
         }
+
         if let property = MPVOptionOwnership.rendererPropertyModified(by: name, arguments: arguments) {
             queue.async { [weak self] in
                 self?.publish(.error(.reservedProperty(name: property), fatal: false))
             }
+
             return
         }
+
         let (commandName, commandArguments) = MPVOptionOwnership.commandComponents(name, arguments: arguments)
+
         if ["loadfile", "loadlist", "playlist-next", "playlist-prev", "playlist-play-index", "playlist-remove", "playlist-clear"]
             .contains(commandName)
         {
@@ -70,19 +76,32 @@ package extension MPVSession {
                     message: "Use the typed load API so source identity and pending operations remain ordered."
                 ), fatal: false))
             }
+
             return
         }
+
         if commandName == "stop", commandArguments.isEmpty {
             stop()
             return
         }
+
+        if commandName == "set", commandArguments.count == 2,
+           let property = commandArguments.first, Self.canonicalOptionName(property) == "vid",
+           let value = commandArguments.last
+        {
+            setProperty(property, to: value)
+            return
+        }
+
         command([name] + arguments, allowsStoppedClient: true)
     }
 
     func recordPersistentCommandMutation(_ arguments: [String]) {
         guard let name = arguments.first else { return }
+
         let (command, arguments) = MPVOptionOwnership.commandComponents(name, arguments: Array(arguments.dropFirst()))
         let property: String
+
         if ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(command),
            let name = arguments.first
         {
@@ -92,6 +111,7 @@ package extension MPVSession {
         } else {
             return
         }
+
         // File-local values, timeline actions, and renderer ownership must not
         // become configuration for a replacement client. Only real options are
         // read below; properties such as chapter and time-pos are not options.
@@ -110,12 +130,14 @@ package extension MPVSession {
                   "playlist-playing-pos"
               ].contains(property)
         else { return }
+
         commandMutatedOptions.insert(property)
         renderingOptionsDirty = true
     }
 
     func snapshotRuntimeProperties() {
         dispatchPrecondition(condition: .onQueue(queue))
+
         let names = [
             "volume",
             "mute",
@@ -130,15 +152,18 @@ package extension MPVSession {
             "sub-visibility",
             "secondary-sub-visibility",
         ]
+
         for name in names {
             // Preserve the user's video selection while no surface is attached.
             if name == "vid", renderTarget == nil {
                 continue
             }
+
             if let value = getString(name) {
                 desiredProperties[name] = value
             }
         }
+
         for name in commandMutatedOptions.subtracting(names) {
             if let value = getString("options/\(name)") {
                 // Store the resolved value of add/cycle/list operations, never
@@ -150,8 +175,10 @@ package extension MPVSession {
 
     func applyDesiredProperties() {
         dispatchPrecondition(condition: .onQueue(queue))
+
         for (name, value) in desiredProperties {
             let status = setPropertyImmediately(name, to: value)
+
             if status < 0 {
                 publishCommandError(status, context: "Restore \(name)")
             }
@@ -169,16 +196,20 @@ package extension MPVSession {
                 message: "Native option names and values cannot contain NUL bytes."
             )
         }
+
         try check(mpv_set_option_string(handle, name, value), context: "Set option \(name)")
     }
 
     func command(_ arguments: [String], allowsStoppedClient: Bool = false) {
         queue.async { [weak self] in
             guard let self else { return }
+
             if allowsStoppedClient {
                 self.createStoppedClientForExplicitCommandIfNeeded()
             }
+
             let status = self.runCommand(arguments)
+
             if status < 0 {
                 self.publishCommandError(status, context: arguments.first ?? "Command")
             }
@@ -192,6 +223,7 @@ package extension MPVSession {
 
         var cArguments: [UnsafePointer<CChar>?] = arguments.map { argument in
             guard let duplicate = strdup(argument) else { return nil }
+
             return UnsafePointer(duplicate)
         }
         cArguments.append(nil)
@@ -204,6 +236,7 @@ package extension MPVSession {
 
         let status = mpv_command(handle, &cArguments)
         recordAcceptedCommand(arguments, status: status)
+
         return status
     }
 
@@ -214,6 +247,7 @@ package extension MPVSession {
 
         var cArguments: [UnsafePointer<CChar>?] = arguments.map { argument in
             guard let duplicate = strdup(argument) else { return nil }
+
             return UnsafePointer(duplicate)
         }
         cArguments.append(nil)
@@ -228,7 +262,9 @@ package extension MPVSession {
         let status = mpv_command_ret(handle, &cArguments, &result)
         recordAcceptedCommand(arguments, status: status)
         guard status >= 0 else { return (status, nil) }
+
         defer { mpv_free_node_contents(&result) }
+
         return (status, MPVNodeValue(copying: result))
     }
 
@@ -240,24 +276,32 @@ package extension MPVSession {
 
     func setPropertyImmediatelyOrDefer(_ name: String, to value: String) {
         dispatchPrecondition(condition: .onQueue(queue))
+
         // Reject before retaining desired settings as well as before the C call.
         // Otherwise a truncated name could evade option ownership validation.
         guard !name.contains("\0"), !value.contains("\0") else {
             publishCommandError(MPV_ERROR_INVALID_PARAMETER.rawValue, context: "Set property")
             return
         }
+
         desiredProperties[Self.canonicalOptionName(name)] = value
+
         let audioSetting = ["volume", "mute", "speed"].contains(Self.canonicalOptionName(name))
+
         guard handle != nil else {
             if audioSetting {
                 refreshAudioState()
             }
+
             return
         }
 
         let status = setPropertyImmediately(name, to: value)
+
         if status < 0 {
             publishCommandError(status, context: "Set \(name)")
+        } else if Self.canonicalOptionName(name) == "vid" {
+            continuePreloadIfPossible()
         } else if audioSetting {
             refreshAudioState()
         } else if Self.textSubtitleSnapshotRefreshProperties.contains(
@@ -275,58 +319,78 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !name.contains("\0"), !value.contains("\0") else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
         guard let handle else { return MPV_ERROR_UNINITIALIZED.rawValue }
+
         let property = MPVOptionOwnership.normalizedProperty(name)
         let effectiveValue = renderTarget == nil && ["vid", "video"].contains(property) ? "no" : value
         let status = mpv_set_property_string(handle, name, effectiveValue)
+
         if status >= 0 {
             renderingOptionsDirty = true
         }
+
         return status
     }
 
     func getFlag(_ name: String) -> Bool? {
         guard let handle else { return nil }
+
         lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+
         var value: Int32 = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_FLAG, &value) >= 0 else { return nil }
+
         return value != 0
     }
 
     func getInt64(_ name: String) -> Int64? {
         guard let handle else { return nil }
+
         lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+
         var value: Int64 = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_INT64, &value) >= 0 else { return nil }
+
         return value
     }
 
     func getDouble(_ name: String) -> Double? {
         guard let handle else { return nil }
+
         lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+
         var value: Double = 0
         guard mpv_get_property(handle, name, MPV_FORMAT_DOUBLE, &value) >= 0 else { return nil }
+
         return value.isFinite ? value : nil
     }
 
     func getString(_ name: String) -> String? {
         guard let handle else { return nil }
+
         lifecycleDiagnostics.engineActivity.propertyReads &+= 1
         guard let value = mpv_get_property_string(handle, name) else { return nil }
+
         defer { mpv_free(value) }
+
         return String(validatingCString: value)
     }
 
     func getNode(_ name: String) -> MPVNodeValue? {
         guard let handle else { return nil }
+
         lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+
         var node = mpv_node()
         guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &node) >= 0 else { return nil }
+
         defer { mpv_free_node_contents(&node) }
+
         return MPVNodeValue(copying: node)
     }
 
     func check(_ status: Int32, context: String) throws(MPVPlayerError) {
         guard status < 0 else { return }
+
         throw .initializationFailed(context: context, code: status, message: mpvErrorMessage(status))
     }
 
@@ -336,8 +400,10 @@ package extension MPVSession {
 
     private func createStoppedClientForExplicitCommandIfNeeded() {
         dispatchPrecondition(condition: .onQueue(queue))
+
         guard handle == nil, isStoppedForResourceRelease,
               !needsSourceLoad, !playbackRequestIsActive else { return }
+
         // Explicit raw commands retain native option and command ordering even
         // after stop retired the old session. This idle client does not reopen
         // the source; ordinary view updates still respect the stopped latch.

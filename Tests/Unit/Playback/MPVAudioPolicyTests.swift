@@ -24,7 +24,7 @@ struct MPVAudioPolicyTests {
         #expect(status.nativePath == "avplayer")
         #expect(status.allowsStereoSpatialization == true)
         #expect(status.allowsMultichannelSpatialization == true)
-        #expect(status.routeSpatialAudioEnabled == false)
+        #expect(status.isSpatialAudioEnabledForRoute == false)
         #expect(status.sourceChannels == nil)
     }
 
@@ -40,7 +40,7 @@ struct MPVAudioPolicyTests {
                 native: .map(["path": .string("sample-buffer"), "allows-stereo": .bool(true)])
             )
 
-            #expect(status.routeSpatialAudioEnabled == nil)
+            #expect(status.isSpatialAudioEnabledForRoute == nil)
             #expect(status.allowsMultichannelSpatialization == nil)
             #expect(status.nativePath == (output == "avfoundation" ? "sample-buffer" : nil))
             #expect(status.allowsStereoSpatialization == (output == "avfoundation" ? true : nil))

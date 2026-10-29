@@ -47,13 +47,39 @@ let package = Package(name: "Consumer", platforms: [.macOS(.v15)],
 """)
         source = consumer / "Sources/Consumer"
         source.mkdir(parents=True)
-        (source / "Consumer.swift").write_text("""import MPVUI
+        (source / "Consumer.swift").write_text("""import Foundation
+import MPVUI
 @main struct Consumer {
-    @MainActor static func main() {
-        let player = MPVPlayer(configuration: .init(autoPlay: false))
+    @MainActor static func main() async {
+        let configuration = MPVPlayerConfiguration(
+            automaticallyPlays: false,
+            initialBufferDuration: .seconds(2),
+            isLoopingEnabled: true,
+            networkCacheDuration: .seconds(8),
+            renderingQuality: .init(isDebandingEnabled: true)
+        )
+        let player = MPVPlayer(configuration: configuration)
+        precondition(!player.configuration.automaticallyPlays)
+        precondition(player.configuration.isLoopingEnabled)
+        precondition(player.configuration.initialBufferDuration == .seconds(2))
+        precondition(player.configuration.networkCacheDuration == .seconds(8))
+        precondition(player.bufferStatus.bufferedDurationAhead == .zero)
+        precondition(player.videoFeatureCapabilities.requestResult(for: [.inlineOverlays]).outcome == .available)
         player.setVolume(25)
         precondition(player.volume == 25)
         precondition(player.state == .idle)
+        let error: any Error = MPVPlayerError.clientUnavailable
+        precondition((error as? MPVPlayerError)?.message == "mpv is not available.")
+        let plan: MPVExternalPlaybackPlan? = player.externalPlayback.preparationPlan
+        precondition(plan == nil && !player.externalPlayback.isTranscoding)
+        do {
+            _ = try await player.externalPlayback.makePreparationPlan()
+            preconditionFailure("Unloaded media cannot produce a preparation plan.")
+        } catch let failure as MPVPlayerError {
+            guard case .externalPlaybackFailed = failure else { preconditionFailure(failure.message) }
+        } catch {
+            preconditionFailure(String(describing: error))
+        }
         print("Independent Apple consumer loaded the shared core and selected native artifact.")
     }
 }

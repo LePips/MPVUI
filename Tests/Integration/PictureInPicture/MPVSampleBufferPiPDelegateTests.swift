@@ -15,9 +15,11 @@ struct MPVSampleBufferPiPDelegateTests {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
+
         var modes: [Bool] = []
         let helper = makeHelper(player: fixture.player, layer: fixture.player.sampleBufferDisplayLayer) { modes.append($0) }
         defer { helper.invalidate() }
+
         let platform = platformController(helper, layer: fixture.player.sampleBufferDisplayLayer)
         helper.pictureInPictureControllerWillStartPictureInPicture(platform)
 
@@ -37,7 +39,9 @@ struct MPVSampleBufferPiPDelegateTests {
         #expect(!helper.snapshot.isActive && !helper.snapshot.isStopping)
         #expect(modes == [true, false])
         helper.invalidate()
+
         let retired = helper.snapshot
+
         helper.pictureInPictureControllerWillStartPictureInPicture(platform)
         helper.pictureInPictureControllerDidStartPictureInPicture(platform)
         helper.pictureInPictureControllerWillStopPictureInPicture(platform)
@@ -52,9 +56,11 @@ struct MPVSampleBufferPiPDelegateTests {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
+
         let layer = fixture.player.sampleBufferDisplayLayer
         let helper = makeHelper(player: fixture.player, layer: layer)
         defer { helper.invalidate() }
+
         let platform = platformController(helper, layer: layer)
         let range = helper.pictureInPictureControllerTimeRangeForPlayback(platform)
 
@@ -68,6 +74,7 @@ struct MPVSampleBufferPiPDelegateTests {
         #expect(!helper.pictureInPictureControllerIsPlaybackPaused(platform))
         helper.pictureInPictureController(platform, setPlaying: false)
         try await eventually("AVKit pause freezes the native clock") { fixture.player.state == .paused }
+
         var completions = 0
         helper.pictureInPictureController(platform, skipByInterval: CMTime(seconds: 0.5, preferredTimescale: 600)) { completions += 1 }
         try await eventually("AVKit skip completes after the native frame is ready") { completions == 1 }
@@ -85,6 +92,7 @@ struct MPVSampleBufferPiPDelegateTests {
         let layer = AVSampleBufferDisplayLayer()
         let helper = makeHelper(player: player, layer: layer)
         defer { helper.invalidate() }
+
         let platform = platformController(helper, layer: layer)
         helper.pictureInPictureControllerWillStartPictureInPicture(platform)
         helper.stop()
@@ -92,6 +100,7 @@ struct MPVSampleBufferPiPDelegateTests {
         #expect(helper.snapshot.isStopping)
         helper.pictureInPictureControllerWillStartPictureInPicture(platform)
         helper.pictureInPictureControllerDidStartPictureInPicture(platform)
+
         let failure = NSError(domain: "MPVUI.PiPTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Presenter refused"])
         helper.pictureInPictureController(platform, failedToStartPictureInPictureWithError: failure)
 
@@ -100,13 +109,17 @@ struct MPVSampleBufferPiPDelegateTests {
         helper.clearLastError()
 
         #expect(helper.snapshot.lastError == nil)
+
         var answers: [Bool] = []
+
         helper.pictureInPictureController(
             platform,
             restoreUserInterfaceForPictureInPictureStopWithCompletionHandler: { answers.append($0) }
         )
+
         try await eventually("declined restoration calls AVKit completion") { answers == [false] }
         helper.invalidate()
+
         helper.pictureInPictureController(
             platform,
             restoreUserInterfaceForPictureInPictureStopWithCompletionHandler: { answers.append($0) }
@@ -136,12 +149,15 @@ struct MPVSampleBufferPiPDelegateTests {
 
         let helper = try makeHelper(player: #require(player), layer: layer)
         defer { helper.invalidate() }
+
         let platform = platformController(helper, layer: layer)
+
         player = nil
 
         #expect(helper.pictureInPictureControllerIsPlaybackPaused(platform))
         #expect(!helper.pictureInPictureControllerTimeRangeForPlayback(platform).isValid)
         helper.pictureInPictureController(platform, setPlaying: true)
+
         var completions = 0
         helper.pictureInPictureController(platform, skipByInterval: .invalid) { completions += 1 }
 
@@ -157,7 +173,7 @@ struct MPVSampleBufferPiPDelegateTests {
             player: player,
             displayLayer: layer,
             onStateChange: { _ in },
-            restoreUserInterface: { false },
+            userInterfaceRestorationHandler: { false },
             onRenderingModeChange: renderingChanged
         )
     }

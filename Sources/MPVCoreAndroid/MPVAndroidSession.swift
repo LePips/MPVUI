@@ -2,43 +2,61 @@ import CMPV
 import Foundation
 import MPVCore
 
-/// Creates the shared session with Android native output and audio options.
+/// Factory methods for shared playback sessions with Android video and audio options.
 public enum MPVAndroidSession {
 
     /// Consumes one retained C session reference supplied by an Android adapter.
     /// The adapter and Swift UI then address the same session and native client.
+    ///
+    /// - Parameter address: A session address with one retained reference transferred to this call.
+    ///   Pass each retained reference only once. Zero returns `nil`.
     public static func consumeRetainedHandle(_ address: Int64) -> MPVSession? {
         guard let pointer = UnsafeMutableRawPointer(bitPattern: Int(truncatingIfNeeded: address)) else { return nil }
+
         return Unmanaged<MPVSession>.fromOpaque(pointer).takeRetainedValue()
     }
 
-    /// Creates one session, with no Skip or Java dependency. A platform adapter
-    /// supplies content access and surfaces separately.
-    public static func create(configuration: MPVSessionConfiguration = .init(videoOutput: .gpu), lowPowerMode: Bool = false) -> MPVSession {
-        create(configuration: configuration, lowPowerMode: lowPowerMode, prepareHandle: { _ in 0 })
+    /// Creates a session with Android playback services.
+    /// A platform adapter supplies content access and surfaces separately.
+    ///
+    /// - Parameters:
+    ///   - configuration: Playback defaults and requested output policies.
+    ///   - isLowPowerModeEnabled: Whether automatic rendering quality uses the battery preset.
+    public static func makeSession(
+        configuration: MPVSessionConfiguration = .init(videoOutput: .gpu),
+        isLowPowerModeEnabled: Bool = false
+    ) -> MPVSession {
+        makeSession(configuration: configuration, isLowPowerModeEnabled: isLowPowerModeEnabled, prepareHandle: { _ in 0 })
     }
 
-    package static func create(
+    package static func makeSession(
         configuration: MPVSessionConfiguration,
-        lowPowerMode: Bool,
+        isLowPowerModeEnabled: Bool,
         prepareHandle: @escaping @Sendable (OpaquePointer) -> Int32
     ) -> MPVSession {
         var platform = MPVPlatformServices()
-        platform.lowPowerMode = { lowPowerMode }
+        platform.lowPowerMode = { isLowPowerModeEnabled }
         platform.prepareHandle = prepareHandle
+
         platform.mediaPath = { url in
             let path = url.isFileURL ? url.path : url.absoluteString
+
             if url.scheme == "content" {
                 return "mpvui-content" + path.dropFirst("content".count)
             }
+
             if url.scheme == "asset" {
                 return "mpvui-asset://" + path.dropFirst("asset:".count).drop(while: { $0 == "/" })
             }
+
             return path
         }
+
         platform.videoOutputName = { $0 == .nativeSurface ? "mediacodec_embed" : "gpu-next" }
+
         platform.initialOptions = { settings, target, output in
             let display = target?.displayCapabilities ?? .unknown
+
             return [
                 ("ao", "audiotrack,opensles,"),
                 ("hwdec", MPVAndroidOutputPolicy.hardware(settings, output: output)),
@@ -61,6 +79,7 @@ public enum MPVAndroidSession {
                 ("input-default-bindings", "no")
             ]
         }
+
         return MPVSession(settings: configuration, platform: platform) { _ in }
     }
 }

@@ -119,7 +119,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
         public let url: URL
 
         /// Creates a creative LUT with the specified input encoding.
-        public init(domain: Domain = .native, url: URL) {
+        public init(url: URL, domain: Domain = .native) {
             self.domain = domain
             self.url = url
         }
@@ -129,15 +129,17 @@ public struct MPVRenderingQuality: Equatable, Sendable {
 
     /// Whether to reduce color banding. Uses the preset when `nil`.
     /// - Note: Has no effect with sample-buffer output.
-    public let debanding: Bool?
+    public let isDebandingEnabled: Bool?
 
     // MARK: - Numeric options
 
-    /// Antiringing strength, clamped to `0...1`. Uses the preset when `nil`.
+    /// The requested antiringing strength. Rendering clamps finite values to `0...1`.
+    /// Uses the preset when `nil` and ignores non-finite values.
     /// - Note: Has no effect with sample-buffer output.
     public let antiringing: Double?
 
-    /// Chroma antiringing strength, clamped to `0...1`. Uses the preset when `nil`.
+    /// The requested chroma antiringing strength. Rendering clamps finite values to `0...1`.
+    /// Uses the preset when `nil` and ignores non-finite values.
     /// - Note: Has no effect with sample-buffer output.
     public let chromaAntiringing: Double?
 
@@ -186,7 +188,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
         antiringing: Double? = nil,
         chromaAntiringing: Double? = nil,
         chromaScaling: Scaling? = nil,
-        debanding: Bool? = nil,
+        isDebandingEnabled: Bool? = nil,
         dithering: Dithering? = nil,
         gamutMapping: GamutMapping? = nil,
         lut: LUT? = nil,
@@ -199,7 +201,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
         self.antiringing = antiringing
         self.chromaAntiringing = chromaAntiringing
         self.chromaScaling = chromaScaling
-        self.debanding = debanding
+        self.isDebandingEnabled = isDebandingEnabled
         self.dithering = dithering
         self.gamutMapping = gamutMapping
         self.lut = lut
@@ -225,7 +227,8 @@ public struct MPVRenderingQualityStatus: Equatable, Sendable {
     /// Requested features that the renderer cannot apply.
     public var unsupportedFeatures: [String]
 
-    /// Automatic preset selection checks Low Power Mode once at renderer creation.
+    /// Whether applying new settings requires recreating the renderer and reloading media.
+    /// Always `true`. Automatic preset selection checks Low Power Mode at renderer creation.
     public var requiresReload: Bool {
         true
     }

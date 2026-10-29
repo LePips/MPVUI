@@ -21,7 +21,7 @@ def run(*command, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label", required=True, help="Unique result label, e.g. before or after")
-    parser.add_argument("--serial", help="adb device serial (required when multiple devices are attached)")
+    parser.add_argument("--device", help="adb device serial (required when multiple devices are attached)")
     parser.add_argument("--seconds", type=int, default=10, choices=range(1, 121), metavar="1..120")
     parser.add_argument("--rounds", type=int, default=3, choices=range(1, 21), metavar="1..20")
     parser.add_argument("--apk", type=Path, help="Install a saved benchmark APK instead of building current sources")
@@ -50,12 +50,12 @@ def main():
     adb = ["adb"]
     devices = run("adb", "devices", capture_output=True, text=True).stdout.splitlines()[1:]
     serials = [line.split()[0] for line in devices if len(line.split()) >= 2 and line.split()[1] == "device"]
-    if args.serial:
-        if args.serial not in serials:
-            parser.error(f"Device {args.serial} is not connected/authorized")
-        adb += ["-s", args.serial]
+    if args.device:
+        if args.device not in serials:
+            parser.error(f"Device {args.device} is not connected/authorized")
+        adb += ["-s", args.device]
     elif len(serials) != 1:
-        parser.error("Connect exactly one authorized device, or pass --serial")
+        parser.error("Connect exactly one authorized device, or pass --device")
     else:
         adb += ["-s", serials[0]]
     if args.apk:

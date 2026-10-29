@@ -27,7 +27,7 @@ jobs:
         id: updates
         env:
           GH_TOKEN: ${{ github.token }}
-        run: make update-dependencies ARGS='--all --report .build/dependency-update.md'
+        run: make update ARGS='--all --report .build/dependency-update.md'
       - name: Open or refresh PR
         uses: peter-evans/create-pull-request@v8
         with:

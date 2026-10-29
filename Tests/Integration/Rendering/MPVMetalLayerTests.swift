@@ -23,6 +23,7 @@ struct MPVMetalLayerTests {
         layer.colorspace = originalColorSpace
 
         let retainedColorSpace = try #require(layer.colorspace)
+
         layer.colorspace = duplicateColorSpace
         layer.drawableSize = validSize
 
@@ -57,6 +58,7 @@ struct MPVMetalLayerTests {
         let layer = MPVMetalLayer()
         let validSize = CGSize(width: 320, height: 180)
         layer.drawableSize = validSize
+
         let box = MPVMetalLayerSendableBox(layer)
 
         await Task.detached {
@@ -68,6 +70,7 @@ struct MPVMetalLayerTests {
 
         layer.beginNativeResizeTransaction()
         layer.beginNativeResizeTransaction()
+
         await Task.detached {
             box.value.drawableSize = CGSize(width: 1, height: 1)
         }
@@ -98,6 +101,7 @@ struct MPVMetalLayerTests {
         let layer = MPVMetalLayer()
         layer.minificationFilter = .nearest
         layer.magnificationFilter = .nearest
+
         let box = MPVMetalLayerSendableBox(layer)
 
         await Task.detached {
@@ -105,6 +109,7 @@ struct MPVMetalLayerTests {
             box.value.magnificationFilter = .linear
         }
         .value
+
         for _ in 0 ..< 10 {
             await Task.yield()
         }
@@ -120,6 +125,7 @@ struct MPVMetalLayerTests {
     func `iOS EDR requests from the render queue preserve host policy`() async {
         let layer = MPVMetalLayer()
         layer.configureExtendedDynamicRangeContent(true)
+
         let hostValue = layer.wantsExtendedDynamicRangeContent
         let box = MPVMetalLayerSendableBox(layer)
 
@@ -129,6 +135,7 @@ struct MPVMetalLayerTests {
             box.value.wantsExtendedDynamicRangeContent = false
         }
         .value
+
         for _ in 0 ..< 10 {
             await Task.yield()
         }
@@ -142,6 +149,7 @@ struct MPVMetalLayerTests {
         guard #available(iOS 26.0, *) else { return }
 
         let surface = MPVPlatformVideoPlayer(player: MPVPlayer())
+
         surface.configureMetalLayer(
             usesExtendedDynamicRange: true,
             scale: 3,
@@ -152,6 +160,7 @@ struct MPVMetalLayerTests {
 
         #expect(layer.contentsScale == 3)
         #expect(layer.pixelFormat == .rgba16Float)
+
         #expect(
             try #require(layer.colorspace).name
                 == CGColorSpace.extendedLinearDisplayP3
@@ -177,6 +186,7 @@ struct MPVMetalLayerTests {
         let layer = surface.metalLayer
 
         #expect(layer.contentsScale == 2)
+
         if #available(tvOS 26.0, *) {
             #expect(layer.pixelFormat == .rgba16Float)
             #expect(try #require(layer.colorspace).name == CGColorSpace.extendedLinearDisplayP3)

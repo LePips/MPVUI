@@ -1,7 +1,7 @@
-/// Audio decoding, spatialization, and session settings for ``MPVPlayer``.
+/// Audio decoding, spatialization, and session settings for a playback session.
 ///
-/// Set ``MPVPlayerConfiguration/audio`` before creating the player.
-/// Changes require a new player.
+/// Set ``MPVSessionConfiguration/audio`` before creating the session.
+/// Changes require a new session. Apple audio options have no effect on Android.
 public struct MPVAudioConfiguration: Equatable, Sendable {
 
     // MARK: - Types
@@ -58,7 +58,7 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
     /// Source layouts eligible for Apple's spatializer. Defaults to `.automatic`.
     public let spatialization: Spatialization
 
-    /// Creates audio settings with automatic decoding, spatialization, and session setup.
+    /// Creates audio settings with the specified decoding, spatialization, and session policies.
     public init(
         audioSession: AudioSession = .automatic,
         dolbyDecoding: DolbyDecoding = .automatic,

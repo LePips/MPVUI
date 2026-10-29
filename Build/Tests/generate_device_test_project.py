@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -13,6 +14,7 @@ import subprocess
 
 
 SCHEME = "MPVUIRegressionTests"
+TEAM_ENVIRONMENT = "MPVUI_DEVELOPMENT_TEAM"
 HOST_TARGET = "MPVUITestHost"
 HOST_SOURCE = """import SwiftUI
 import UIKit
@@ -123,6 +125,15 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
     }
 
 
+def add_team_argument(parser):
+    """Accept the Apple development team as --team, or from MPVUI_DEVELOPMENT_TEAM."""
+    parser.add_argument(
+        "--team",
+        default=os.environ.get(TEAM_ENVIRONMENT),
+        help=f"Apple development team for signed physical-device runs. Defaults to {TEAM_ENVIRONMENT}",
+    )
+
+
 def generate(repository: Path, output: Path, team: str | None = None) -> Path:
     repository, output = repository.resolve(), output.resolve()
     generated_root = repository / ".build"
@@ -149,7 +160,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--output", type=Path, help="Build-owned output; default: .build/device-tests")
-    parser.add_argument("--team", help="Apple development team; required for signed physical-device runs")
+    add_team_argument(parser)
     args = parser.parse_args()
     repository = args.repository.resolve()
     output = (args.output or repository / ".build/device-tests").resolve()

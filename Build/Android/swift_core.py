@@ -205,12 +205,17 @@ def stage_dependencies(abi, binaries, destination):
     return copied
 
 
-def execute_tests(abi, device):
+def device_abi(device):
     if not device:
         raise ValueError("Select the connected Android test device with --device SERIAL")
+    adb = Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk")) / "platform-tools/adb"
+    return subprocess.check_output([adb, "-s", device, "shell", "getprop", "ro.product.cpu.abi"], text=True).strip()
+
+
+def execute_tests(abi, device):
     android_sdk, _, _ = native_paths(abi)
     adb = android_sdk / "platform-tools/adb"
-    architecture = subprocess.check_output([adb, "-s", device, "shell", "getprop", "ro.product.cpu.abi"], text=True).strip()
+    architecture = device_abi(device)
     if architecture != abi:
         raise ValueError(f"Device {device} runs {architecture}, but tests were built for {abi}")
     products = ROOT / ".build/android/swift" / abi / f"out/Products/Release-android-{ARCHITECTURES[abi]}"
@@ -254,7 +259,7 @@ def build(abi, *, product=None, tests=False):
     arch = ARCHITECTURES[abi]
     prefix = ROOT / ".build/android/upstream/buildscripts/prefix" / ("arm64" if arch == "aarch64" else arch)
     if not (prefix / "include/mpv/client.h").is_file():
-        raise RuntimeError(f"Build the native {abi} inputs first with make build-android")
+        raise RuntimeError(f"Build the native {abi} inputs first with make build PLATFORM=android")
     command = [
         compiler(),
         "build",
@@ -279,11 +284,14 @@ def build(abi, *, product=None, tests=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--abi", choices=ARCHITECTURES, action="append")
+    parser.add_argument("--abi", choices=ARCHITECTURES, action="append", help="Defaults to every ABI, or the device ABI with --test")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--device")
     args = parser.parse_args()
-    for abi in args.abi or ARCHITECTURES:
+    abis = args.abi or ([device_abi(args.device)] if args.test else list(ARCHITECTURES))
+    if not set(abis) <= ARCHITECTURES.keys():
+        parser.error(f"Unsupported device ABI: {', '.join(abis)}")
+    for abi in abis:
         build(abi, product="MPVCoreAndroid", tests=args.test)
         if args.test:
             execute_tests(abi, args.device)

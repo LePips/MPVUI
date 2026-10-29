@@ -16,6 +16,7 @@ public struct MPVDisplayCapabilities: Equatable, Sendable {
     public static let unknown = Self()
     /// The output route's reported HDR capability.
     public let hdrSupport: HDRSupport
+    /// Whether the output route supports a wide color gamut, or `nil` when unknown.
     /// Wide-gamut capability does not imply HDR support.
     public let supportsWideGamut: Bool?
     /// The selected display profile's name, when available.
@@ -25,13 +26,13 @@ public struct MPVDisplayCapabilities: Equatable, Sendable {
     public let currentEDRHeadroom: Double?
     /// The maximum possible headroom, describing capability rather than available brightness.
     public let potentialEDRHeadroom: Double?
-    /// HDR10 support reported by Android, or nil when unknown.
+    /// Whether Android reports HDR10 support, or `nil` when unknown.
     public let supportsHDR10: Bool?
-    /// HLG support reported by Android, or nil when unknown.
+    /// Whether Android reports HLG support, or `nil` when unknown.
     public let supportsHLG: Bool?
-    /// Dolby Vision support reported by Android, or nil when unknown.
+    /// Whether Android reports Dolby Vision support, or `nil` when unknown.
     public let supportsDolbyVision: Bool?
-    /// Nominal display refresh rate reported by the platform.
+    /// The nominal display refresh rate in hertz, or `nil` when unknown.
     public let refreshRate: Double?
 
     package init(
@@ -59,6 +60,7 @@ public struct MPVDisplayCapabilities: Equatable, Sendable {
     private static func validHeadroom(_ value: Double?) -> Double? {
         value.flatMap {
             guard $0.isFinite, $0 >= 1, ($0 * 100).isFinite else { return nil }
+
             return ($0 * 100).rounded() / 100
         }
     }

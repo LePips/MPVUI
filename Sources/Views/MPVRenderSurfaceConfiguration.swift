@@ -34,18 +34,23 @@ struct MPVRenderSurfaceConfiguration: Sendable {
         usesExtendedDynamicRange: Bool
     ) {
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
+
         self.displaySupportsExtendedDynamicRange =
             displaySupportsExtendedDynamicRange
+
         self.drawableSize = drawableSize
         self.scale = scale
         self.outputHeadroom = Self.quantizedOutputHeadroom(outputHeadroom)
+
         self.displayCapabilities = displayCapabilities ?? MPVDisplayCapabilities(
             hdrSupport: displaySupportsExtendedDynamicRange ? .supported : .unsupported,
             currentEDRHeadroom: outputHeadroom,
             potentialEDRHeadroom: outputHeadroom
         )
+
         self.configuredDynamicRange = configuredDynamicRange
             ?? (usesExtendedDynamicRange ? .hdr : .sdr)
+
         self.policyFallbackReason = policyFallbackReason
         self.colorConfiguration = colorConfiguration
     }
@@ -65,9 +70,11 @@ struct MPVRenderSurfaceConfiguration: Sendable {
 
     private static func quantizedOutputHeadroom(_ outputHeadroom: Double) -> Double {
         guard outputHeadroom.isFinite else { return 1 }
+
         let clampedHeadroom = max(outputHeadroom, 1)
         let scaledHeadroom = clampedHeadroom * 100
         guard scaledHeadroom.isFinite else { return clampedHeadroom }
+
         return scaledHeadroom.rounded(.toNearestOrEven) / 100
     }
 

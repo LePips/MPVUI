@@ -6,6 +6,7 @@ package struct MPVVideoOverlayBitmap: Sendable {
     package let width: Int
     package let height: Int
     package let bytes: Data
+
     package var stride: Int {
         width * 4
     }

@@ -11,17 +11,21 @@ struct MPVMetalPerformanceTests {
     func `Metal playback renders seeks and recreates with bounded decoder threading`(media: String) async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no"],
-            autoPlay: false,
+            automaticallyPlays: false,
             logLevel: .info,
             videoOutput: .metal
         ))
         defer { fixture.close() }
+
         let player = fixture.player
         player.setDiagnosticsEnabled(true)
+
         var messages: [String] = []
         player.logHandler = { messages.append($0.message) }
+
         let url = try TestPaths.testMedia(media)
         try await fixture.loadPaused(url, at: .seconds(0.25))
+
         try await eventually("bounded Metal presentation") {
             player.playbackDiagnostics.renderingQuality.effectiveOptions["swapchain-depth"] == "2"
                 && player.playbackDiagnostics.freshRenderPasses?.isEmpty == false
@@ -35,23 +39,28 @@ struct MPVMetalPerformanceTests {
         let before = await player.lifecycleDiagnostics()
 
         #expect(await player.seekForPictureInPicture(to: .seconds(0.5)))
+
         try await eventually("paused Metal seek") {
             player.isPaused && abs(player.position.seconds - 0.5) < 0.15
         }
+
         player.play()
         try await eventually("Metal playback advances") { player.position.seconds > 0.8 }
         player.pause()
         try await eventually("Metal playback pauses") { player.isPaused }
+
         let after = await player.lifecycleDiagnostics()
 
         #expect(after.handlesCreated == before.handlesCreated)
         #expect(player.lastError == nil)
 
         player.stop()
+
         try await eventually("Metal resources retired") {
             let state = await player.lifecycleDiagnostics()
             return state.handlesCreated == state.handlesDestroyed
         }
+
         try await fixture.loadPaused(url, at: .seconds(0.25))
 
         #expect(player.lastError == nil)
@@ -66,7 +75,8 @@ struct MPVMetalPerformanceTests {
         ))
         defer { fixture.close() }
         fixture.player.setDiagnosticsEnabled(true)
-        try fixture.player.load(TestPaths.testMedia("image-webp-animated.webp"), autoPlay: true)
+        try fixture.player.load(TestPaths.testMedia("image-webp-animated.webp"), playAutomatically: true)
+
         try await eventually("software decoded animation rendered by Metal") {
             fixture.player.position.seconds >= 0.75
                 && fixture.player.playbackDiagnostics.decoder.session == .software
@@ -80,18 +90,22 @@ struct MPVMetalPerformanceTests {
     func `presentation depth override survives recreation`(override: Bool) async throws {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null"].merging(override ? ["swapchain-depth": "3"] : [:]) { _, new in new },
-            autoPlay: false,
+            automaticallyPlays: false,
             renderingQuality: .init(preset: .highQuality),
             videoOutput: .metal
         ))
         defer { fixture.close() }
         fixture.player.setDiagnosticsEnabled(true)
+
         for _ in 0 ..< 2 {
             try await fixture.loadPaused()
+
             try await eventually("requested presentation depth") {
                 fixture.player.playbackDiagnostics.renderingQuality.effectiveOptions["swapchain-depth"] == (override ? "3" : "2")
             }
+
             fixture.player.stop()
+
             try await eventually("configured renderer stopped") {
                 let state = await fixture.player.lifecycleDiagnostics()
                 return state.handlesCreated == state.handlesDestroyed

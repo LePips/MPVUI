@@ -124,9 +124,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--lane",
-        choices=["default", "all", "unit", "integration", "system", "benchmarks"],
+        choices=["default", "all", "core", "unit", "integration", "system"],
         default="default",
-        help="all combines core, unit, integration and system suites; system opt-ins still apply",
+        help="default runs core, unit and integration suites; all adds system suites, whose opt-ins still apply",
     )
     parser.add_argument("--check", action="store_true", help="Enforce complete-suite coverage floors")
     parser.add_argument("--report", type=Path, help="Summarize an existing LLVM JSON export without running tests")
@@ -153,19 +153,14 @@ def main():
         folders = {
             "default": ["Unit", "Integration"],
             "all": ["Unit", "Integration", "System"],
+            "core": [],
             "unit": ["Unit"],
             "integration": ["Integration"],
             "system": ["System"],
-            "benchmarks": ["Benchmarks"],
         }[args.lane]
-        if args.lane in ("default", "all", "unit"):
+        if args.lane in ("default", "all", "core", "unit"):
             folders.append("Core")
         command += ["--filter", suites(ROOT, folders)]
-        if sys.platform == "darwin" and args.lane != "unit":
-            # AVFoundation readback and system PiP need an awake display. Keep
-            # the assertion scoped to this test process, without changing the
-            # user's persistent power settings or weakening frame assertions.
-            command = ["/usr/bin/caffeinate", "-disu", *command]
         print(f"Running {args.lane} lane; log: {output / 'tests.log'}", flush=True)
         publish_evidence(artifacts=dict(testLog=output / "tests.log"))
         with (output / "tests.log").open("w") as log:

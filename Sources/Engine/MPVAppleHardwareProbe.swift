@@ -13,6 +13,7 @@ enum MPVAppleHardwareProbe {
         case "mpeg2video": kCMVideoCodecType_MPEG2Video
         default: nil
         }
+
         return type.map(probe)
     }
 }

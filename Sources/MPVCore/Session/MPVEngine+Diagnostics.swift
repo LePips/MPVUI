@@ -11,6 +11,7 @@ package extension MPVSession {
             sentinel: "MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED:",
             allowsDecoder: true
         ) ?? MPVNativeDiagnosticParser.payload(log, sentinel: "MPVUI_NATIVE_VIDEO_UNSUPPORTED:")
+
         return reason.flatMap { $0.isEmpty ? nil : $0 }
     }
 
@@ -31,6 +32,7 @@ package extension MPVSession {
                     continuation.resume(returning: nil)
                     return
                 }
+
                 let (status, value) = self.runCommandReturningValue(["screenshot-raw", "window", "bgr0"])
                 continuation.resume(returning: status >= 0 ? value : nil)
             }
@@ -39,13 +41,21 @@ package extension MPVSession {
 
     func recordAcceptedCommand(_ arguments: [String], status: Int32) {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard status >= 0, let command = arguments.first?.lowercased() else { return }
+        guard status >= 0, let name = arguments.first else { return }
+
+        let (command, _) = MPVOptionOwnership.commandComponents(name, arguments: Array(arguments.dropFirst()))
+
         recordPersistentCommandMutation(arguments)
+
         switch command {
         case "loadfile":
             lifecycleDiagnostics.loadCommands &+= 1
         case "seek":
             lifecycleDiagnostics.seekCommands &+= 1
+        case "stop", "quit", "quit-watch-later":
+            // mpv processes transport commands during hooks, but cannot finish
+            // unloading until every client releases its pending continuation.
+            releasePendingPreload()
         default:
             break
         }
@@ -53,7 +63,9 @@ package extension MPVSession {
 
     func handleLogMessage(_ event: mpv_event) {
         guard let data = event.data else { return }
+
         let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
+
         // Copy before retiring a rejected native handle invalidates event data.
         let log = MPVLogMessage(
             prefix: message.prefix.map { String(cString: $0) } ?? "mpv",
@@ -62,15 +74,18 @@ package extension MPVSession {
             } ?? .info,
             message: message.text.map { String(cString: $0) } ?? ""
         )
+
         if isRequestedPlaylistEntryActive, let hardware = MPVPlaybackDiagnosticsParser.videoToolboxSession(log) {
             updateVideoToolboxSession(hardware, hardwareDecoder: getString("hwdec-current"))
         }
+
         if videoOutput == .sampleBuffer,
            isRequestedPlaylistEntryActive,
            dolbyVisionResolver.consume(log: log)
         {
             refreshMediaInformation()
         }
+
         if videoOutput == .sampleBuffer, !didRejectNativeOutput,
            let reason = Self.nativeOutputRejectionReason(log),
            Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID),
@@ -86,9 +101,11 @@ package extension MPVSession {
             isFileLoaded = false
             publishFatalError(.nativeVideoOutputUnavailable(reason))
         }
+
         let orderedLevels: [MPVSessionConfiguration.LogLevel] = [.none, .fatal, .error, .warning, .info, .status, .verbose, .debug, .trace]
         let threshold = orderedLevels.firstIndex(of: configuration.logLevel) ?? 0
         let severity = orderedLevels.firstIndex(of: log.level) ?? 0
+
         if threshold > 0, severity > 0, severity <= threshold {
             publish(.log(log))
         }
@@ -97,11 +114,14 @@ package extension MPVSession {
     func setDiagnosticsEnabled(_ enabled: Bool) {
         queue.async { [weak self] in
             guard let self, self.isDiagnosticsEnabled != enabled else { return }
+
             self.isDiagnosticsEnabled = enabled
             self.publish(.diagnostics(self.playbackDiagnostics))
+
             if enabled {
                 self.refreshPlaybackDiagnostics()
             }
+
             self.startDiagnosticsTimer()
         }
     }
@@ -113,20 +133,27 @@ package extension MPVSession {
             return
         }
         guard diagnosticsTimer == nil else { return }
+
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: .milliseconds(500), leeway: .milliseconds(100))
+
         timer.setEventHandler { [weak self] in
             guard let self, self.isRequestedPlaylistEntryActive, self.isFileLoaded else { return }
+
             self.refreshPlaybackDiagnostics()
         }
+
         diagnosticsTimer = timer
         timer.resume()
     }
 
     func refreshPlaybackDiagnostics() {
         guard isDiagnosticsEnabled, handle != nil else { return }
+
         lifecycleDiagnostics.engineActivity.diagnosticsSnapshots &+= 1
+
         var result = playbackDiagnostics
+
         result.audio = MPVAudioStatusParser.parse(
             output: getString("current-ao"),
             codec: getString("audio-codec-name"),
@@ -135,6 +162,7 @@ package extension MPVSession {
             outputFormat: getString("audio-out-params/format"),
             native: getNode("avfoundation-audio-spatialization")
         )
+
         result.decoderDroppedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("decoder-frame-drop-count"))
         result.outputDroppedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("frame-drop-count"))
         result.mistimedFrames = MPVPlaybackDiagnosticsParser.nonnegative(getInt64("mistimed-frame-count"))
@@ -145,34 +173,44 @@ package extension MPVSession {
         result.estimatedFilterFramesPerSecond = MPVPlaybackDiagnosticsParser.finite(getDouble("estimated-vf-fps"))
         result.nominalDisplayFramesPerSecond = MPVPlaybackDiagnosticsParser.finite(getDouble("display-fps"))
         result.estimatedDisplayFramesPerSecond = MPVPlaybackDiagnosticsParser.finite(getDouble("estimated-display-fps"))
+
         let passes = (videoOutput == .metal || videoOutput == .gpu) ? getNode("vo-passes")?.mapValue : nil
         result.freshRenderPasses = MPVPlaybackDiagnosticsParser.renderPasses(passes?["fresh"])
         result.redrawRenderPasses = MPVPlaybackDiagnosticsParser.renderPasses(passes?["redraw"])
+
         result.nativeOutputStatistics = videoOutput == .sampleBuffer
             ? MPVPlaybackDiagnosticsParser.nativeStatistics(getNode("avfoundation-video-statistics")) : nil
+
         let hardwareDecoder = getString("hwdec-current")
         result.decoder = decoderDiagnostics(hardwareDecoder: hardwareDecoder)
+
         result.deinterlace = MPVRenderingOptions.deinterlaceStatus(
             policy: configuration.deinterlace,
             interlaced: getFlag("video-frame-info/interlaced"),
             hardwareDecoder: hardwareDecoder,
             automaticFilterIsActive: getFlag("deinterlace-active")
         )
+
         // Filter-output cadence is a decoded cadence estimate only if the filter
         // chain has no configured processing capable of changing timestamps.
         let filters = getNode("vf")?.arrayValue
+
         result.estimatedDecodedFramesPerSecond = configuration.deinterlace.mode == .disabled && filters?.isEmpty == true
             ? result.estimatedFilterFramesPerSecond : nil
+
         if renderingOptionsDirty, let resolution = renderingResolution {
             var effective: [String: String] = [:]
+
             for name in resolution.options.keys {
                 if let value = getString(name) {
                     effective[name] = value
                 }
             }
+
             if !resolution.shaderPaths.isEmpty {
                 effective["glsl-shaders"] = getString("glsl-shaders")
             }
+
             result.renderingQuality = MPVRenderingQualityStatus(
                 requested: configuration.renderingQuality,
                 resolvedPreset: resolution.preset,
@@ -180,8 +218,10 @@ package extension MPVSession {
                 effectiveOptions: effective,
                 unsupportedFeatures: resolution.unsupportedFeatures
             )
+
             renderingOptionsDirty = false
         }
+
         result.fallbackReasons = diagnosticFallbackReasons(result)
         result.engineActivity = lifecycleDiagnostics.engineActivity
         playbackDiagnostics = result
@@ -190,6 +230,7 @@ package extension MPVSession {
 
     func refreshAudioDiagnostics() {
         guard handle != nil else { return }
+
         let audio = MPVAudioStatusParser.parse(
             output: getString("current-ao"),
             codec: getString("audio-codec-name"),
@@ -198,7 +239,9 @@ package extension MPVSession {
             outputFormat: getString("audio-out-params/format"),
             native: getNode("avfoundation-audio-spatialization")
         )
+
         guard playbackDiagnostics.audio != audio else { return }
+
         playbackDiagnostics.audio = audio
         publish(.diagnostics(playbackDiagnostics))
     }
@@ -226,15 +269,18 @@ package extension MPVSession {
         case .software: false
         case .unknown: nil
         }
+
         refreshDecoderDiagnostics(hardwareDecoder: hardwareDecoder)
     }
 
     func refreshDecoderDiagnostics(hardwareDecoder: String?) {
         guard handle != nil else { return }
+
         var result = playbackDiagnostics
         result.decoder = decoderDiagnostics(hardwareDecoder: hardwareDecoder)
         result.fallbackReasons = diagnosticFallbackReasons(result)
         guard result != playbackDiagnostics else { return }
+
         // This updates decoder fields only; diagnosticsSnapshots is the
         // revision of full timer/native snapshots used by timing collectors.
         result.engineActivity = lifecycleDiagnostics.engineActivity
@@ -254,6 +300,7 @@ package extension MPVSession {
                     )
                 )
             )
+
         case .none, .fatal, .error, .warning, .info, .status:
             break
         }

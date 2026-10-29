@@ -639,7 +639,7 @@ class PlaybackIntegrationTest {
     }
     @Test fun inbandDolbyVisionWithoutContainerTagsPreservesColors() {
         val name = "dolby-vision-inband.hevc"
-        assumeTrue("Run Build/Android/prepare_test_media.py with the optional Dolby Vision chart", name in instrumentation.context.assets.list("").orEmpty())
+        assumeTrue("Add the optional Dolby Vision chart, then rerun make test PLATFORM=android SUITE=integration", name in instrumentation.context.assets.list("").orEmpty())
         val player = MPVPlayer(instrumentation.targetContext, PlayerConfiguration(audio = AudioConfiguration(AudioConfiguration.AudioSession.HOST_MANAGED), autoPlay = false))
         ActivityScenario.launch(PlaybackTestActivity::class.java).use { activity ->
             activity.onActivity { it.video.player = player }

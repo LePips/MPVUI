@@ -7,24 +7,35 @@ final class SeekGatedMediaStream: @unchecked Sendable {
 
     static let open: mpv_stream_cb_open_ro_fn = { context, _, info in
         guard let context, let info else { return -1 }
+
         info.pointee.cookie = context
+
         info.pointee.read_fn = { context, buffer, count in
             guard let context, let buffer else { return -1 }
+
             return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().read(into: buffer, count: count)
         }
+
         info.pointee.seek_fn = { context, offset in
             guard let context else { return -1 }
+
             return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().seek(to: offset)
         }
+
         info.pointee.size_fn = { context in
             guard let context else { return -1 }
+
             return Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().size
         }
+
         info.pointee.close_fn = { _ in }
+
         info.pointee.cancel_fn = { context in
             guard let context else { return }
+
             Unmanaged<SeekGatedMediaStream>.fromOpaque(context).takeUnretainedValue().cancel()
         }
+
         return 0
     }
 
@@ -74,17 +85,22 @@ final class SeekGatedMediaStream: @unchecked Sendable {
     private func seek(to offset: Int64) -> Int64 {
         condition.lock()
         defer { condition.unlock() }
+
         if gateNextSeek {
             gateNextSeek = false
             blocked = true
+
             let deadline = Date().addingTimeInterval(10)
+
             while blocked && !cancelled {
                 if !condition.wait(until: deadline) {
                     return -1
                 }
             }
         }
+
         guard !cancelled, offset >= 0 else { return -1 }
+
         do {
             try file.seek(toOffset: UInt64(offset))
             return offset
@@ -95,6 +111,7 @@ final class SeekGatedMediaStream: @unchecked Sendable {
         condition.lock()
         defer { condition.unlock() }
         guard !cancelled else { return -1 }
+
         do {
             let data = try file.read(upToCount: Int(min(count, UInt64(Int.max)))) ?? Data()
             data.copyBytes(to: UnsafeMutableRawBufferPointer(start: buffer, count: data.count))

@@ -104,11 +104,13 @@ struct MPVPlaybackParsingTests {
     @Test
     func `large chapter tables retain every boundary`() {
         let count = 10000
+
         let chapters = MPVSession.parseChapters(.array((0 ..< count).map {
             .map(["time": .double(Double($0))])
         }))
 
         #expect(chapters.count == count)
+
         for (index, chapter) in chapters.enumerated() {
             #expect(chapter.id == index)
             #expect(chapter.startTime == .seconds(index))

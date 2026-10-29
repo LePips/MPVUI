@@ -10,6 +10,7 @@ struct MPVSubtitleQueryLifecycleTests {
     @Test
     func `query before media is loaded reports a precise recoverable error`() async {
         let engine = MPVSession(configuration: .init()) { _ in }
+
         do {
             _ = try await engine.textSubtitleSnapshots(for: .init(type: .subtitle, mpvID: 1))
 
@@ -28,15 +29,18 @@ struct MPVSubtitleQueryLifecycleTests {
     @Test
     func `cancelled caller never leaves a pending subtitle continuation`() async {
         let engine = MPVSession(configuration: .init()) { _ in }
+
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
             return try await engine.textSubtitleSnapshots(for: .init(type: .subtitle, mpvID: 1))
         }
+
         do {
             _ = try await task.value
 
             Issue.record("A cancelled query must throw")
         } catch { #expect(error is CancellationError) }
+
         #expect(engine.queue.sync { engine.subtitleQueries.isEmpty })
     }
 
@@ -47,6 +51,7 @@ struct MPVSubtitleQueryLifecycleTests {
         let unrelated = MPVSubtitleQueryCancellation()
         let (registrations, registered) = AsyncStream<Void>.makeStream()
         defer { registered.finish() }
+
         let first = Task {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[TimedTextSubtitleSnapshot], any Error>) in
                 engine.queue.sync {
@@ -55,8 +60,10 @@ struct MPVSubtitleQueryLifecycleTests {
                 }
             }
         }
+
         var readiness = registrations.makeAsyncIterator()
         await readiness.next()
+
         do {
             let result: [TimedTextSubtitleSnapshot] = try await withCheckedThrowingContinuation { continuation in
                 engine.queue.sync {
@@ -71,10 +78,12 @@ struct MPVSubtitleQueryLifecycleTests {
 
             #expect(result.isEmpty)
         } catch { Issue.record("Unrelated query was cancelled: \(error)") }
+
         do { _ = try await first.value
 
             Issue.record("Selected query was not cancelled")
         } catch { #expect(error is CancellationError) }
+
         #expect(engine.queue.sync { engine.subtitleQueries.isEmpty })
     }
 }

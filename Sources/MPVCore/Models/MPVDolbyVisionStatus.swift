@@ -58,7 +58,8 @@ public struct MPVDolbyVisionStatus: Equatable, Sendable {
     /// A native validation or conversion explanation, if available.
     public let reason: String?
 
-    /// Changing the policy requires decoder recreation and a media reload.
+    /// Whether changing the policy requires recreating the decoder and reloading media.
+    /// Always `true`. Create a player with the new policy to apply it.
     public var policyChangesRequireReload: Bool {
         true
     }
@@ -126,9 +127,17 @@ package struct MPVDolbyVisionStatusResolver {
             observedProfile = nil
             observedCompatibilityID = nil
             reason = payload
+
             return true
         }
+
+        if MPVNativeDiagnosticParser.payload(log, sentinel: "MPVUI_NATIVE_DOLBY_VISION_CLEARED:") != nil {
+            reset()
+            return true
+        }
+
         guard let payload = MPVNativeDiagnosticParser.payload(log, sentinel: "MPVUI_NATIVE_DOLBY_VISION_VALIDATED:") else { return false }
+
         let fields = Dictionary(
             payload.split(whereSeparator: \.isWhitespace).compactMap { field -> (String, String)? in
                 let parts = field.split(separator: "=", maxSplits: 1)
@@ -136,7 +145,9 @@ package struct MPVDolbyVisionStatusResolver {
             },
             uniquingKeysWith: { _, last in last }
         )
+
         guard let conversion = fields["profile7-to81"], ["yes", "no"].contains(conversion) else { return false }
+
         // A malformed or unexpected success message must not claim permission
         // to perform a conversion the caller never requested.
         if conversion == "yes", policy != .profile7Compatibility {
@@ -145,14 +156,18 @@ package struct MPVDolbyVisionStatusResolver {
             observedProfile = nil
             observedCompatibilityID = nil
             reason = "Native Profile 7 conversion was not explicitly requested."
+
             return true
         }
+
         validation = .validated
         converted = conversion == "yes"
         observedProfile = fields["session-profile"].flatMap(Int.init).flatMap { (0 ... 10).contains($0) ? $0 : nil }
         observedCompatibilityID = fields["session-compatibility"].flatMap(Int.init).flatMap { (0 ... 15).contains($0) ? $0 : nil }
+
         reason = converted ? "Profile 7 compatibility conversion discards the enhancement layer; full FEL reproduction is not provided." :
             nil
+
         return true
     }
 
@@ -160,6 +175,7 @@ package struct MPVDolbyVisionStatusResolver {
         let native = backend == .sampleBuffer || backend == .nativeSurface
         let accepted = native && validation == .validated
         let didConvert = accepted && converted
+
         let conversion: MPVDolbyVisionStatus.Conversion = if policy == .strict {
             .notRequested
         } else if didConvert {
@@ -169,6 +185,7 @@ package struct MPVDolbyVisionStatusResolver {
         } else {
             .notRequested
         }
+
         return MPVDolbyVisionStatus(
             requestedPolicy: policy,
             sourceProfile: source.dolbyVisionProfile,

@@ -7,10 +7,13 @@ struct MPVAndroidOutputPolicyTests {
     @Test
     func `automatic Android output honors display and GPU requirements`() {
         let hdr = MPVDisplayCapabilities(supportsHDR10: true)
+
         #expect(MPVAndroidOutputPolicy.output(.init(videoOutput: .automaticAndroid), display: .unknown) == .gpu)
+
         for display in [hdr, .init(supportsHLG: true), .init(supportsDolbyVision: true)] {
             #expect(MPVAndroidOutputPolicy.output(.init(videoOutput: .automaticAndroid), display: display) == .nativeSurface)
         }
+
         for configuration in [
             MPVSessionConfiguration(hardwareDecoding: .disabled, videoOutput: .automaticAndroid),
             .init(hdrPolicy: .disabled, videoOutput: .automaticAndroid),
@@ -20,8 +23,10 @@ struct MPVAndroidOutputPolicyTests {
         ] {
             #expect(MPVAndroidOutputPolicy.output(configuration, display: hdr) == .gpu)
         }
+
         #expect(MPVAndroidOutputPolicy.output(.init(videoOutput: .nativeSurface), display: .unknown) == .nativeSurface)
         #expect(MPVAndroidOutputPolicy.output(.init(videoOutput: .gpu), display: hdr) == .gpu)
+
         #expect(MPVAndroidOutputPolicy
             .output(.init(additionalOptions: ["audio-delay": "1"], videoOutput: .automaticAndroid), display: hdr) == .nativeSurface)
     }
@@ -34,19 +39,24 @@ struct MPVAndroidOutputPolicyTests {
         #expect(MPVAndroidOutputPolicy.hardware(.init(), output: .gpu) == "mediacodec,mediacodec-copy")
         #expect(MPVAndroidOutputPolicy.hardware(.init(deinterlace: .init(mode: .automatic)), output: .gpu) == "mediacodec-copy")
         #expect(MPVAndroidOutputPolicy.hardware(.init(additionalOptions: ["vf": "hflip"]), output: .gpu) == "mediacodec-copy")
+
         let display = MPVDisplayCapabilities(supportsDolbyVision: true)
+
         #expect(MPVAndroidOutputPolicy
             .decoderOptions(.init(), output: .nativeSurface, display: display) == "native_dovi=yes,convert_dovi_p7=no")
+
         #expect(MPVAndroidOutputPolicy.decoderOptions(
             .init(dolbyVisionPolicy: .profile7Compatibility),
             output: .nativeSurface,
             display: display
         ) == "native_dovi=yes,convert_dovi_p7=yes")
+
         #expect(MPVAndroidOutputPolicy.decoderOptions(
             .init(additionalOptions: ["vd-lavc-o": "threads=2"], dolbyVisionPolicy: .profile7Compatibility),
             output: .gpu,
             display: display
         ) == "threads=2,native_dovi=no,convert_dovi_p7=no")
+
         #expect(MPVAndroidOutputPolicy
             .decoderOptions(.init(), output: .nativeSurface, display: .unknown) == "native_dovi=no,convert_dovi_p7=no")
     }
@@ -56,6 +66,7 @@ struct MPVAndroidOutputPolicyTests {
         for output in [MPVVideoOutput.automaticAndroid, .nativeSurface] {
             let player = session(output: output)
             defer { player.close() }
+
             player.queue.sync {
                 player.videoOutput = .nativeSurface
                 player.createHandle()
@@ -65,6 +76,7 @@ struct MPVAndroidOutputPolicyTests {
                 player.renderTarget = target()
                 player.latestSnapshot.mediaInformation = .init(tracks: [.init(id: 1, type: .video)])
                 #expect(player.checkAndroidVideoPresentation())
+
                 if output == .automaticAndroid {
                     #expect(player.videoOutput == .gpu)
                     #expect(player.desiredProperties["vid"] != "no")
@@ -83,6 +95,7 @@ struct MPVAndroidOutputPolicyTests {
     func `subtitle composition fallback retains hardware decoding and requires opt in`() {
         let player = session(output: .automaticAndroid, features: .preferFeatures)
         defer { player.close() }
+
         player.queue.sync {
             player.videoOutput = .nativeSurface
             #expect(!player.checkAndroidVideoPresentation())
@@ -97,6 +110,7 @@ struct MPVAndroidOutputPolicyTests {
             #expect(player.videoOutput == .gpu && player.desiredProperties["hwdec"] == nil)
             #expect(player.androidNativeFallbackReason == "Selected subtitles require GPU composition")
         }
+
         #expect(MPVMediaTrack(id: 1, type: .subtitle, codec: "dvd_subtitle").requiresSubtitleRenderer)
         #expect(!MPVMediaTrack(id: 1, type: .audio, codec: "aac").requiresSubtitleRenderer)
     }
@@ -105,8 +119,9 @@ struct MPVAndroidOutputPolicyTests {
         var platform = MPVPlatformServices()
         platform.initialOptions = { _, _, _ in [("ao", "null"), ("hwdec", "no")] }
         platform.videoOutputName = { _ in "null" }
+
         return MPVSession(
-            settings: .init(autoPlay: false, nativeVideoFeaturePolicy: features, videoOutput: output),
+            settings: .init(automaticallyPlays: false, nativeVideoFeaturePolicy: features, videoOutput: output),
             platform: platform
         ) { _ in }
     }

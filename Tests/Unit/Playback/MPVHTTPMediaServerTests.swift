@@ -11,13 +11,16 @@ struct MPVHTTPMediaServerTests {
     func `cancelling startup closes delivery before a listener can escape`() async throws {
         let files = try TemporaryTestDirectory()
         defer { files.remove() }
+
         let server = MPVHTTPMediaServer(directory: files.url)
         let task = Task { @MainActor in try await server.start(advertisedHost: "127.0.0.1") }
         task.cancel()
+
         do {
             _ = try await task.value
             Issue.record("Cancelled startup returned a listening URL")
         } catch { #expect(error is CancellationError) }
+
         await server.stop()
     }
 
@@ -45,14 +48,17 @@ struct MPVHTTPMediaServerTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         try Data("0123456789".utf8).write(to: directory.appendingPathComponent("stream0.ts"))
         try Data("secret".utf8).write(to: directory.appendingPathComponent("private.txt"))
+
         func request(_ path: String, method: String = "GET", range: String? = nil) -> String {
             let headers = range.map { "Range: \($0)\r\n" } ?? ""
+
             return String(decoding: MPVHTTPMediaServer.response(
                 to: Data("\(method) \(path) HTTP/1.1\r\n\(headers)\r\n".utf8),
                 directory: directory,
                 token: "session"
             ), as: UTF8.self)
         }
+
         for name in ["init.mp4", "media0.m4s"] {
             try Data("fragment".utf8).write(to: directory.appendingPathComponent(name))
 
@@ -60,16 +66,20 @@ struct MPVHTTPMediaServerTests {
             #expect(request("/session/\(name)", range: "bytes=0-3").hasSuffix("frag"))
             #expect(request("/session/\(name).tmp").contains("404 Not Found"))
         }
+
         #expect(request("/session/stream0.ts").hasSuffix("0123456789"))
+
         let partial = request("/session/stream0.ts", range: "bytes=2-4")
 
         #expect(partial.contains("206 Partial Content"))
         #expect(partial.contains("Content-Range: bytes 2-4/10"))
         #expect(partial.hasSuffix("234"))
+
         let head = request("/session/stream0.ts", method: "HEAD")
 
         #expect(head.contains("Content-Length: 10\r\n"))
         #expect(head.hasSuffix("\r\n\r\n"))
+
         for path in [
             "/wrong/stream0.ts",
             "/session/private.txt",
@@ -79,6 +89,7 @@ struct MPVHTTPMediaServerTests {
         ] {
             #expect(request(path).contains("404 Not Found"))
         }
+
         #expect(request("/session/stream0.ts", range: "bytes=20-").contains("Content-Range: bytes */10"))
     }
 
@@ -87,9 +98,12 @@ struct MPVHTTPMediaServerTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+
         let playlist = Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8)
         try playlist.write(to: directory.appendingPathComponent("stream.m3u8"))
+
         let server = MPVHTTPMediaServer(directory: directory)
+
         do {
             let url = try await server.start(advertisedHost: host)
             let (body, response) = try await URLSession.shared.data(from: url)
@@ -107,29 +121,40 @@ struct MPVHTTPMediaServerTests {
     func `malformed requests cannot read nonregular oversized or unlisted files`() throws {
         let files = try TemporaryTestDirectory()
         defer { files.remove() }
+
         let regular = try files.write("stream0.ts", contents: "0123456789")
+
         _ = try files.write("media0.m4s", contents: "")
         try FileManager.default.createSymbolicLink(at: files.url.appendingPathComponent("stream1.ts"), withDestinationURL: regular)
         try FileManager.default.createDirectory(at: files.url.appendingPathComponent("stream2.ts"), withIntermediateDirectories: false)
+
         let oversized = try files.write("stream3.ts", contents: "")
         let handle = try FileHandle(forWritingTo: oversized)
         try handle.truncate(atOffset: 512 * 1024 * 1024 + 1)
         try handle.close()
+
         func response(_ request: Data) -> String {
             String(decoding: MPVHTTPMediaServer.response(to: request, directory: files.url, token: "session"), as: UTF8.self)
         }
+
         #expect(response(Data([0xFF])).contains("400 Bad Request"))
+
         for text in ["", "GET", "POST /session/stream0.ts HTTP/1.1\r\n\r\n"] {
             #expect(response(Data(text.utf8)).contains("405 Method Not Allowed"))
         }
+
         for name in ["stream1.ts", "stream2.ts", "stream3.ts", "stream4.ts"] {
             #expect(response(Data("GET /session/\(name) HTTP/1.1\r\n\r\n".utf8)).contains("404 Not Found"))
         }
+
         #expect(response(Data("GET /session/stream0.ts?cache=1 HTTP/1.1\r\n\r\n".utf8)).hasSuffix("0123456789"))
+
         #expect(response(Data("GET /session/stream0.ts HTTP/1.1\r\nRange: bytes=0-1\r\nrange: bytes=2-3\r\n\r\n".utf8))
             .contains("416 Range Not Satisfiable"))
+
         #expect(response(Data("GET /session/media0.m4s HTTP/1.1\r\nRange: bytes=0-\r\n\r\n".utf8))
             .contains("Content-Range: bytes */0"))
+
         #expect(MPVHTTPMediaServer.byteRange("bytes=-20", count: 10) == 0 ..< 10)
         #expect(MPVHTTPMediaServer.byteRange("bytes=0", count: 10) == nil)
         #expect(MPVHTTPMediaServer.byteRange("bytes=0-1", count: 0) == nil)
@@ -139,21 +164,27 @@ struct MPVHTTPMediaServerTests {
     func `listener teardown prevents restart and preserves complete large responses`() async throws {
         let files = try TemporaryTestDirectory()
         defer { files.remove() }
+
         let bytes = Data(repeating: 0x5A, count: 700_000)
         try bytes.write(to: files.url.appendingPathComponent("stream0.ts"))
+
         let server = MPVHTTPMediaServer(directory: files.url)
+
         do {
             let playlist = try await server.start(advertisedHost: "127.0.0.1")
             let media = playlist.deletingLastPathComponent().appendingPathComponent("stream0.ts")
             let (body, response) = try await URLSession.shared.data(from: media)
             #expect((response as? HTTPURLResponse)?.statusCode == 200)
             #expect(body == bytes)
+
             do {
                 _ = try await server.start(advertisedHost: "127.0.0.1")
                 Issue.record("An active listener started a second server")
             } catch { #expect(error is CancellationError) }
+
             await server.stop()
             await server.stop()
+
             do {
                 _ = try await server.start(advertisedHost: "127.0.0.1")
                 Issue.record("A stopped listener restarted")

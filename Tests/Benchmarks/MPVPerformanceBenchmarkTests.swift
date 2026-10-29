@@ -22,13 +22,16 @@ struct MPVPerformanceBenchmarkTests {
     func `measure local runtime workloads`() async throws {
         let settings = try BenchmarkSettings()
         var workloads: [[String: Any]] = []
+
         if settings.suites.contains("micro") {
             workloads += try chapterWorkloads(repetitions: settings.repetitions)
             try workloads.append(resizeWorkload(repetitions: settings.repetitions))
         }
+
         if settings.suites.contains("playback") {
             workloads += try await playbackWorkloads(settings)
         }
+
         var runtime: [String: Any] = [
             "operatingSystem": ProcessInfo.processInfo.operatingSystemVersionString,
             "processorCount": ProcessInfo.processInfo.processorCount,
@@ -65,11 +68,14 @@ struct MPVPerformanceBenchmarkTests {
             ],
         ]
         runtime.merge(loadedMPVImage()) { _, value in value }
+
         let report: [String: Any] = [
             "workloads": workloads,
             "runtime": runtime,
         ]
+
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+
         try FileManager.default.createDirectory(at: settings.output.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: settings.output, options: .atomic)
         print("Performance benchmark: \(settings.output.path)")
@@ -80,25 +86,33 @@ struct MPVPerformanceBenchmarkTests {
             let node = MPVNodeValue.array((0 ..< count).map { index in
                 .map(["title": .string("Chapter \(index + 1)"), "time": .double(Double(index) * 30)])
             })
+
             var measurement = BenchmarkMeasurement(
                 id: "parse_chapters_\(count)",
                 parameters: ["chapterCount": count, "iterations": iterations, "warmupIterations": 5, "inputVersion": 1]
             )
+
             for _ in 0 ..< 5 {
                 _ = parseChapterChecksum(node)
             }
+
             let expected = parseChapterChecksum(node) * iterations
+
             for repetition in 1 ... repetitions {
                 let start = ProcessTiming()
                 var checksum = 0
+
                 for _ in 0 ..< iterations {
                     checksum &+= parseChapterChecksum(node)
                 }
+
                 let elapsed = start.elapsed()
+
                 try #require(checksum == expected)
                 measurement.addTiming(elapsed, operations: iterations)
                 measurement.observations.append(["repetition": repetition, "checksum": checksum])
             }
+
             return measurement.json
         }
     }
@@ -114,6 +128,7 @@ struct MPVPerformanceBenchmarkTests {
         let layer = CAMetalLayer()
         let size = CGSize(width: 1280, height: 720)
         var commits = 0
+
         let coordinator = MPVRenderSurfaceResizeCoordinator(
             commit: { _ in commits += 1
                 return true
@@ -121,14 +136,18 @@ struct MPVPerformanceBenchmarkTests {
             // The production diagnostic consumer does this when logging is off.
             emitDiagnostic: { _ in }
         )
+
         coordinator.activate(
             layer: layer,
             layerAddress: MPVRenderSurfaceResizeCoordinator.layerAddress(of: layer),
             contentsScale: 1,
             committedSize: size
         )
+
         defer { coordinator.deactivate() }
+
         let iterations = 100_000
+
         var measurement = BenchmarkMeasurement(
             id: "resize_diagnostics_disabled",
             parameters: [
@@ -142,22 +161,28 @@ struct MPVPerformanceBenchmarkTests {
                 "diagnostics": "disabled"
             ]
         )
+
         for _ in 0 ..< 1000 {
             coordinator.requestResize(to: size, contentsScale: 1, kind: .discrete)
         }
+
         for repetition in 1 ... repetitions {
             let start = ProcessTiming()
             var accepted = 0
+
             for _ in 0 ..< iterations {
                 if coordinator.requestResize(to: size, contentsScale: 1, kind: .discrete) {
                     accepted += 1
                 }
             }
+
             let elapsed = start.elapsed()
+
             try #require(accepted == 0 && commits == 0)
             measurement.addTiming(elapsed, operations: iterations)
             measurement.observations.append(["repetition": repetition, "acceptedRequests": accepted])
         }
+
         return measurement.json
     }
 
@@ -166,16 +191,20 @@ struct MPVPerformanceBenchmarkTests {
         let temporaryDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MPVUI-benchmark-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
         let subtitle = temporaryDirectory.appendingPathComponent("benchmark-overlay.ass")
         try benchmarkSubtitle.write(to: subtitle, atomically: true, encoding: .utf8)
+
         let subtitleHash = try sha256(subtitle)
         let backends: [MPVPlayerConfiguration.VideoOutput] = [.metal, .sampleBuffer]
         var collected: [MPVPlayerConfiguration.VideoOutput: BenchmarkMeasurement] = [:]
+
         // Alternate which backend runs first to reduce systematic thermal/order bias.
         for repetition in 1 ... settings.repetitions {
             for offset in backends.indices {
                 let backend = backends[(offset + repetition - 1) % backends.count]
                 let sample = try await playbackSample(settings, backend: backend, subtitle: subtitle, repetition: repetition)
+
                 if collected[backend] == nil {
                     var parameters: [String: Any] = [
                         "fixtureSHA256": fixtureHash,
@@ -196,6 +225,7 @@ struct MPVPerformanceBenchmarkTests {
                         "subtitleSHA256": backend == .sampleBuffer ? subtitleHash : "none",
                     ]
                     parameters.merge(sample.parameters) { _, new in new }
+
                     collected[backend] = BenchmarkMeasurement(
                         id: backend == .metal ? "playback_metal_balanced_software" : "playback_sample_buffer_software",
                         parameters: parameters
@@ -208,12 +238,15 @@ struct MPVPerformanceBenchmarkTests {
                         try #require(previousData == currentData, "Playback output changed between repetitions: \(key)")
                     }
                 }
+
                 for (name, value) in sample.metrics {
                     collected[backend]!.add(name, value: value.value, unit: value.unit, direction: value.direction)
                 }
+
                 collected[backend]!.observations.append(sample.observation)
             }
         }
+
         return backends.compactMap { collected[$0]?.json }
     }
 
@@ -224,45 +257,53 @@ struct MPVPerformanceBenchmarkTests {
         repetition: Int
     ) async throws -> PlaybackSample {
         var options = ["ao": "null", "loop-file": "inf", "osd-level": "0"]
+
         if backend == .sampleBuffer {
             options["video-zoom"] = "0.25"
             options["sub-visibility"] = "yes"
         } else {
             options["sid"] = "no"
         }
+
         let player = MPVPlayer(configuration: .init(
             additionalOptions: options,
-            autoPlay: true,
+            automaticallyPlays: true,
             hardwareDecoding: .disabled,
             hdrPolicy: .disabled,
             logLevel: .none,
-            loop: true,
+            isLoopingEnabled: true,
             renderingQuality: .init(preset: .balanced),
             sdrOutput: .compatibility8Bit,
             videoOutput: backend
         ))
+
         let surface = MPVPlatformVideoPlayer(player: player)
+
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
             styleMask: [.titled],
             backing: .buffered,
             defer: false
         )
+
         defer {
             player.stop()
             surface.detach()
             window.contentView = nil
             window.orderOut(nil)
         }
+
         window.contentView = surface
         window.orderFront(nil)
         surface.layoutSubtreeIfNeeded()
         surface.activateRenderingSurface()
         player.setDiagnosticsEnabled(true)
         player.load(settings.media)
+
         if backend == .sampleBuffer {
             player.loadExternalTrack(subtitle, type: .subtitle, select: true)
         }
+
         try await waitForPlayback(player, backend: backend)
         try await Task.sleep(for: .seconds(settings.warmupSeconds))
         try validatePlayback(player, backend: backend)
@@ -270,9 +311,12 @@ struct MPVPerformanceBenchmarkTests {
         let screen = try #require(window.screen, "Playback benchmarking requires an attached display.")
         let dimensions = try #require(player.mediaInformation.dimensions)
         try #require(dimensions.width > 0 && dimensions.height > 0, "Media dimensions must be positive.")
+
         let duration = player.duration.seconds
+
         // A fixture shorter than two polls cannot be measured reliably across wraps.
         try #require(duration.isFinite && duration >= 0.5, "Use a local video fixture at least 0.5 seconds long.")
+
         let before = player.playbackDiagnostics
         var position = player.position.seconds
         let initialPosition = position
@@ -282,43 +326,58 @@ struct MPVPerformanceBenchmarkTests {
         var observations: [[String: Any]] = []
         var previousCounters = diagnosticCounters(before)
         var resetCount = 0
+
         if let resident = residentMemoryBytes() {
             residentSamples.append(resident)
         }
+
         let start = ProcessTiming()
+
         repeat {
             try await Task.sleep(for: .milliseconds(100))
             try validatePlayback(player, backend: backend)
+
             let currentPosition = player.position.seconds
+
             if currentPosition < position - 0.25 {
                 wraps += 1
                 progress += max(0, duration - position + currentPosition)
             } else {
                 progress += max(0, currentPosition - position)
             }
+
             position = currentPosition
+
             let counters = diagnosticCounters(player.playbackDiagnostics)
+
             for (name, value) in counters {
                 if let previous = previousCounters[name], value < previous {
                     resetCount += 1
                 }
             }
+
             previousCounters = counters
+
             var point: [String: Any] = [
                 "elapsedSeconds": start.wallSeconds,
                 "positionSeconds": currentPosition,
                 "state": String(describing: player.state),
                 "counters": counters
             ]
+
             if let resident = residentMemoryBytes() {
                 residentSamples.append(resident)
                 point["residentBytes"] = resident
             }
+
             observations.append(point)
         } while start.wallSeconds < settings.sampleSeconds
+
         let elapsed = start.elapsed()
         let after = player.playbackDiagnostics
+
         try #require(progress > 0, "Playback did not advance during the measurement interval.")
+
         var sample = PlaybackSample(parameters: [
             "sourceWidth": dimensions.width,
             "sourceHeight": dimensions.height,
@@ -339,15 +398,19 @@ struct MPVPerformanceBenchmarkTests {
             "intervalSamples": observations,
             "startLatencySeconds": after.startLatencySeconds.map { $0 as Any } ?? NSNull(),
         ])
+
         try #require(window.screen === screen, "Playback display changed during the measurement interval.")
+
         sample.parameters["displayID"] = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
             .intValue ?? -1
+
         sample.parameters["screenFramePoints"] = [
             "x": screen.frame.origin.x,
             "y": screen.frame.origin.y,
             "width": screen.frame.width,
             "height": screen.frame.height,
         ]
+
         sample.parameters["maximumFramesPerSecond"] = screen.maximumFramesPerSecond
         sample.add("cpuSeconds", elapsed.cpuSeconds, unit: "seconds", direction: "lower")
 
@@ -355,6 +418,7 @@ struct MPVPerformanceBenchmarkTests {
         try #require(startLatency.isFinite && startLatency >= 0)
         sample.add("startLatencySeconds", startLatency, unit: "seconds", direction: "lower")
         sample.add("wallSeconds", elapsed.wallSeconds, unit: "seconds", direction: "neutral")
+
         sample
             .add(
                 "cpuSecondsPerWallSecond",
@@ -362,31 +426,39 @@ struct MPVPerformanceBenchmarkTests {
                 unit: "cpu-seconds/wall-second",
                 direction: "lower"
             )
+
         sample.add("playbackProgressSeconds", progress, unit: "seconds", direction: "neutral")
+
         sample.add(
             "playbackSecondsPerWallSecond",
             progress / elapsed.wallSeconds,
             unit: "playback-seconds/wall-second",
             direction: "neutral"
         )
+
         if let peak = residentSamples.max() {
             sample.add("residentPeakBytes", peak, unit: "bytes", direction: "lower")
             sample.add("residentMeanBytes", residentSamples.reduce(0, +) / Double(residentSamples.count), unit: "bytes", direction: "lower")
         }
+
         // Diagnostics are polled by the engine at 500 ms. A wrap can hide the
         // exact reset; never invent a full-interval delta for a looping fixture.
         // Keep optional metric sets stable for the bundled short looping fixture,
         // even if scheduling happens to produce a particular interval with no wrap.
         let counterDeltasEligible = duration > settings.warmupSeconds + settings.sampleSeconds + 2
         sample.parameters["intervalCounterDeltasEligible"] = counterDeltasEligible
+
         if counterDeltasEligible && wraps == 0 && resetCount == 0 {
             let firstCounters = diagnosticCounters(before)
             var deltas: [String: Int64] = [:]
+
             for (name, end) in diagnosticCounters(after) {
                 if let begin = firstCounters[name], end >= begin {
                     deltas[name] = end - begin
+
                     let direction = ["nativeSampleBuildCount", "nativePixelBufferCopies", "nativeSampleBuildNanoseconds"]
                         .contains(name) ? "neutral" : "lower"
+
                     sample.add(
                         name + "Delta",
                         Double(end - begin),
@@ -395,6 +467,7 @@ struct MPVPerformanceBenchmarkTests {
                     )
                 }
             }
+
             if let count = deltas["nativeSampleBuildCount"], count > 0 {
                 if let nanoseconds = deltas["nativeSampleBuildNanoseconds"] {
                     sample.add(
@@ -404,6 +477,7 @@ struct MPVPerformanceBenchmarkTests {
                         direction: "lower"
                     )
                 }
+
                 if let copies = deltas["nativePixelBufferCopies"] {
                     sample.add(
                         "nativePixelBufferCopiesPerSample",
@@ -414,6 +488,7 @@ struct MPVPerformanceBenchmarkTests {
                 }
             }
         }
+
         if backend == .metal {
             sample.parameters["drawableWidth"] = surface.metalLayer.drawableSize.width
             sample.parameters["drawableHeight"] = surface.metalLayer.drawableSize.height
@@ -423,7 +498,9 @@ struct MPVPerformanceBenchmarkTests {
             sample.parameters["outputPrimaries"] = player.mediaInformation.hdr.output.primaries ?? "unknown"
             sample.parameters["outputPixelFormat"] = player.mediaInformation.hdr.output.pixelFormat ?? "unknown"
             sample.parameters["outputTransfer"] = player.mediaInformation.hdr.output.transferFunction.mpvValue ?? "unknown"
+
             let passes = after.freshRenderPasses ?? []
+
             sample.observation["freshRenderPasses"] = passes.map { pass in
                 [
                     "name": pass.name,
@@ -431,7 +508,9 @@ struct MPVPerformanceBenchmarkTests {
                     "peakNanoseconds": pass.peakNanoseconds.map { $0 as Any } ?? NSNull()
                 ] as [String: Any]
             }
+
             let averages = passes.compactMap(\.averageNanoseconds)
+
             if averages.count == passes.count && !averages.isEmpty {
                 sample.add(
                     "gpuPassAverageTotalNanoseconds",
@@ -442,6 +521,7 @@ struct MPVPerformanceBenchmarkTests {
             }
         } else {
             let outputInput = player.mediaInformation.hdr.videoOutputInput
+
             let outputPixelFormat: String = try #require(
                 outputInput.pixelFormat,
                 "Native video output input format is unavailable."
@@ -451,52 +531,66 @@ struct MPVPerformanceBenchmarkTests {
             sample.parameters["videoOutputInputTransfer"] = outputInput.transferFunction.mpvValue ?? "unknown"
             sample.parameters["videoOutputInputMatrix"] = outputInput.matrix ?? "unknown"
             sample.parameters["videoOutputInputRange"] = outputInput.range ?? "unknown"
+
             let renderer = player.sampleBufferDisplayLayer.sampleBufferRenderer
             try #require(renderer.status != .failed)
         }
+
         // Keep seeking and readback outside the steady-playback CPU/GPU/counter
         // interval. An exact paused seek submits a destination frame; merely
         // stopping the clock can leave AVFoundation's displayedPixelBuffer nil
         // even when the layer is ready and has no rendering error.
         let seekTarget = duration * 0.75
+
         sample.parameters["postIntervalSeek"] = "paused-absolute-exact"
         sample.parameters["postIntervalSeekTargetFraction"] = 0.75
         sample.parameters["postIntervalSeekTimeoutSeconds"] = 8
+
         let seekSeconds = try await pausedExactSeek(player, target: seekTarget)
         sample.add("pausedExactSeekCompletionSeconds", seekSeconds, unit: "seconds", direction: "lower")
         sample.observation["postIntervalSeekTargetSeconds"] = seekTarget
         sample.observation["postIntervalSeekPositionSeconds"] = player.position.seconds
+
         if backend == .sampleBuffer {
             sample.parameters["nativeReadbackPolicy"] = settings.nativeReadbackPolicy
+
             let buffer: CVPixelBuffer?
+
             do {
                 buffer = try await pausedNativeBuffer(player)
             } catch let BenchmarkReadbackError.noPausedNativeFrame(details) {
                 guard settings.nativeReadbackPolicy == "optional" else {
                     throw BenchmarkReadbackError.noPausedNativeFrame(details)
                 }
+
                 buffer = nil
                 sample.observation["readbackTimeoutDiagnostics"] = details
             }
+
             sample.observation["readbackAvailable"] = buffer != nil
+
             let layer = player.sampleBufferDisplayLayer
             try #require(player.isPaused && layer.isReadyForDisplay)
             try #require(layer.sampleBufferRenderer.status != .failed && player.lastError == nil)
 
             let timebase = try #require(layer.controlTimebase)
             try #require(CMTimebaseGetRate(timebase) == 0)
+
             try #require(
                 abs(CMTimebaseGetTime(timebase).seconds - seekTarget) < 0.15,
                 "Native readback clock did not reach the exact seek destination."
             )
+
             try #require(
                 player.mediaInformation.dimensions == dimensions,
                 "Media dimensions changed during the native playback workload."
             )
+
             if let buffer {
                 let width = CVPixelBufferGetWidth(buffer)
                 let height = CVPixelBufferGetHeight(buffer)
                 try #require(width > 0 && height > 0)
+
                 if settings.nativeReadbackPolicy == "required" {
                     sample.parameters["outputWidth"] = width
                     sample.parameters["outputHeight"] = height
@@ -504,60 +598,78 @@ struct MPVPerformanceBenchmarkTests {
                     sample.observation["outputWidth"] = width
                     sample.observation["outputHeight"] = height
                 }
+
                 // Internal native routes may differ; observed output format is
                 // never a control or proof of the route used throughout timing.
                 sample.observation["pausedReadbackPixelFormat"] = CVPixelBufferGetPixelFormatType(buffer)
             }
         }
+
         return sample
     }
 
     private func pausedExactSeek(_ player: MPVPlayer, target: Double) async throws -> Double {
         player.pause()
+
         for _ in 0 ..< 250 {
             try #require(player.lastError == nil)
+
             if player.isPaused {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         try #require(player.isPaused, "Playback did not pause before the exact-seek measurement.")
+
         let start = ProcessTiming()
+
         // This existing API drains stale events, requests absolute+exact, and
         // completes only after the matching seek/restart (or its 8 s timeout).
         let completed = await player.seekForPictureInPicture(to: .seconds(target))
         let seconds = start.wallSeconds
         try #require(completed, "The paused exact seek did not complete.")
+
         // Main-actor published state can follow engine completion. Validate it
         // after timing instead of adding polling granularity to seek latency.
         for _ in 0 ..< 250 {
             try #require(player.lastError == nil)
+
             if player.isPaused && abs(player.position.seconds - target) < 0.15 {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         try #require(
             player.isPaused && abs(player.position.seconds - target) < 0.15,
             "Paused exact-seek position did not reach its target: \(player.position.seconds), target=\(target)."
         )
+
         return seconds
     }
 
     private func pausedNativeBuffer(_ player: MPVPlayer) async throws -> CVPixelBuffer {
         let layer = player.sampleBufferDisplayLayer
+
         for _ in 0 ..< 250 {
             try #require(player.lastError == nil, "Native output failed while preparing pixel readback.")
             try #require(layer.sampleBufferRenderer.status != .failed)
+
             if player.isPaused, layer.isReadyForDisplay,
                let timebase = layer.controlTimebase, CMTimebaseGetRate(timebase) == 0,
                let buffer = layer.sampleBufferRenderer.displayedPixelBuffer()
             {
                 return buffer
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         let timebase = layer.controlTimebase
+
         let details = "state=\(player.state), isPaused=\(player.isPaused), "
             + "isReadyForDisplay=\(layer.isReadyForDisplay), "
             + "timebaseRate=\(timebase.map { String(CMTimebaseGetRate($0)) } ?? "nil"), "
@@ -574,6 +686,7 @@ struct MPVPerformanceBenchmarkTests {
             if player.lastError != nil {
                 break
             }
+
             if player.state == .playing, player.position.seconds > 0,
                player.playbackDiagnostics.decoder.session == .software,
                backend == .metal ||
@@ -581,18 +694,22 @@ struct MPVPerformanceBenchmarkTests {
             {
                 return
             }
+
             try await Task.sleep(for: .milliseconds(50))
         }
+
         try #require(Bool(false), "Benchmark playback failed to start: \(player.state), \(String(describing: player.lastError))")
     }
 
     private func validatePlayback(_ player: MPVPlayer, backend: MPVPlayerConfiguration.VideoOutput) throws {
         try #require(player.lastError == nil, "Playback error: \(String(describing: player.lastError))")
+
         // A loop emits seeking/restart events while remaining in active playback.
         try #require(player.state == .playing || player.state == .seeking, "Playback stopped during benchmark: \(player.state)")
         try #require(player.videoOutput == backend && player.lastError == nil, "Benchmark output fell back.")
         try #require(player.playbackDiagnostics.decoder.session == .software)
         try #require(player.playbackDiagnostics.fallbackReasons.isEmpty)
+
         if backend == .metal {
             try #require(player.playbackDiagnostics.renderingQuality.resolvedPreset == .balanced)
             try #require(!player.playbackDiagnostics.renderingQuality.effectiveOptions.isEmpty)
@@ -631,13 +748,17 @@ private struct BenchmarkSettings {
         try #require(sampleSeconds.isFinite && (0.5 ... 60).contains(sampleSeconds))
         try #require(warmupSeconds.isFinite && (0.5 ... 30).contains(warmupSeconds))
         try #require(!suites.isEmpty && suites.isSubset(of: ["micro", "playback"]))
+
         try #require(
             ["required", "optional"].contains(nativeReadbackPolicy),
             "MPVUI_PERF_NATIVE_READBACK must be required or optional."
         )
+
         let root = TestPaths.repositoryRoot
+
         output = environment["MPVUI_PERF_OUTPUT"].map { URL(fileURLWithPath: $0) }
             ?? root.appendingPathComponent(".build/benchmarks/runtime.json")
+
         media = environment["MPVUI_PERF_MEDIA"].map { URL(fileURLWithPath: $0) } ?? TestPaths.baselineMedia
     }
 }
@@ -666,9 +787,11 @@ private struct BenchmarkMeasurement {
 
     mutating func add(_ name: String, value: Double, unit: String, direction: String) {
         guard value.isFinite else { return }
+
         if metrics[name] == nil {
             metrics[name] = .init(unit: unit, direction: direction)
         }
+
         metrics[name]!.samples.append(value)
     }
 
@@ -679,12 +802,14 @@ private struct BenchmarkMeasurement {
             unit: "nanoseconds/operation",
             direction: "lower"
         )
+
         add(
             "cpuNanosecondsPerOperation",
             value: elapsed.cpuSeconds * 1e9 / Double(operations),
             unit: "cpu-nanoseconds/operation",
             direction: "lower"
         )
+
         add(
             "cpuSecondsPerWallSecond",
             value: elapsed.cpuSeconds / elapsed.wallSeconds,
@@ -737,11 +862,13 @@ private struct ProcessTiming {
 private func residentMemoryBytes() -> Double? {
     var info = mach_task_basic_info()
     var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+
     let result = withUnsafeMutablePointer(to: &info) { pointer in
         pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
             task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
         }
     }
+
     return result == KERN_SUCCESS ? Double(info.resident_size) : nil
 }
 
@@ -755,6 +882,7 @@ private func diagnosticCounters(_ diagnostics: MPVPlaybackDiagnostics) -> [Strin
         "nativeSampleBuildCount": diagnostics.nativeOutputStatistics?.sampleBuildCount,
         "nativeSampleBuildNanoseconds": diagnostics.nativeOutputStatistics?.totalSampleBuildNanoseconds,
     ]
+
     return values.compactMapValues { $0 }
 }
 
@@ -767,8 +895,10 @@ private func loadedMPVImage() -> [String: Any] {
     let pointer = unsafeBitCast(function, to: UnsafeRawPointer.self)
     var info = Dl_info()
     guard dladdr(pointer, &info) != 0, let filename = info.dli_fname else { return ["libraryKind": "unresolved"] }
+
     let file = URL(fileURLWithPath: String(cString: filename)).resolvingSymlinksInPath()
     let lower = file.lastPathComponent.lowercased()
+
     return [
         "libraryPath": file.path,
         "librarySHA256": (try? sha256(file)).map { $0 as Any } ?? NSNull(),

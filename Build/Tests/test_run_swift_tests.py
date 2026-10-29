@@ -21,7 +21,9 @@ class SwiftTestRunnerTests(unittest.TestCase):
 
             def run(command, **kwargs):
                 self.assertTrue((root / ".build/test-media/baseline.mp4").is_file())
-                self.assertEqual(command, ["swift", "test", "--package-path", str(root), "--no-parallel", "--filter", "PlaybackTests"])
+                self.assertEqual(
+                    command, ["awake", "swift", "test", "--package-path", str(root), "--no-parallel", "--filter", "PlaybackTests"]
+                )
                 self.assertEqual(kwargs["cwd"], root)
                 events.append("test")
                 return SimpleNamespace(returncode=7)
@@ -29,6 +31,7 @@ class SwiftTestRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner, "ROOT", root),
                 patch.object(runner, "prepare", side_effect=prepare),
+                patch.object(runner, "keep_awake", side_effect=lambda command: ["awake", *command]),
                 patch.object(runner.subprocess, "run", side_effect=run),
             ):
                 self.assertEqual(runner.main(["--filter", "PlaybackTests"]), 7)
@@ -52,7 +55,16 @@ class SwiftTestRunnerTests(unittest.TestCase):
             ):
                 self.assertEqual(runner.main(arguments), 0)
                 prepare.assert_not_called()
+                self.assertEqual(run.call_args.args[0][0], "swift")
                 self.assertEqual(run.call_args.args[0][-len(arguments) :], arguments)
+
+    def test_keep_awake_wraps_only_when_caffeinate_is_available(self):
+        with tempfile.TemporaryDirectory() as directory:
+            caffeinate = Path(directory) / "caffeinate"
+            self.assertEqual(runner.keep_awake(["swift"], caffeinate), ["swift"])
+            caffeinate.write_text("#!/bin/sh\n")
+            caffeinate.chmod(0o755)
+            self.assertEqual(runner.keep_awake(["swift"], caffeinate), [str(caffeinate), "-disu", "swift"])
 
 
 if __name__ == "__main__":

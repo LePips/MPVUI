@@ -1,4 +1,4 @@
 target-version = "py310"
 line-length = 140
-extend-include = ["Build/benchmark"]
+extend-include = ["Build/mpvbuild"]
 extend-exclude = [".build*", "build", "DerivedData", "Build/Patches"]

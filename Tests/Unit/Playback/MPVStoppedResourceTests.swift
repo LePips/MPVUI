@@ -11,6 +11,7 @@ struct MPVStoppedResourceTests {
     // libmpv wakes clients from its own core thread, outside the test actor.
     private nonisolated static let wakeupCallback: @convention(c) (UnsafeMutableRawPointer?) -> Void = { context in
         guard let context else { return }
+
         Unmanaged<MPVSession>.fromOpaque(context).takeUnretainedValue().scheduleEventDrain()
     }
 
@@ -20,6 +21,7 @@ struct MPVStoppedResourceTests {
         let source = TestPaths.baselineMedia
         let subtitle = URL(fileURLWithPath: "/tmp/deferred-shutdown.srt")
         let cancellation = MPVSubtitleQueryCancellation()
+
         do {
             let _: [TimedTextSubtitleSnapshot] = try await withCheckedThrowingContinuation { continuation in
                 engine.queue.sync {
@@ -52,6 +54,7 @@ struct MPVStoppedResourceTests {
         } catch {
             #expect(error is CancellationError)
         }
+
         engine.queue.sync {
             #expect(engine.sourceURL == nil && engine.securityScopedURL == nil)
             #expect(engine.externalSecurityScopedURLs.isEmpty)
@@ -74,6 +77,7 @@ struct MPVStoppedResourceTests {
     @Test
     func `native quit cancels diagnostics and clears media ownership exactly once`() async throws {
         let engine = MPVSession(configuration: .init()) { _ in }
+
         try engine.queue.sync {
             let handle = try #require(mpv_create())
             engine.handle = handle
@@ -85,12 +89,14 @@ struct MPVStoppedResourceTests {
             engine.sourceURL = TestPaths.baselineMedia
             engine.securityScopedURL = TestPaths.baselineMedia
             engine.externalSecurityScopedURLs = [URL(fileURLWithPath: "/tmp/quit.srt")]
+
             engine.externalTracks = [.init(
                 url: URL(fileURLWithPath: "/tmp/quit.srt"),
                 type: .subtitle,
                 select: true,
                 subtitleRole: .primary
             )]
+
             engine.pendingExternalTracks = engine.externalTracks
             engine.isLoading = true
             engine.isSeeking = true
@@ -98,9 +104,11 @@ struct MPVStoppedResourceTests {
             engine.startDiagnosticsTimer()
             try #require(engine.runCommand(["quit"]) >= 0)
         }
+
         try await eventually("native quit clears its handle and owned work") {
             engine.queue.sync { engine.handle == nil }
         }
+
         engine.queue.sync {
             #expect(engine.diagnosticsTimer == nil)
             #expect(engine.sourceURL == nil && engine.securityScopedURL == nil)
@@ -118,6 +126,7 @@ struct MPVStoppedResourceTests {
     @Test
     func `stop cancels pending work but retains replay source and runtime settings`() {
         let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null"])) { _ in }
+
         engine.queue.sync {
             engine.sourceURL = TestPaths.baselineMedia
             engine.playbackRequestIsActive = true
@@ -127,6 +136,7 @@ struct MPVStoppedResourceTests {
             engine.pendingSeekAfterLoad = .seconds(8)
             engine.lastPosition = .seconds(6)
             engine.desiredProperties["audio-delay"] = "0.25"
+
             engine.externalTracks = [.init(
                 url: URL(fileURLWithPath: "/tmp/replay.srt"),
                 type: .subtitle,
@@ -134,7 +144,9 @@ struct MPVStoppedResourceTests {
                 subtitleRole: .primary
             )]
         }
+
         engine.stop(generation: 17)
+
         engine.queue.sync {
             #expect(engine.currentGeneration == 17)
             #expect(engine.sourceURL == TestPaths.baselineMedia)
@@ -147,7 +159,9 @@ struct MPVStoppedResourceTests {
             #expect(engine.externalTracks.count == 1 && engine.pendingExternalTracks.count == 1)
             #expect(engine.desiredProperties["audio-delay"] == "0.25")
         }
+
         engine.togglePlayback()
+
         engine.queue.sync {
             #expect(!engine.isStoppedForResourceRelease)
             #expect(engine.playbackRequestIsActive && !engine.needsSourceLoad && engine.isLoading)
@@ -160,13 +174,16 @@ struct MPVStoppedResourceTests {
     @Test
     func `stopped surfaces accept geometry without recreating a native client`() async {
         var errors: [MPVPlayerError] = []
+
         let engine = MPVSession(configuration: .init(videoOutput: .metal)) { emission in
             if case let .error(error, _) = emission.update {
                 errors.append(error)
             }
         }
         engine.stop()
+
         let owner = NSObject()
+
         func target(width: Int, headroom: Double) -> MPVRenderTarget {
             .init(
                 layerAddress: 1,
@@ -178,22 +195,27 @@ struct MPVStoppedResourceTests {
                 outputHeadroom: headroom
             )
         }
+
         engine.attach(to: target(width: 640, headroom: 1))
+
         engine.queue.sync {
             #expect(engine.handle == nil)
             #expect(engine.renderTarget?.drawableWidth == 640)
             #expect(engine.lifecycleDiagnostics.handlesCreated == 0)
         }
+
         #expect(await engine.resizeRenderTargetAndWait(width: 800, height: 450, forLayerAddress: 1))
         #expect(engine.beginColorUpdate(forLayerAddress: 1))
         engine.finishColorUpdate(target: target(width: 900, headroom: 2))
         engine.detachSynchronously(fromLayerAddress: 1)
         engine.attach(to: target(width: 960, headroom: 1))
+
         engine.queue.sync {
             #expect(engine.handle == nil && engine.renderTarget?.drawableWidth == 960)
             #expect(engine.lifecycleDiagnostics.handlesCreated == 0)
             #expect(engine.liveConfigurationFailure == nil)
         }
+
         await Task.yield()
 
         #expect(errors.isEmpty)
@@ -201,24 +223,29 @@ struct MPVStoppedResourceTests {
 
     @Test
     func `explicit seek after stop controls replay while a new load replaces the retired source`() async throws {
-        let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null"])) { _ in }
-        engine.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(8), generation: 1)
+        let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null", "vid": "no"])) { _ in }
+        engine.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(8), generation: 1)
         engine.stop(generation: 2)
         engine.seek(to: .seconds(2))
         engine.play()
+
         try await eventually("headless replay at the requested seek") {
             engine.queue.sync { engine.isFileLoaded && abs((engine.getDouble("time-pos") ?? -1) - 2) < 0.2 }
         }
+
         engine.queue.sync {
             #expect(engine.sourceURL == TestPaths.baselineMedia)
             #expect(engine.pendingStartTime == nil)
             #expect(!engine.isStoppedForResourceRelease)
         }
+
         engine.stop(generation: 3)
-        engine.load(TestPaths.multitrackMedia, autoPlay: false, startTime: .seconds(4), generation: 4)
+        engine.load(TestPaths.multitrackMedia, playAutomatically: false, startTime: .seconds(4), generation: 4)
+
         try await eventually("replacement source at its configured position") {
             engine.queue.sync { engine.isFileLoaded && abs((engine.getDouble("time-pos") ?? -1) - 4) < 0.2 }
         }
+
         engine.queue.sync {
             #expect(engine.currentGeneration == 4)
             #expect(engine.sourceURL == TestPaths.multitrackMedia)

@@ -21,11 +21,13 @@ struct AppleCapsuleSlider {
     private var isDragging = false
     @State
     private var dragStartValue = 0.0
+
     @GestureState
     private var gestureIsActive = false
 
     private var fraction: Double {
         guard upperBound > 0 else { return 0 }
+
         return min(max(value / upperBound, 0), 1)
     }
 }
@@ -73,6 +75,7 @@ extension AppleCapsuleSlider: View {
                 .accessibilityHint("Swipe up or down to seek by ten seconds.")
                 .accessibilityAdjustableAction(adjustPosition)
         }
+
         // Gesture state also resets on cancellation (for example, a system gesture).
         .onChange(of: gestureIsActive) { _, active in
             if !active {
@@ -109,6 +112,7 @@ extension AppleCapsuleSlider: View {
         guard isEnabled else { return }
 
         let offset: Double
+
         switch direction {
         case .increment: offset = 10
         case .decrement: offset = -10
@@ -122,6 +126,7 @@ extension AppleCapsuleSlider: View {
 
     private func finishDragging() {
         guard isDragging else { return }
+
         isDragging = false
         onEditingChanged(false)
     }

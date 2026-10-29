@@ -15,10 +15,10 @@ struct UtilityTests {
 
     @Test
     func `clamp constrains comparable values`() {
-        #expect(clamp(-1, to: 0 ... 10) == 0)
-        #expect(clamp(4, to: 0 ... 10) == 4)
-        #expect(clamp(11, to: 0 ... 10) == 10)
-        #expect(clamp(Duration.seconds(12), to: .zero ... .seconds(10)) == .seconds(10))
+        #expect(clamped(-1, to: 0 ... 10) == 0)
+        #expect(clamped(4, to: 0 ... 10) == 4)
+        #expect(clamped(11, to: 0 ... 10) == 10)
+        #expect(clamped(Duration.seconds(12), to: .zero ... .seconds(10)) == .seconds(10))
     }
 
     @Test
@@ -28,6 +28,7 @@ struct UtilityTests {
             let box = WeakBox(value)
 
             #expect(box.value === value)
+
             return box
         }()
 
@@ -38,21 +39,25 @@ struct UtilityTests {
     @Test
     func `surface registry activates the most recent attached surface`() {
         let player = MPVPlayer()
+
         let registry = MPVSwiftUISurfaceRegistry<RegistrySurface>(
             isAttachedToWindow: { $0.isAttachedToWindow },
             activate: { $0.activationCount += 1 }
         )
+
         let first = RegistrySurface()
         let second = RegistrySurface()
 
         registry.register(first, for: player)
         registry.register(second, for: player)
+
         registry.surfaceDidMoveToWindow(
             first,
             player: player,
             isInWindow: true,
             shouldRestorePreviousSurface: false
         )
+
         registry.surfaceDidMoveToWindow(
             second,
             player: player,
@@ -71,6 +76,7 @@ struct UtilityTests {
             isInWindow: true,
             shouldRestorePreviousSurface: false
         )
+
         registry.activateMostRecentSurface(for: player)
 
         #expect(first.activationCount == 1)

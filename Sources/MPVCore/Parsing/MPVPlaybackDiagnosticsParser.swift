@@ -18,6 +18,7 @@ package enum MPVPlaybackDiagnosticsParser {
     package static func renderPasses(_ node: MPVNodeValue?) -> [MPVPlaybackDiagnostics.RenderPass]? {
         node?.arrayValue?.compactMap { value in
             guard let pass = value.mapValue, let name = pass["desc"]?.stringValue else { return nil }
+
             return .init(
                 name: name,
                 lastNanoseconds: nonnegative(pass["last"]?.integerValue),
@@ -29,6 +30,7 @@ package enum MPVPlaybackDiagnosticsParser {
 
     package static func nativeStatistics(_ node: MPVNodeValue?) -> MPVPlaybackDiagnostics.NativeOutputStatistics? {
         guard let map = node?.mapValue else { return nil }
+
         return .init(
             pixelBufferCopies: nonnegative(map["pixel-buffer-copies"]?.integerValue),
             sampleBuildCount: nonnegative(map["sample-build-count"]?.integerValue),
@@ -41,16 +43,21 @@ package enum MPVPlaybackDiagnosticsParser {
         guard log.prefix == "ffmpeg/video",
               let payload = MPVNativeDiagnosticParser.payload(log, sentinel: "MPVUI_VIDEOTOOLBOX_SESSION:", allowsDecoder: true)
         else { return nil }
+
         let fields = payload.split(whereSeparator: \.isWhitespace)
+
         if fields.contains("hardware=yes") {
             return .hardware
         }
+
         if fields.contains("hardware=no") {
             return .software
         }
+
         if fields.contains("hardware=unknown") {
             return .unknown
         }
+
         return nil
     }
 
@@ -70,9 +77,11 @@ package enum MPVPlaybackDiagnosticsParser {
         result.videoToolboxSupportsCodec = codecSupportsHardware
         result.interop = interop
         result.decodedPixelFormat = pixelFormat
+
         if let hardwareDecoder, !hardwareDecoder.isEmpty {
             if hardwareDecoder == "no" || sessionUsesHardware == false {
                 result.session = .software
+
                 if requested != .disabled {
                     result.fallbackReason = hardwareDecoder == "no"
                         ? """
@@ -85,6 +94,7 @@ package enum MPVPlaybackDiagnosticsParser {
                 result.session = .hardware(hardwareDecoder)
             }
         }
+
         return result
     }
 }

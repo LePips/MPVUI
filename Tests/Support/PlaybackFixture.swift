@@ -35,7 +35,7 @@ final class PlaybackFixture {
     init(
         configuration: MPVPlayerConfiguration = .init(
             additionalOptions: ["ao": "null"],
-            autoPlay: false,
+            automaticallyPlays: false,
             videoOutput: .sampleBuffer
         ),
         player: MPVPlayer? = nil,
@@ -43,6 +43,7 @@ final class PlaybackFixture {
     ) {
         self.player = player ?? MPVPlayer(configuration: configuration)
         surface = MPVPlatformVideoPlayer(player: self.player, notificationCenter: notificationCenter)
+
         let frame = CGRect(x: 0, y: 0, width: 320, height: 180)
         #if os(macOS)
         _ = NSApplication.shared
@@ -55,8 +56,10 @@ final class PlaybackFixture {
         // has no windowScene. AVFoundation may report ready even though there
         // is no displayed image for copyDisplayedPixelBuffer to return.
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+
         let scene = scenes.first { $0.activationState == .foregroundActive }
             ?? scenes.first { $0.activationState == .foregroundInactive }
+
         if let scene {
             previousKeyWindow = scene.windows.first { $0.isKeyWindow }
             window = UIWindow(windowScene: scene)
@@ -65,6 +68,7 @@ final class PlaybackFixture {
             // Unhosted simulator/package runners may not create a scene.
             window = UIWindow(frame: frame)
         }
+
         let host = UIViewController()
         host.view = surface
         window.rootViewController = host
@@ -76,7 +80,8 @@ final class PlaybackFixture {
     }
 
     func loadPaused(_ url: URL = TestPaths.baselineMedia, at position: Duration = .seconds(1)) async throws {
-        player.load(url, autoPlay: false, startTime: position)
+        player.load(url, playAutomatically: false, startTime: position)
+
         try await eventually("paused media at \(position)") {
             self.player.state == .paused && self.player.isPaused && self.player.isSeekable
                 && abs(self.player.position.seconds - position.seconds) < 0.2

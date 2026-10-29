@@ -16,6 +16,7 @@ struct MPVNativeSubtitleContractTests {
     func `bundled mpv exposes text subtitle snapshot property`() throws {
         let handle = try #require(mpv_create())
         var initialized = false
+
         defer {
             if initialized {
                 mpv_terminate_destroy(handle)
@@ -28,10 +29,12 @@ struct MPVNativeSubtitleContractTests {
         #expect(mpv_set_option_string(handle, "ao", "null") >= 0)
         #expect(mpv_set_option_string(handle, "idle", "yes") >= 0)
         #expect(mpv_set_option_string(handle, "sub-text-intercept", "yes") >= 0)
+
         let initializeStatus = mpv_initialize(handle)
 
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
+
         initialized = true
 
         var node = mpv_node()
@@ -47,6 +50,7 @@ struct MPVNativeSubtitleContractTests {
     func `bundled mpv text subtitle snapshot contract`() throws {
         let handle = try #require(mpv_create())
         var initialized = false
+
         defer {
             if initialized {
                 mpv_terminate_destroy(handle)
@@ -63,10 +67,12 @@ struct MPVNativeSubtitleContractTests {
         ] {
             #expect(mpv_set_option_string(handle, name, value) >= 0)
         }
+
         let initializeStatus = mpv_initialize(handle)
 
         #expect(initializeStatus >= 0)
         guard initializeStatus >= 0 else { return }
+
         initialized = true
 
         let video = TestPaths.baselineMedia
@@ -76,13 +82,16 @@ struct MPVNativeSubtitleContractTests {
         let temporaryDirectory = FileManager.default
             .temporaryDirectory
             .appendingPathComponent("MPVUI-subtitle-contract-\(UUID().uuidString)")
+
         try FileManager.default.createDirectory(
             at: temporaryDirectory,
             withIntermediateDirectories: true
         )
+
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
 
         let webVTT = temporaryDirectory.appendingPathComponent("overlap.vtt")
+
         try """
         WEBVTT
 
@@ -95,6 +104,7 @@ struct MPVNativeSubtitleContractTests {
         """.write(to: webVTT, atomically: true, encoding: .utf8)
 
         let ass = temporaryDirectory.appendingPathComponent("native.ass")
+
         try """
         [Script Info]
         ScriptType: v4.00+
@@ -113,6 +123,7 @@ struct MPVNativeSubtitleContractTests {
         """.write(to: ass, atomically: true, encoding: .utf8)
 
         let srt = temporaryDirectory.appendingPathComponent("automatic.srt")
+
         try """
         1
         00:00:00,000 --> 00:00:30,000
@@ -125,6 +136,7 @@ struct MPVNativeSubtitleContractTests {
 
         #expect(mpv_command_string(handle, "sub-add \(webVTT.path) select") >= 0)
         #expect(waitForSelectedSubtitleCodec(handle, "webvtt", timeout: 5))
+
         let webVTTSnapshot = try #require(
             waitForSubtitleSnapshot(
                 handle,
@@ -136,6 +148,7 @@ struct MPVNativeSubtitleContractTests {
         let webVTTRegions = try #require(webVTTSnapshot.arrayValue)
         #expect((webVTTRegions[0].mapValue?["text"]?.stringValue) == "positioned")
         #expect((webVTTRegions[0].mapValue?["format"]?.stringValue) == "webvtt")
+
         #expect(
             (webVTTRegions[0].mapValue?["settings"]?.stringValue)
                 == "position:25%,line-left line:80% size:40%"
@@ -145,6 +158,7 @@ struct MPVNativeSubtitleContractTests {
         #expect((webVTTRegions[1].mapValue?["settings"]?.stringValue) == "")
 
         #expect(mpv_set_property_string(handle, "sub-visibility", "no") >= 0)
+
         #expect(
             waitForSubtitleSnapshot(
                 handle,
@@ -154,6 +168,7 @@ struct MPVNativeSubtitleContractTests {
         )
 
         #expect(mpv_set_property_string(handle, "sub-visibility", "yes") >= 0)
+
         #expect(
             waitForSubtitleSnapshot(
                 handle,
@@ -164,6 +179,7 @@ struct MPVNativeSubtitleContractTests {
 
         #expect(mpv_command_string(handle, "sub-add \(ass.path) select") >= 0)
         #expect(waitForSelectedSubtitleCodec(handle, "ass", timeout: 5))
+
         #expect(
             waitForSubtitleSnapshot(
                 handle,
@@ -174,6 +190,7 @@ struct MPVNativeSubtitleContractTests {
 
         #expect(mpv_command_string(handle, "sub-add \(srt.path) select") >= 0)
         #expect(waitForSelectedSubtitleCodec(handle, "subrip", timeout: 5))
+
         let automaticSnapshot = try #require(
             waitForSubtitleSnapshot(
                 handle,
@@ -187,6 +204,7 @@ struct MPVNativeSubtitleContractTests {
         #expect(automaticRegion["format"] == nil)
 
         #expect(mpv_set_property_string(handle, "sub-forced-events-only", "yes") >= 0)
+
         #expect(
             waitForSubtitleSnapshot(
                 handle,
@@ -207,12 +225,15 @@ fileprivate extension MPVNativeSubtitleContractTests {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             guard let event = mpv_wait_event(handle, 0.05) else { continue }
+
             if event.pointee.event_id == id {
                 return true
             }
         }
+
         return false
     }
 
@@ -222,15 +243,19 @@ fileprivate extension MPVNativeSubtitleContractTests {
         timeout: TimeInterval
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             let tracks = MPVSession.parseTracks(copiedMPVNode(handle, property: "track-list"))
+
             if tracks.contains(where: {
                 $0.type == .subtitle && $0.isSelected && $0.codec == expected
             }) {
                 return true
             }
+
             _ = mpv_wait_event(handle, 0.05)
         }
+
         return false
     }
 
@@ -240,14 +265,17 @@ fileprivate extension MPVNativeSubtitleContractTests {
         where predicate: (MPVNodeValue) -> Bool
     ) -> MPVNodeValue? {
         let deadline = Date().addingTimeInterval(timeout)
+
         while Date() < deadline {
             if let node = copiedMPVNode(handle, property: "sub-text-snapshot"),
                predicate(node)
             {
                 return node
             }
+
             _ = mpv_wait_event(handle, 0.05)
         }
+
         return nil
     }
 
@@ -256,10 +284,13 @@ fileprivate extension MPVNativeSubtitleContractTests {
         property: String
     ) -> MPVNodeValue? {
         var node = mpv_node()
+
         guard mpv_get_property(handle, property, MPV_FORMAT_NODE, &node) >= 0 else {
             return nil
         }
+
         defer { mpv_free_node_contents(&node) }
+
         return MPVNodeValue(copying: node)
     }
 }

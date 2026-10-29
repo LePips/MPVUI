@@ -21,8 +21,14 @@ final class MPVMediaPackager: @unchecked Sendable {
         let dolbyVisionProfile: Int
         let dolbyVisionLevel: Int
 
-        var isTranscoding: Bool {
-            (hasVideo && !videoCopied) || (hasAudio && !audioCopied)
+        var preparationPlan: MPVExternalPlaybackPlan {
+            .init(
+                hasVideo: hasVideo,
+                hasAudio: hasAudio,
+                copiesVideo: videoCopied,
+                copiesAudio: audioCopied,
+                requiresForeground: requiresForeground
+            )
         }
 
         init(_ info: mpvui_hls_info) {
@@ -61,59 +67,69 @@ final class MPVMediaPackager: @unchecked Sendable {
         (updates, continuation) = AsyncStream.makeStream()
     }
 
+    func inspect(source: URL, startTime: Duration, options: MPVMediaPackagingOptions) async throws -> MPVExternalPlaybackPlan {
+        try await withTaskCancellationHandler {
+            let plan: MPVExternalPlaybackPlan = try await withCheckedThrowingContinuation { completion in
+                queue.async { [self] in
+                    do {
+                        let plan = try withHandle(source: source, playlist: nil, startTime: startTime, options: options) { client in
+                            var plan = mpvui_hls_plan()
+
+                            guard mpvui_hls_probe(client, &plan) >= 0 else {
+                                throw MPVPlayerError.externalPlaybackFailed(String(cString: mpvui_hls_error(client)))
+                            }
+
+                            return MPVExternalPlaybackPlan(
+                                hasVideo: plan.has_video != 0,
+                                hasAudio: plan.has_audio != 0,
+                                copiesVideo: plan.video_copied != 0,
+                                copiesAudio: plan.audio_copied != 0,
+                                requiresForeground: plan.requires_foreground != 0
+                            )
+                        }
+                        completion.resume(returning: plan)
+                    } catch {
+                        completion.resume(throwing: lock.withLock { cancelled } ? CancellationError() : error)
+                    }
+                }
+            }
+
+            try Task.checkCancellation()
+            return plan
+        } onCancel: {
+            self.cancel()
+        }
+    }
+
     func start(source: URL, playlist: URL, startTime: Duration, options: MPVMediaPackagingOptions) {
         queue.async { [self] in
-            let scoped = source.isFileURL && source.startAccessingSecurityScopedResource()
-            defer {
-                if scoped {
-                    source.stopAccessingSecurityScopedResource()
+            defer { continuation.finish() }
+
+            do {
+                try withHandle(source: source, playlist: playlist, startTime: startTime, options: options) { client in
+                    var info = mpvui_hls_info()
+
+                    guard mpvui_hls_prepare(client, &info) >= 0 else {
+                        throw MPVPlayerError.externalPlaybackFailed(String(cString: mpvui_hls_error(client)))
+                    }
+
+                    continuation.yield(.prepared(Info(info)))
+
+                    guard mpvui_hls_run(client) >= 0 else {
+                        throw MPVPlayerError.externalPlaybackFailed(String(cString: mpvui_hls_error(client)))
+                    }
+
+                    continuation.yield(.finished)
                 }
-                continuation.finish()
-            }
-            let client: OpaquePointer? = lock.withLock {
-                guard !cancelled else { return nil }
-                handle = mpvui_hls_create(
-                    MPVSession.mpvPath(for: source),
-                    playlist.path,
-                    startTime.seconds,
-                    options.videoIndex,
-                    options.audioIndex
-                )
-                if let handle {
-                    mpvui_hls_set_paused(handle, 1)
-                }
-                return handle
-            }
-            guard let client else {
+            } catch {
                 if !lock.withLock({ cancelled }) {
-                    continuation.yield(.failed("Unable to create the media packager."))
+                    let message: String = if case let .externalPlaybackFailed(detail) = error as? MPVPlayerError {
+                        detail
+                    } else {
+                        error.localizedDescription
+                    }
+                    continuation.yield(.failed(message))
                 }
-                return
-            }
-            defer {
-                lock.withLock {
-                    handle = nil
-                    mpvui_hls_destroy(client)
-                }
-            }
-            for (key, value) in options.input {
-                guard mpvui_hls_set_option(client, key, value) >= 0 else {
-                    continuation.yield(.failed("Unable to configure the media input."))
-                    return
-                }
-            }
-            var info = mpvui_hls_info()
-            guard mpvui_hls_prepare(client, &info) >= 0 else {
-                continuation.yield(.failed(String(cString: mpvui_hls_error(client))))
-                return
-            }
-            continuation.yield(.prepared(Info(info)))
-            if mpvui_hls_run(client) < 0 {
-                if !lock.withLock({ cancelled }) {
-                    continuation.yield(.failed(String(cString: mpvui_hls_error(client))))
-                }
-            } else {
-                continuation.yield(.finished)
             }
         }
     }
@@ -138,14 +154,69 @@ final class MPVMediaPackager: @unchecked Sendable {
     }
 
     func stop() async {
+        cancel()
+
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume() }
+        }
+    }
+
+    private func withHandle<T>(
+        source: URL,
+        playlist: URL?,
+        startTime: Duration,
+        options: MPVMediaPackagingOptions,
+        operation: (OpaquePointer) throws -> T
+    ) throws -> T {
+        let scoped = source.isFileURL && source.startAccessingSecurityScopedResource()
+
+        defer {
+            if scoped {
+                source.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let client: OpaquePointer = try lock.withLock {
+            guard !cancelled else { throw CancellationError() }
+
+            handle = mpvui_hls_create(
+                MPVSession.mpvPath(for: source),
+                playlist?.path,
+                startTime.seconds,
+                options.videoIndex,
+                options.audioIndex
+            )
+
+            guard let handle else { throw MPVPlayerError.externalPlaybackFailed("Unable to create the media packager.") }
+
+            mpvui_hls_set_paused(handle, 1)
+
+            return handle
+        }
+
+        defer {
+            lock.withLock {
+                handle = nil
+                mpvui_hls_destroy(client)
+            }
+        }
+
+        for (key, value) in options.input {
+            guard mpvui_hls_set_option(client, key, value) >= 0 else {
+                throw MPVPlayerError.externalPlaybackFailed("Unable to configure the media input.")
+            }
+        }
+
+        return try operation(client)
+    }
+
+    private func cancel() {
         lock.withLock {
             cancelled = true
+
             if let handle {
                 mpvui_hls_cancel(handle)
             }
-        }
-        await withCheckedContinuation { continuation in
-            queue.async { continuation.resume() }
         }
     }
 }

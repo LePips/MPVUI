@@ -36,6 +36,17 @@ class DeviceTestProjectTests(unittest.TestCase):
         )
         self.assertEqual(list((self.output / "GeneratedMedia").iterdir()), [])
 
+    def test_team_comes_from_the_flag_or_the_environment(self):
+        def team(arguments, environment):
+            with patch.dict(project.os.environ, environment, clear=True):
+                parser = project.argparse.ArgumentParser()
+                project.add_team_argument(parser)
+                return parser.parse_args(arguments).team
+
+        self.assertIsNone(team([], {}))
+        self.assertEqual(team([], {project.TEAM_ENVIRONMENT: "ENVTEAM001"}), "ENVTEAM001")
+        self.assertEqual(team(["--team", "FLAGTEAM01"], {project.TEAM_ENVIRONMENT: "ENVTEAM001"}), "FLAGTEAM01")
+
     def test_device_test_bundle_has_an_application_host_and_matching_signing(self):
         with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(project.subprocess, "run"):
             project.generate(self.repository, self.output, "ABC123DE45")

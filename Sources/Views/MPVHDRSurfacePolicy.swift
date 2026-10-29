@@ -17,29 +17,35 @@ struct MPVHDRSurfacePolicy {
     ) {
         if native {
             usesExtendedDynamicRange = false // AVFoundation owns conversion.
+
             guard supportsLayerPolicy else {
                 dynamicRange = .automatic
                 fallbackReason = policy == .automatic ? nil : .unsupportedPolicy
                 return
             }
+
             switch policy {
             case .automatic: dynamicRange = .automatic
             case .disabled: dynamicRange = .sdr
             case .always: dynamicRange = .hdr
             case .constrained: dynamicRange = .constrainedHDR
             }
+
             fallbackReason = policy != .disabled && !displaySupportsHDR
                 && (sourceIsHDR || policy != .automatic)
                 ? .displayDoesNotSupportHDR : nil
+
             return
         }
 
         let requestsHDR = policy == .always || policy == .constrained
             || (policy == .automatic && sourceIsHDR)
         usesExtendedDynamicRange = requestsHDR && displaySupportsHDR && supportsMetalHDR
+
         dynamicRange = usesExtendedDynamicRange
             ? (policy == .constrained && supportsLayerPolicy ? .constrainedHDR : .hdr)
             : .sdr
+
         if requestsHDR && !supportsMetalHDR {
             fallbackReason = .unsupportedPolicy
         } else if requestsHDR && !displaySupportsHDR {

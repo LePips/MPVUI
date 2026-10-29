@@ -40,6 +40,7 @@ public enum ExampleAudioSession {
                 false,
                 options: .notifyOthersOnDeactivation
             )
+
             return nil
         } catch {
             return error.localizedDescription

@@ -17,6 +17,7 @@ struct MPVHDRSurfacePolicyTests {
             displaySupportsExtendedDynamicRange: true,
             outputHeadroom: 4
         )
+
         let options = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(for: target))
 
         #expect(options["target-contrast"] == (hdr ? "inf" : "auto"))
@@ -27,6 +28,7 @@ struct MPVHDRSurfacePolicyTests {
         let hdr = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(usesExtendedDynamicRange: true, outputHeadroom: headroom))
 
         #expect(hdr == ["target-prim": "display-p3", "target-trc": "linear", "target-peak": peak])
+
         let sdr = Dictionary(uniqueKeysWithValues: MPVSession.colorTargetOptions(usesExtendedDynamicRange: false, outputHeadroom: headroom))
 
         #expect(sdr == ["target-prim": "bt.709", "target-trc": "srgb", "target-peak": "auto"])
@@ -42,6 +44,7 @@ struct MPVHDRSurfacePolicyTests {
     @Test(arguments: [MPVPlayerConfiguration.HDRPolicy.automatic, .always, .constrained, .disabled], [true, false])
     func `native layer reports display limitations only for requested HDR`(_ policy: MPVPlayerConfiguration.HDRPolicy, sourceHDR: Bool) {
         let result = resolve(policy, native: true, displayHDR: false, sourceHDR: sourceHDR)
+
         let expected: MPVPresentationStatus.FallbackReason? = switch policy {
         case .disabled: nil
         case .automatic: sourceHDR ? .displayDoesNotSupportHDR : nil
@@ -82,6 +85,7 @@ struct MPVHDRSurfacePolicyTests {
         #expect(!unavailable.usesExtendedDynamicRange)
         #expect(unavailable.dynamicRange == .sdr)
         #expect(unavailable.fallbackReason == .unsupportedPolicy)
+
         let available = resolve(.always)
 
         #expect(available.usesExtendedDynamicRange)

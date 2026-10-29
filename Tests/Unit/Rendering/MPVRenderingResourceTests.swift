@@ -10,11 +10,13 @@ struct MPVRenderingResourceTests {
     func `readable local LUT and ordered shaders survive option resolution`(domain: MPVRenderingQuality.LUT.Domain) throws {
         let files = try TemporaryTestDirectory()
         defer { files.remove() }
+
         let first = try files.write("first shader.glsl", contents: "//!HOOK MAIN\n")
         let second = try files.write("second.glsl", contents: "//!HOOK OUTPUT\n")
         let lut = try files.write("grade.cube", contents: "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
+
         let result = MPVRenderingOptions.resolve(
-            .init(lut: .init(domain: domain, url: lut), shaders: [first, second]),
+            .init(lut: .init(url: lut, domain: domain), shaders: [first, second]),
             backend: .metal,
             lowPowerMode: false
         )
@@ -29,10 +31,12 @@ struct MPVRenderingResourceTests {
     func `unreadable LUT and shader are diagnosed while valid shaders remain ordered`() throws {
         let files = try TemporaryTestDirectory()
         defer { files.remove() }
+
         let valid = try files.write("valid.glsl", contents: "//!HOOK MAIN\n")
         let missing = files.url.appendingPathComponent("missing.glsl")
 
         let remote = try #require(URL(string: "https://example.invalid/grade.cube"))
+
         let result = MPVRenderingOptions.resolve(
             .init(lut: .init(url: remote), shaders: [missing, valid]),
             backend: .metal,

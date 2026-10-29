@@ -11,6 +11,7 @@ struct MPVPlayerEmissionTests {
     func `scalar timeline changes preserve metadata and reset chapter and frame state on stop`() {
         let player = MPVPlayer()
         let video = MPVMediaTrack(id: 1, type: .video)
+
         let information = MPVMediaInformation(
             title: "Movie",
             dimensions: .init(width: 720, height: 576),
@@ -48,15 +49,19 @@ struct MPVPlayerEmissionTests {
     func `superseded media updates cannot replace the current source but global failures remain visible`() {
         let player = MPVPlayer()
         player.load(TestPaths.baselineMedia)
+
         let previous = player.mediaGeneration
+
         player.load(TestPaths.baselineMedia)
 
         #expect(player.mediaGeneration != previous)
         player.applyTestEmission(.init(generation: previous, update: .state(.ended)))
+
         player.applyTestEmission(.init(
             generation: previous,
             update: .timing(position: .seconds(99), duration: .seconds(100), isSeekable: true)
         ))
+
         player.applyTestEmission(.init(generation: previous, update: .error(.eventQueueOverflow, fatal: true)))
 
         #expect(player.state == .loading)
@@ -90,6 +95,7 @@ struct MPVPlayerEmissionTests {
         let player = MPVPlayer()
         var messages: [MPVLogMessage] = []
         player.logHandler = { messages.append($0) }
+
         let log = MPVLogMessage(prefix: "decoder", level: .warning, message: "Decoded frame was dropped")
         player.applyTestEmission(.init(generation: player.mediaGeneration, update: .log(log)))
 

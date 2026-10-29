@@ -9,7 +9,7 @@ import MPVCore
 ///
 /// ```swift
 /// let configuration = MPVPlayerConfiguration(
-///     autoPlay: false,
+///     automaticallyPlays: false,
 ///     videoOutput: .sampleBuffer,
 ///     volume: 75
 /// )
@@ -30,6 +30,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
         /// Decodes video in software.
         case disabled = "no"
+
         package var coreValue: MPVHardwareDecoding {
             switch self {
             case .automatic: .automatic
@@ -51,10 +52,11 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         /// Full `gpu-next` rendering through Metal and MoltenVK.
         case metal
 
-        /// Native AVFoundation output with iOS PiP. Requires the native-output Libmpv build.
+        /// Native AVFoundation output with iOS picture in picture. Requires the native-output Libmpv build.
         /// AVFoundation handles color conversion, bypassing `gpu-next` shaders and tone mapping.
         /// Unsupported native formats report a playback error.
         case sampleBuffer
+
         package var coreValue: MPVVideoOutput {
             switch self {
             case .metal: .metal
@@ -72,10 +74,10 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public static let `default` = Self()
 
     /// The default initial buffer duration, one second.
-    public static let defaultInitialBufferSeconds: Duration = .seconds(1)
+    public static let defaultInitialBufferDuration: Duration = .seconds(1)
 
     /// The default network cache duration, ten seconds.
-    public static let defaultNetworkCacheSeconds: Duration = .seconds(10)
+    public static let defaultNetworkCacheDuration: Duration = .seconds(10)
 
     /// The default playback rate, normal speed.
     public static let defaultPlaybackRate = 1.0
@@ -91,32 +93,32 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
     // MARK: - Boolean options
 
-    /// Whether loading a source should begin playback automatically.
-    public let autoPlay: Bool
+    /// Whether loading a source begins playback automatically.
+    public let automaticallyPlays: Bool
 
-    /// Whether playback should restart after reaching the end of the media.
-    public let loop: Bool
+    /// Whether playback restarts after reaching the end of the media.
+    public let isLoopingEnabled: Bool
 
     // MARK: - Numeric options
 
-    /// Speed multiplier clamped to `0.01...100`. Nonpositive or non-finite values
-    /// use ``defaultPlaybackRate``.
+    /// The initial playback-rate multiplier, clamped to `0.01...100`.
+    /// Nonpositive or non-finite values use ``defaultPlaybackRate``.
     public let playbackRate: Double
 
     /// Reference white in nits for native HDR subtitles and overlay graphics.
     /// Values are clamped to `1...1000`. Non-finite values use 203 nits.
     public let subtitleLuminance: Double
 
-    /// Volume clamped to `0...100`. NaN uses ``defaultVolume``.
+    /// The initial playback volume, clamped to `0...100`. NaN uses ``defaultVolume``.
     public let volume: Double
 
     // MARK: - Timing options
 
     /// Buffered duration required before initial playback, clamped to zero or greater.
-    public let initialBufferSeconds: Duration
+    public let initialBufferDuration: Duration
 
     /// Desired network cache duration, clamped to zero or greater.
-    public let networkCacheSeconds: Duration
+    public let networkCacheDuration: Duration
 
     /// Initial position, or `nil` for the default. Negative values become zero.
     public let startTime: Duration?
@@ -174,7 +176,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// For app-owned subtitle fonts, set `sub-fonts-dir` to a local directory path
     /// and `sub-font` to the font's internal family name. MPVUI ships no fonts.
     /// These options affect mpv-rendered subtitles. Style text from
-    /// ``MPVPlayer/textSubtitleStream()`` in your own UI.
+    /// ``MPVPlayer/makeTextSubtitleStream()`` in your own UI.
     public let additionalOptions: [String: String]
 
     // MARK: - Normalization
@@ -184,16 +186,16 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         MPVSessionConfiguration(
             additionalOptions: additionalOptions,
             audio: audio,
-            autoPlay: autoPlay,
+            automaticallyPlays: automaticallyPlays,
             cache: cache,
             deinterlace: deinterlace,
             dolbyVisionPolicy: dolbyVisionPolicy,
             hardwareDecoding: hardwareDecoding.coreValue,
             hdrPolicy: hdrPolicy,
-            initialBufferSeconds: initialBufferSeconds,
+            initialBufferDuration: initialBufferDuration,
             logLevel: logLevel,
-            loop: loop,
-            networkCacheSeconds: networkCacheSeconds,
+            isLoopingEnabled: isLoopingEnabled,
+            networkCacheDuration: networkCacheDuration,
             playbackRate: playbackRate,
             renderingQuality: renderingQuality,
             startTime: startTime,
@@ -210,7 +212,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     public init(
         additionalOptions: [String: String] = [:],
         audio: MPVAudioConfiguration = .init(),
-        autoPlay: Bool = true,
+        automaticallyPlays: Bool = true,
         cache: MPVCacheConfiguration = .init(),
         colorManagement: MPVColorManagement = .init(),
         deinterlace: MPVDeinterlacePolicy = .init(),
@@ -218,10 +220,10 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         dolbyVisionPolicy: MPVDolbyVisionPolicy = .strict,
         hardwareDecoding: HardwareDecoding = .automatic,
         hdrPolicy: HDRPolicy = .automatic,
-        initialBufferSeconds: Duration = defaultInitialBufferSeconds,
+        initialBufferDuration: Duration = defaultInitialBufferDuration,
         logLevel: LogLevel = .warning,
-        loop: Bool = false,
-        networkCacheSeconds: Duration = defaultNetworkCacheSeconds,
+        isLoopingEnabled: Bool = false,
+        networkCacheDuration: Duration = defaultNetworkCacheDuration,
         playbackRate: Double = 1,
         renderingQuality: MPVRenderingQuality = .init(),
         sdrOutput: MPVSDROutputPolicy = .automatic,
@@ -232,7 +234,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     ) {
         self.additionalOptions = additionalOptions
         self.audio = audio
-        self.autoPlay = autoPlay
+        self.automaticallyPlays = automaticallyPlays
         self.cache = cache
         self.displayMatching = displayMatching
         self.colorManagement = colorManagement
@@ -240,10 +242,10 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.dolbyVisionPolicy = dolbyVisionPolicy
         self.hardwareDecoding = hardwareDecoding
         self.hdrPolicy = hdrPolicy
-        self.initialBufferSeconds = initialBufferSeconds.clampPositiveOrZero
+        self.initialBufferDuration = initialBufferDuration.clampPositiveOrZero
         self.logLevel = logLevel
-        self.loop = loop
-        self.networkCacheSeconds = networkCacheSeconds.clampPositiveOrZero
+        self.isLoopingEnabled = isLoopingEnabled
+        self.networkCacheDuration = networkCacheDuration.clampPositiveOrZero
         self.playbackRate = MPVSessionConfiguration.normalizedPlaybackRate(playbackRate)
         self.renderingQuality = renderingQuality
         self.sdrOutput = sdrOutput

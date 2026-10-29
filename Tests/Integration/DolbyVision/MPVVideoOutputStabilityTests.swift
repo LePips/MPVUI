@@ -36,10 +36,12 @@ struct MPVVideoOutputStabilityTests {
                 backing: .buffered,
                 defer: false
             )
+
             window.contentView = surface
             window.orderFront(nil)
             #else
             window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+
             let controller = UIViewController()
             controller.view.addSubview(surface)
             surface.frame = window.bounds
@@ -69,15 +71,18 @@ struct MPVVideoOutputStabilityTests {
     func `display headroom updates retain the native handle and paused position`() async throws {
         let player = MPVPlayer(configuration: .init(
             additionalOptions: ["ao": "null"],
-            autoPlay: false,
+            automaticallyPlays: false,
             hardwareDecoding: .disabled,
             videoOutput: .sampleBuffer
         ))
+
         let host = Host(player: player)
         defer { host.close() }
-        player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(0.4))
+        player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(0.4))
         try await waitUntil("native video is paused") { player.state == .paused }
+
         let before = await player.lifecycleDiagnostics()
+
         for headroom in [4.0, 2.5, 1.0, 3.0] {
             player.updateSampleBufferOutput(
                 displayCapabilities: MPVDisplayCapabilities(
@@ -88,6 +93,7 @@ struct MPVVideoOutputStabilityTests {
                 configuredDynamicRange: .automatic
             )
         }
+
         let after = await player.lifecycleDiagnostics()
 
         #expect(after.handlesCreated == before.handlesCreated)
@@ -107,15 +113,19 @@ struct MPVVideoOutputStabilityTests {
             hardwareDecoding: .disabled,
             videoOutput: .sampleBuffer
         ))
+
         let host = Host(player: player)
         defer { host.close() }
         player.load(TestPaths.baselineMedia)
+
         try await waitUntil("native video is playing") {
             player.state == .playing && player.position > .milliseconds(100)
         }
+
         player.setDisplaySwitchInProgress(true)
         _ = await player.lifecycleDiagnostics()
         try await Task.sleep(for: .milliseconds(50))
+
         let position = player.position
 
         #expect(!player.isPaused)
@@ -130,6 +140,7 @@ struct MPVVideoOutputStabilityTests {
         #expect(player.isPaused)
         #expect(abs((player.position - position).seconds) < 0.05)
         player.play()
+
         try await waitUntil("playback resumes after user request") {
             player.position > position + .milliseconds(100)
         }
@@ -143,8 +154,10 @@ struct MPVVideoOutputStabilityTests {
             if predicate() {
                 return
             }
+
             try await Task.sleep(for: .milliseconds(20))
         }
+
         try #require(predicate(), "Video output timed out: \(context)")
     }
 }

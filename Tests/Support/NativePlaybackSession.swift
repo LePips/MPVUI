@@ -14,6 +14,7 @@ final class NativePlaybackSession {
 
     init(options: [String: String] = [:]) throws {
         handle = try #require(mpv_create())
+
         do {
             for (name, value) in [
                 "vo": "null",
@@ -28,6 +29,7 @@ final class NativePlaybackSession {
             ].merging(options, uniquingKeysWith: { _, new in new }) {
                 try #require(mpv_set_option_string(handle, name, value) >= 0)
             }
+
             try #require(mpv_initialize(handle) >= 0)
         } catch {
             mpv_destroy(handle)
@@ -50,7 +52,9 @@ final class NativePlaybackSession {
     func property(_ name: String) -> MPVNodeValue? {
         var node = mpv_node()
         guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &node) >= 0 else { return nil }
+
         defer { mpv_free_node_contents(&node) }
+
         return MPVNodeValue(copying: node)
     }
 
@@ -59,10 +63,12 @@ final class NativePlaybackSession {
             if event.event_id == MPV_EVENT_NONE {
                 return false
             }
+
             if event.event_id == MPV_EVENT_PLAYBACK_RESTART {
                 return true
             }
         }
+
         return false
     }
 
@@ -70,16 +76,19 @@ final class NativePlaybackSession {
     func command(_ arguments: [String]) throws -> MPVNodeValue? {
         let strings = arguments.map { strdup($0) }
         defer { strings.forEach { free($0) } }
+
         var pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer($0) } } + [nil]
         var node = mpv_node()
         defer { mpv_free_node_contents(&node) }
         try #require(mpv_command_ret(handle, &pointers, &node) >= 0, "Command failed: \(arguments)")
+
         return MPVNodeValue(copying: node)
     }
 
     func load(_ url: URL) async throws {
         try #require(FileManager.default.fileExists(atPath: url.path))
         try command(["loadfile", url.path])
+
         try await eventually("decoded frame from \(url.lastPathComponent)") {
             self.property("video-out-params/w")?.integerValue != nil
                 && self.property("time-pos")?.doubleValue != nil

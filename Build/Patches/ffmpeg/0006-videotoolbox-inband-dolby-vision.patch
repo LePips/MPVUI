@@ -1,0 +1,155 @@
+Subject: [PATCH] Recover native Dolby Vision configuration from validated in-band RPUs
+
+diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
+--- a/libavcodec/videotoolbox.c
++++ b/libavcodec/videotoolbox.c
+@@ -877,10 +877,102 @@
+         return NULL;
+     const AVPacketSideData *sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
+ 
+-    if (!sd || sd->size < sizeof(AVDOVIDecoderConfigurationRecord))
++    if (!sd) {
++        VTContext *vtctx = avctx->internal->hwaccel_priv_data;
++        return vtctx && vtctx->native_dovi_inband_conf.dv_profile ?
++            &vtctx->native_dovi_inband_conf : NULL;
++    }
++    if (sd->size < sizeof(AVDOVIDecoderConfigurationRecord))
+         return NULL;
+ 
+     return (const AVDOVIDecoderConfigurationRecord *)sd->data;
++}
++
++/* Recover source configuration, without opting into conversion. The encoder
++ * configurator cannot represent enhancement layers. For a parsed P7 RPU,
++ * validate its HDR10 base and derive the level from that base, then retain
++ * P7/CCID 6 so the explicit compatibility policy remains authoritative. */
++static int videotoolbox_dovi_configure_from_metadata(void *logctx,
++    AVCodecParameters *par, const AVDOVIMetadata *metadata,
++    AVDOVIDecoderConfigurationRecord *conf)
++{
++    DOVIContext writer = { .logctx = logctx, .enable = FF_DOVI_AUTOMATIC };
++    int ret, profile;
++
++    memset(conf, 0, sizeof(*conf));
++    if (!metadata || par->codec_id != AV_CODEC_ID_HEVC ||
++        par->format != AV_PIX_FMT_YUV420P10)
++        return 0;
++    profile = ff_dovi_guess_profile_hevc(av_dovi_get_header(metadata));
++    if (profile != 5 && profile != 7 && profile != 8)
++        return 0;
++    if (profile == 7) {
++        if (par->color_space != AVCOL_SPC_BT2020_NCL ||
++            par->color_primaries != AVCOL_PRI_BT2020 ||
++            par->color_trc != AVCOL_TRC_SMPTE2084)
++            return 0;
++        writer.enable = 1;
++        metadata = NULL;
++    }
++    ret = ff_dovi_configure_from_codedpar(&writer, par, metadata,
++                                         AV_DOVI_COMPRESSION_NONE, FF_COMPLIANCE_NORMAL);
++    if (ret >= 0 && writer.cfg.dv_profile) {
++        *conf = writer.cfg;
++        if (profile == 7) {
++            conf->dv_profile = 7;
++            conf->el_present_flag = 1;
++            conf->dv_bl_signal_compatibility_id = 6;
++        }
++    }
++    ff_dovi_ctx_unref(&writer);
++    return ret;
++}
++
++/* Remuxers can omit dvcC/dvvC while retaining every RPU. The HEVC decoder
++ * parses the current RPU before selecting the hardware pixel format. Use that
++ * validated metadata and the SPS color description to configure this session.
++ * Never infer DV from HDR tags alone or replace an explicit container record. */
++static int videotoolbox_dovi_configure_inband(AVCodecContext *avctx)
++{
++    VTContext *vtctx = avctx->internal->hwaccel_priv_data;
++    HEVCContext *h = avctx->priv_data;
++    AVDOVIMetadata *metadata = NULL;
++    AVCodecParameters *par = NULL;
++    int ret;
++
++    memset(&vtctx->native_dovi_inband_conf, 0, sizeof(vtctx->native_dovi_inband_conf));
++    if (!videotoolbox_native_dovi_enabled(avctx) ||
++        ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF) ||
++        !h->rpu_buf || !h->dovi_ctx.mapping || !h->dovi_ctx.color)
++        return 0;
++    ret = ff_dovi_get_metadata(&h->dovi_ctx, &metadata);
++    if (ret <= 0)
++        return ret;
++    par = avcodec_parameters_alloc();
++    if (!par) {
++        ret = AVERROR(ENOMEM);
++        goto done;
++    }
++    ret = avcodec_parameters_from_context(par, avctx);
++    if (ret < 0)
++        goto done;
++    par->format = avctx->sw_pix_fmt;
++    ret = videotoolbox_dovi_configure_from_metadata(avctx, par, metadata,
++                                                   &vtctx->native_dovi_inband_conf);
++    if (ret >= 0 && vtctx->native_dovi_inband_conf.dv_profile) {
++        av_log(avctx, AV_LOG_VERBOSE,
++               "Recovered Dolby Vision configuration from HEVC RPU (profile %u, compatibility %u).\n",
++               vtctx->native_dovi_inband_conf.dv_profile,
++               vtctx->native_dovi_inband_conf.dv_bl_signal_compatibility_id);
++    } else if (ret >= 0) {
++        av_log(avctx, AV_LOG_ERROR, "MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED: "
++               "in-band RPU profile and base-layer signal cannot establish "
++               "a supported native Dolby Vision configuration\n");
++    }
++done:
++    avcodec_parameters_free(&par);
++    av_free(metadata);
++    return ret;
+ }
+ 
+ static int videotoolbox_dovi_is_apple_hevc(const AVDOVIDecoderConfigurationRecord *dovi)
+@@ -892,11 +984,14 @@
+     /* Native P7 decode requires P8.1 conversion. */
+     switch (dovi->dv_profile) {
+     case 5:
+-        return dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
++        return dovi->dv_bl_signal_compatibility_id == 0 &&
++               dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE;
+     case 8:
+         /* Native HDR bases: known HDR10/HLG only. Compressed metadata is
+          * submitted as standalone RPUs; see videotoolbox_hevc_append_dovi_rpus. */
+-        return dovi->dv_md_compression != AV_DOVI_COMPRESSION_RESERVED &&
++        return (dovi->dv_md_compression == AV_DOVI_COMPRESSION_NONE ||
++                dovi->dv_md_compression == AV_DOVI_COMPRESSION_LIMITED ||
++                dovi->dv_md_compression == AV_DOVI_COMPRESSION_EXTENDED) &&
+                (dovi->dv_bl_signal_compatibility_id == 1 ||
+                 dovi->dv_bl_signal_compatibility_id == 4);
+     default:
+@@ -1143,6 +1238,9 @@
+         break;
+     case AV_CODEC_ID_HEVC :
+         {
++            int ret = videotoolbox_dovi_configure_inband(avctx);
++            if (ret < 0)
++                return ret;
+             AVDOVIDecoderConfigurationRecord converted;
+             const AVDOVIDecoderConfigurationRecord *dovi = videotoolbox_dovi_effective_conf(avctx, &converted);
+ 
+diff --git a/libavcodec/vt_internal.h b/libavcodec/vt_internal.h
+--- a/libavcodec/vt_internal.h
++++ b/libavcodec/vt_internal.h
+@@ -21,6 +21,7 @@
+ 
+ #include "avcodec.h"
+ #include "videotoolbox.h"
++#include "libavutil/dovi_meta.h"
+ 
+ typedef struct VTContext {
+     // The current bitstream buffer.
+@@ -46,6 +47,7 @@
+     uint8_t                     sps[3];
+     bool                        reconfig_needed;
+     bool                        native_dovi_error_reported;
++    AVDOVIDecoderConfigurationRecord native_dovi_inband_conf;
+ 
+     void *logctx;
+ } VTContext;

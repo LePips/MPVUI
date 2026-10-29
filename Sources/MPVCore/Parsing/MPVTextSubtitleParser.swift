@@ -34,6 +34,7 @@ package enum MPVTextSubtitleParser {
                         id > 0 ? MPVMediaTrackIdentifier(type: .subtitle, mpvID: id) : nil
                     }
                 }
+
                 return TextSubtitleRegion(
                     text: text,
                     placement: placement,
@@ -41,6 +42,7 @@ package enum MPVTextSubtitleParser {
                     role: fields["role"]?.stringValue.flatMap(MPVSubtitleRole.init(rawValue:))
                 )
             } ?? []
+
         return TextSubtitleSnapshot(regions: regions)
     }
 
@@ -52,16 +54,20 @@ package enum MPVTextSubtitleParser {
         let writingDirection = writingDirection(for: settings.vertical)
         let baseDirection = cueBaseDirection(cueText)
         let alignment = settings.alignment ?? .center
+
         let textAlignment = physicalTextAlignment(
             for: alignment,
             baseDirection: baseDirection
         )
+
         let inlinePosition =
             settings.position?.value
                 ?? defaultInlinePosition(for: alignment)
+
         let inlineAnchor =
             settings.position?.anchor
                 ?? defaultPositionAnchor(for: alignment, baseDirection: baseDirection)
+
         let maximumExtent = settings.size.map {
             min($0, availableInlineExtent(at: inlinePosition, anchor: inlineAnchor))
         }
@@ -69,6 +75,7 @@ package enum MPVTextSubtitleParser {
         switch writingDirection {
         case .horizontal:
             let line = horizontalLinePlacement(settings.line)
+
             return WebVTTPlacement(
                 horizontalPosition: inlinePosition,
                 verticalPosition: line.position,
@@ -84,6 +91,7 @@ package enum MPVTextSubtitleParser {
                 settings.line,
                 direction: writingDirection
             )
+
             return WebVTTPlacement(
                 horizontalPosition: line.position,
                 verticalPosition: inlinePosition,
@@ -180,6 +188,7 @@ private extension MPVTextSubtitleParser {
         init(rawValue: String) {
             for field in rawValue.split(whereSeparator: { $0.isWhitespace }) {
                 guard let separator = field.firstIndex(of: ":") else { continue }
+
                 let key = String(field[..<separator])
                 let value = String(field[field.index(after: separator)...])
                 guard !value.isEmpty else { continue }
@@ -192,22 +201,27 @@ private extension MPVTextSubtitleParser {
                     if value == "rl" || value == "lr" {
                         vertical = value
                     }
+
                 case "line":
                     if let parsed = parseLine(value) {
                         line = parsed
                     }
+
                 case "position":
                     if let parsed = parsePosition(value) {
                         position = parsed
                     }
+
                 case "size":
                     if let parsed = percentage(value) {
                         size = parsed
                     }
+
                 case "align":
                     if let parsed = CueAlignment(rawValue: value) {
                         alignment = parsed
                     }
+
                 default:
                     break
                 }
@@ -234,17 +248,21 @@ private extension MPVTextSubtitleParser {
             omittingEmptySubsequences: false
         )
         .map(String.init)
+
         guard let position = percentage(components[0]) else { return nil }
 
         let anchor: PositionAnchor?
+
         if components.count == 2 {
             guard let parsedAnchor = PositionAnchor(rawValue: components[1]) else {
                 return nil
             }
+
             anchor = parsedAnchor
         } else {
             anchor = nil
         }
+
         return PositionSetting(value: position, anchor: anchor)
     }
 
@@ -255,11 +273,14 @@ private extension MPVTextSubtitleParser {
             omittingEmptySubsequences: false
         )
         .map(String.init)
+
         let anchor: LineAnchor
+
         if components.count == 2 {
             guard let parsedAnchor = LineAnchor(rawValue: components[1]) else {
                 return nil
             }
+
             anchor = parsedAnchor
         } else {
             anchor = .start
@@ -268,7 +289,9 @@ private extension MPVTextSubtitleParser {
         if let position = percentage(components[0]) {
             return .percentage(position, anchor: anchor)
         }
+
         guard let line = Float(components[0]), line.isFinite else { return nil }
+
         return .snap(line)
     }
 
@@ -279,6 +302,7 @@ private extension MPVTextSubtitleParser {
               result.isFinite,
               (0 ... 100).contains(result)
         else { return nil }
+
         return result / 100
     }
 
@@ -297,6 +321,7 @@ private extension MPVTextSubtitleParser {
             if scalar.value == 0x200F {
                 return .rightToLeft
             }
+
             if scalar.value == 0x200E {
                 return .leftToRight
             }
@@ -307,10 +332,12 @@ private extension MPVTextSubtitleParser {
                 return isRightToLeftLetter(scalar)
                     ? .rightToLeft
                     : .leftToRight
+
             default:
                 continue
             }
         }
+
         return .leftToRight
     }
 
@@ -408,17 +435,21 @@ private extension MPVTextSubtitleParser {
                 position: 1 - safeAreaInset,
                 anchor: .bottom
             )
+
         case let .percentage(position, anchor):
             return HorizontalLinePlacement(
                 position: position,
                 anchor: verticalLineAnchor(anchor)
             )
+
         case let .snap(line):
             let roundedLine = (line + 0.5).rounded(.down)
+
             let position =
                 roundedLine < 0
                     ? 1 - safeAreaInset + (roundedLine + 1) * estimatedSnapLineStep
                     : safeAreaInset + roundedLine * estimatedSnapLineStep
+
             return HorizontalLinePlacement(
                 position: position,
                 anchor: roundedLine < 0 ? .bottom : .top
@@ -431,21 +462,25 @@ private extension MPVTextSubtitleParser {
         direction: WebVTTPlacement.WritingDirection
     ) -> VerticalLinePlacement {
         let growsLeft = direction == .verticalGrowingLeft
+
         switch setting {
         case nil:
             return VerticalLinePlacement(
                 position: growsLeft ? 1 - safeAreaInset : safeAreaInset,
                 anchor: growsLeft ? .right : .left
             )
+
         case let .percentage(position, anchor):
             return VerticalLinePlacement(
                 position: position,
                 anchor: horizontalLineAnchor(anchor, growsLeft: growsLeft)
             )
+
         case let .snap(line):
             let roundedLine = (line + 0.5).rounded(.down)
             let fromHighEdge = growsLeft ? roundedLine >= 0 : roundedLine < 0
             let distance = roundedLine >= 0 ? roundedLine : -roundedLine - 1
+
             return VerticalLinePlacement(
                 position: fromHighEdge
                     ? 1 - safeAreaInset - distance * estimatedSnapLineStep

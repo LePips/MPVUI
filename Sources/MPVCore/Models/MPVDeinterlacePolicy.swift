@@ -41,7 +41,7 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
 
     /// Whether to run `idet` before an explicitly selected software filter to correct bad field tags.
     /// Detection itself requires software-accessible pixels, including progressive video.
-    public let analyzeFieldOrder: Bool
+    public let analyzesFieldOrder: Bool
 
     // MARK: - Policies
 
@@ -57,12 +57,12 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
     /// Creates a deinterlacing policy, disabled by default.
     public init(
         algorithm: Algorithm = .automatic,
-        analyzeFieldOrder: Bool = false,
+        analyzesFieldOrder: Bool = false,
         fieldOrder: FieldOrder = .automatic,
         mode: Mode = .disabled
     ) {
         self.algorithm = algorithm
-        self.analyzeFieldOrder = analyzeFieldOrder
+        self.analyzesFieldOrder = analyzesFieldOrder
         self.fieldOrder = fieldOrder
         self.mode = mode
     }
@@ -74,7 +74,7 @@ public struct MPVDeinterlaceStatus: Equatable, Sendable {
     /// The deinterlacing policy requested by the caller.
     public var requested: MPVDeinterlacePolicy = .init()
     /// Whether the displayed frame is interlaced, or `nil` when mpv cannot report it.
-    public var outputFrameIsInterlaced: Bool?
+    public var isOutputFrameInterlaced: Bool?
     /// Whether mpv's automatic deinterlacer is active. Explicit `lavfi` filters may be unknown.
     public var isActive: Bool?
     /// The effective deinterlacing filter description, when available.

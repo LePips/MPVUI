@@ -12,29 +12,34 @@ struct MPVMacPiPViewHostingTests {
     @Test
     @MainActor
     func `reparent preserves inline constraints sibling order and metal layer`() {
-        let player = MPVPlayer(configuration: .init(autoPlay: false))
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false))
         let surface = MPVPlatformVideoPlayer(player: player)
         let sourceWindow = makeWindow()
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
         sourceWindow.contentView = root
+
         let behind = NSView()
         let ahead = NSView()
         root.addSubview(behind)
         root.addSubview(surface)
         root.addSubview(ahead)
         surface.translatesAutoresizingMaskIntoConstraints = false
+
         let constraints = [
             surface.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
             surface.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
             surface.widthAnchor.constraint(equalToConstant: 320),
             surface.heightAnchor.constraint(equalToConstant: 180),
         ]
+
         // These dimensions belong to the view itself. Keeping them active while
         // moving would constrain the PiP host to the inline dimensions.
         NSLayoutConstraint.activate(constraints)
+
         let overlay = NSView()
         surface.addSubview(overlay)
         overlay.translatesAutoresizingMaskIntoConstraints = false
+
         let overlayConstraints = [
             overlay.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
             overlay.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
@@ -43,10 +48,14 @@ struct MPVMacPiPViewHostingTests {
         ]
         NSLayoutConstraint.activate(overlayConstraints)
         root.layoutSubtreeIfNeeded()
+
         let metalLayer = surface.metalLayer
         let originalFrame = surface.frame
+
         surface.retainRenderingForPictureInPicture()
+
         let hosting = MPVMacPiPViewHosting(surface: surface)
+
         defer {
             hosting.restore()
             surface.releaseRenderingFromPictureInPicture()
@@ -65,6 +74,7 @@ struct MPVMacPiPViewHostingTests {
         #expect(!constraints[0].isActive)
         #expect(!constraints[1].isActive)
         #expect(overlay.superview === surface)
+
         // swiftformat:disable:next preferKeyPath
         #expect(overlayConstraints.allSatisfy { $0.isActive })
 
@@ -77,6 +87,7 @@ struct MPVMacPiPViewHostingTests {
         #expect(root.subviews[1] === surface)
         #expect(surface.frame == originalFrame)
         #expect(!surface.translatesAutoresizingMaskIntoConstraints)
+
         // swiftformat:disable:next preferKeyPath
         #expect(constraints.allSatisfy { $0.isActive })
         #expect(surface.metalLayer === metalLayer)
@@ -89,7 +100,9 @@ struct MPVMacPiPViewHostingTests {
         let sourceWindow = makeWindow()
         sourceWindow.contentView = surface
         surface.retainRenderingForPictureInPicture()
+
         let hosting = MPVMacPiPViewHosting(surface: surface)
+
         defer {
             hosting.restore()
             surface.releaseRenderingFromPictureInPicture()
@@ -100,6 +113,7 @@ struct MPVMacPiPViewHostingTests {
         #expect(sourceWindow.contentView === hosting.placeholder)
         sourceWindow.setContentSize(NSSize(width: 800, height: 450))
         sourceWindow.contentView?.layoutSubtreeIfNeeded()
+
         let resizedInlineBounds = hosting.placeholder.bounds
 
         #expect(hosting.restore())
@@ -115,7 +129,9 @@ struct MPVMacPiPViewHostingTests {
         let sourceWindow = makeWindow()
         sourceWindow.contentView = surface
         surface.retainRenderingForPictureInPicture()
+
         let hosting = MPVMacPiPViewHosting(surface: surface)
+
         sourceWindow.contentView = NSView()
 
         #expect(!hosting.restore())

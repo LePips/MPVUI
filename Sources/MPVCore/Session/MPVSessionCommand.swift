@@ -3,8 +3,9 @@ import Foundation
 /// Typed playback operations shared by platform players.
 public enum MPVSessionCommand: Sendable {
 
-    /// Replaces the source; omitted options use the session defaults.
-    case load(URL, autoPlay: Bool? = nil, startTime: Duration? = nil)
+    /// Replaces the source. Omitted options use the session defaults.
+    /// Audio-only media starts without a surface. Enabled video waits for one.
+    case load(URL, playAutomatically: Bool? = nil, startTime: Duration? = nil)
     /// Starts or resumes playback, including replay after stop.
     case play
     /// Pauses without discarding the user's source.
@@ -14,37 +15,39 @@ public enum MPVSessionCommand: Sendable {
     /// Stops playback and releases native decode and rendering resources.
     case stop
     /// Seeks to an absolute position.
-    case seek(Duration)
+    case seek(to: Duration)
     /// Seeks relative to the current or pending position.
-    case seekRelative(Duration)
-    /// Advances one video frame, optionally backwards.
-    case frameStep(backward: Bool)
+    case seekByOffset(Duration)
+    /// Steps one video frame forward and pauses playback.
+    case stepForward
+    /// Steps one video frame backward and pauses playback.
+    case stepBackward
     /// Changes volume, clamped to the supported range.
-    case volume(Double)
+    case setVolume(Double)
     /// Changes the mute setting.
-    case mute(Bool)
+    case setMuted(Bool)
     /// Toggles mute against the latest serialized session state.
     case toggleMute
     /// Changes the playback speed.
-    case playbackRate(Double)
+    case setPlaybackRate(Double)
     /// Selects a video, audio, or primary subtitle track.
     case selectTrack(MPVMediaTrackIdentifier)
     /// Selects or disables the specified subtitle role.
-    case selectSubtitle(MPVMediaTrackIdentifier?, role: MPVSubtitleRole)
+    case selectSubtitle(MPVMediaTrackIdentifier?, for: MPVSubtitleRole = .primary)
     /// Disables one track type.
     case disableTrack(MPVTrackType)
-    /// Enables semantic text subtitle delivery.
-    case interceptTextSubtitles(Bool)
-    /// Enables detailed diagnostic sampling.
-    case diagnostics(Bool)
+    /// Enables or disables text subtitle interception and delivery.
+    case setTextSubtitleInterceptionEnabled(Bool)
+    /// Enables or disables detailed diagnostics sampling.
+    case setDiagnosticsEnabled(Bool)
     /// Sets a caller-owned native property.
-    case property(String, String)
+    case setProperty(String, to: String)
     /// Executes a validated native command.
-    case native([String])
+    case executeCommand(String, arguments: [String] = [])
     /// Adds an external track, optionally selecting it in a subtitle role.
-    case externalTrack(URL, type: MPVTrackType, select: Bool, role: MPVSubtitleRole?)
+    case loadExternalTrack(URL, type: MPVTrackType, select: Bool = true, subtitleRole: MPVSubtitleRole? = nil)
     /// Clears the last recoverable error without changing a failed lifecycle.
-    case clearError
+    case clearLastError
 }
 
 /// Identifies one accepted operation and the load generation it addresses.
@@ -58,103 +61,150 @@ public struct MPVSessionOperation: Equatable, Sendable {
 
 public extension MPVSession {
 
-    /// Returns the most recent copied state after pending native operations finish.
+    /// The most recent copied playback state.
+    ///
+    /// Access waits for previously enqueued session work to finish.
     var snapshot: MPVSessionSnapshot {
         queue.sync { latestSnapshot }
     }
 
     package func closeImmediately() {
         guard !isClosed else { return }
+
         isClosed = true
         latestSnapshot.requestedVideoFeatures = nil
         eventDrainSource.cancel()
         destroyHandle(preservePlayback: false)
+
         if !latestSnapshot.isClosed {
             record(.state(.stopped))
         }
+
         renderTarget = nil
+
         for observer in observers.values {
             observer.finish()
         }
+
         observers.removeAll()
         updateContinuation.finish()
     }
 
-    /// Enqueues a command and returns its stable identity. Native work remains
-    /// serialized independently of the caller's UI executor.
+    /// Submits a command and returns its operation identifier and load generation.
+    ///
+    /// Submission waits for previously enqueued session work. Acceptance does not
+    /// confirm native completion. Observe ``makeEventStream()`` for results and playback errors.
+    ///
+    /// - Throws: ``MPVPlayerError/clientUnavailable`` if the session is closed.
     @discardableResult
     func send(_ command: MPVSessionCommand) throws -> MPVSessionOperation {
         try queue.sync {
             guard !isClosed else { throw MPVPlayerError.clientUnavailable }
+
             let id = nextOperationID
+
             nextOperationID &+= 1
+
             var generation = currentGeneration
+
             switch command {
-            case let .load(url, autoPlay, startTime):
+            case let .load(url, playAutomatically, startTime):
                 generation &+= 1
-                load(url, autoPlay: autoPlay, startTime: startTime, generation: generation)
+                load(url, playAutomatically: playAutomatically, startTime: startTime, generation: generation)
+
             case .play: play()
+
             case .pause: pause()
+
             case .togglePlayback: togglePlayback()
+
             case .stop:
                 generation &+= 1
                 stop(generation: generation)
+
             case let .seek(time): seek(to: time)
-            case let .seekRelative(time): seek(by: time)
-            case let .frameStep(backward): frameStep(backward: backward)
-            case let .volume(value): setVolume(value)
-            case let .mute(value): setMuted(value)
+
+            case let .seekByOffset(time): seek(by: time)
+
+            case .stepForward: frameStep(backward: false)
+
+            case .stepBackward: frameStep(backward: true)
+
+            case let .setVolume(value): setVolume(value)
+
+            case let .setMuted(value): setMuted(value)
+
             case .toggleMute: toggleMute()
-            case let .playbackRate(value): setPlaybackRate(value)
+
+            case let .setPlaybackRate(value): setPlaybackRate(value)
+
             case let .selectTrack(value): selectTrack(value)
+
             case let .selectSubtitle(value, role): selectSubtitle(value, for: role)
+
             case let .disableTrack(value): disableTrack(value)
-            case let .interceptTextSubtitles(value): setTextSubtitleInterceptionEnabled(value)
-            case let .diagnostics(value): setDiagnosticsEnabled(value)
-            case let .property(name, value): performPropertySet(name, value: value)
-            case let .native(arguments):
-                if let name = arguments.first {
-                    performCommand(name, arguments: Array(arguments.dropFirst()))
-                }
-            case let .externalTrack(url, type, select, role):
+
+            case let .setTextSubtitleInterceptionEnabled(value): setTextSubtitleInterceptionEnabled(value)
+
+            case let .setDiagnosticsEnabled(value): setDiagnosticsEnabled(value)
+
+            case let .setProperty(name, value): performPropertySet(name, value: value)
+
+            case let .executeCommand(name, arguments):
+                performCommand(name, arguments: arguments)
+
+            case let .loadExternalTrack(url, type, select, role):
                 loadExternalTrack(url, type: type, select: select, subtitleRole: role ?? .primary)
-            case .clearError:
+
+            case .clearLastError:
                 queue.async { [weak self] in
                     guard let self, self.latestSnapshot.state.error == nil else { return }
+
                     self.latestSnapshot.error = nil
                     self.record(.state(self.latestSnapshot.state))
                 }
             }
+
             return MPVSessionOperation(id: id, generation: generation)
         }
     }
 
     /// Accumulates renderer requests for the current source without changing its output.
+    @discardableResult
     func requestVideoFeatures(_ features: Set<MPVVideoFeature>) -> MPVVideoFeatureRequestResult {
         queue.sync {
-            guard !isClosed else { return latestSnapshot.videoFeatureCapabilities.resolve(features) }
+            guard !isClosed else { return latestSnapshot.videoFeatureCapabilities.requestResult(for: features) }
+
             latestSnapshot.requestedVideoFeatures = (latestSnapshot.requestedVideoFeatures ?? []).union(features)
             record(.state(latestSnapshot.state))
-            return latestSnapshot.videoFeatureCapabilities.resolve(latestSnapshot.requestedVideoFeatures ?? features)
+
+            return latestSnapshot.videoFeatureCapabilities.requestResult(for: latestSnapshot.requestedVideoFeatures ?? features)
         }
     }
 
-    /// Subscribes to complete ordered states and logs, starting with the current state.
-    /// Cancelling iteration removes the observer; closing finishes every stream.
-    func events() -> AsyncStream<MPVSessionEvent> {
+    /// Creates a stream of complete playback states and log messages in delivery order.
+    ///
+    /// Each stream starts with the current state and buffers all subsequent events.
+    /// Canceling iteration removes the observer. Closing the session finishes every stream.
+    /// A stream created after closing yields the final state and then finishes.
+    func makeEventStream() -> AsyncStream<MPVSessionEvent> {
         let id = UUID()
         let (stream, continuation) = AsyncStream<MPVSessionEvent>.makeStream()
+
         continuation.onTermination = { [weak self] _ in
             self?.queue.async { [weak self] in self?.observers.removeValue(forKey: id) }
         }
+
         queue.sync {
             continuation.yield(.snapshot(latestSnapshot))
+
             if isClosed {
                 continuation.finish()
             } else {
                 observers[id] = continuation
             }
         }
+
         return stream
     }
 

@@ -15,6 +15,7 @@ struct MPVPlayerConfigurationOutputTests {
     @Test
     func `rendering options never choose the default renderer`() {
         let shader = URL(fileURLWithPath: "/tmp/benchmark-shader.glsl")
+
         let configurations = [
             MPVPlayerConfiguration(additionalOptions: ["vf": "hflip"]),
             MPVPlayerConfiguration(additionalOptions: ["unknown-rendering-option": "yes"]),
@@ -30,6 +31,7 @@ struct MPVPlayerConfigurationOutputTests {
             MPVPlayerConfiguration(sdrOutput: .compatibility8Bit),
             MPVPlayerConfiguration(sdrOutput: .highPrecision),
         ]
+
         for configuration in configurations {
             #expect(configuration.videoOutput == .sampleBuffer)
         }

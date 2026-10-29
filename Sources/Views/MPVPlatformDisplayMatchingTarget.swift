@@ -67,10 +67,12 @@ extension MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
             return true
         }
         guard let format = content.makeFormatDescription() else { return false }
+
         manager.preferredDisplayCriteria = AVDisplayCriteria(
             refreshRate: content.refreshRate,
             formatDescription: format
         )
+
         return true
     }
 
@@ -84,6 +86,7 @@ extension MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
                 MainActor.assumeIsolated { onChange() }
             }
         }
+
         return {
             for observation in observations {
                 NotificationCenter.default.removeObserver(observation)

@@ -12,6 +12,7 @@ package extension MPVSession {
     private static let wakeupCallback: @convention(c) (UnsafeMutableRawPointer?) -> Void = {
         context in
         guard let context else { return }
+
         let engine = Unmanaged<WeakBox<MPVSession>>.fromOpaque(context).takeUnretainedValue()
         engine.value?.scheduleEventDrain()
     }
@@ -37,20 +38,25 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
 
         guard !isClosed, handle == nil, !didRejectNativeOutput, allowStopped || !isStoppedForResourceRelease else { return }
+
         resetMediaObservations()
         liveConfigurationFailure = nil
         fatalPlaybackError = nil
+
         guard let newHandle = mpv_create() else {
             publishFatalError(
                 .clientCreationFailed,
                 globally: true
             )
+
             return
         }
 
         handle = newHandle
+
         let contextPointer = Unmanaged.passUnretained(wakeupContext).toOpaque()
         mpv_set_wakeup_callback(newHandle, Self.wakeupCallback, contextPointer)
+
         // Request diagnostics before initialization so Vulkan/libplacebo's
         // one-time surface enumeration and selected format are observable.
         // Native capability rejection is an internal output contract, even
@@ -67,6 +73,7 @@ package extension MPVSession {
         do {
             if let renderTarget {
                 var windowID = renderTarget.layerAddress
+
                 try check(
                     mpv_set_option(newHandle, "wid", MPV_FORMAT_INT64, &windowID),
                     context: "Set render surface"
@@ -75,20 +82,25 @@ package extension MPVSession {
 
             try check(platform.prepareHandle(newHandle), context: "Prepare native session")
             try setInitialOption("vo", value: renderTarget == nil ? "null" : platform.videoOutputName(videoOutput))
+
             for (name, value) in platform.initialOptions(configuration, renderTarget, videoOutput) {
                 try setInitialOption(name, value: value)
             }
+
             for (name, value) in platform.optionalInitialOptions(configuration) {
                 let status = mpv_set_option_string(newHandle, name, value)
+
                 if status == MPV_ERROR_OPTION_NOT_FOUND.rawValue {
                     presentationFallbackReason = .unsupportedSubtitleLuminance
                 } else {
                     try check(status, context: "Set \(name)")
                 }
             }
+
             try setInitialOption("input-default-bindings", value: "no")
             try setInitialOption("subs-match-os-language", value: "yes")
             try setInitialOption("subs-fallback", value: "yes")
+
             if isTextSubtitleInterceptionEnabled {
                 try setInitialOption("sub-text-intercept", value: "yes")
             }
@@ -98,14 +110,17 @@ package extension MPVSession {
                 backend: videoOutput,
                 lowPowerMode: platform.lowPowerMode()
             )
+
             for (name, value) in renderingResolution?.options ?? [:] {
                 try setInitialOption(name, value: value)
             }
+
             for path in renderingResolution?.shaderPaths ?? [] {
                 // The append operation disables string-list splitting, preserving
                 // literal colons and backslashes in local shader paths.
                 try setInitialOption("glsl-shaders-append", value: path)
             }
+
             for (name, value) in MPVRenderingOptions
                 .deinterlaceOptions(videoOutput == .nativeSurface ? .init() : configuration.deinterlace)
             {
@@ -115,22 +130,28 @@ package extension MPVSession {
             try setInitialOption("cache", value: configuration.cache.mode.rawValue)
             try setInitialOption("demuxer-max-bytes", value: String(configuration.cache.maximumBytes))
             try setInitialOption("demuxer-max-back-bytes", value: String(configuration.cache.maximumBackBytes))
+
             try setInitialOption(
                 "cache-secs",
-                value: Self.format(configuration.networkCacheSeconds)
+                value: Self.format(configuration.networkCacheDuration)
             )
+
             try setInitialOption("cache-pause", value: "yes")
+
             try setInitialOption(
                 "cache-pause-initial",
-                value: configuration.initialBufferSeconds > .zero ? "yes" : "no"
+                value: configuration.initialBufferDuration > .zero ? "yes" : "no"
             )
+
             try setInitialOption(
                 "cache-pause-wait",
-                value: Self.format(configuration.initialBufferSeconds)
+                value: Self.format(configuration.initialBufferDuration)
             )
-            try setInitialOption("loop-file", value: configuration.loop ? "inf" : "no")
+
+            try setInitialOption("loop-file", value: configuration.isLoopingEnabled ? "inf" : "no")
             try setInitialOption("volume", value: Self.format(configuration.volume))
             try setInitialOption("speed", value: Self.format(configuration.playbackRate))
+
             // Transport-stream seeks can land between keyframes. Decode from
             // earlier packets so precise seeks can reach the requested frame
             // instead of waiting for the next keyframe beyond the target.
@@ -153,6 +174,7 @@ package extension MPVSession {
 
             // Play audio without creating a video window or decoder.
             try setInitialOption("force-window", value: "no")
+
             if renderTarget == nil {
                 try setInitialOption("vid", value: "no")
             }
@@ -163,10 +185,12 @@ package extension MPVSession {
             publishFatalError(error, globally: true)
             mpv_destroy(newHandle)
             handle = nil
+
             return
         }
 
         lifecycleDiagnostics.handlesCreated &+= 1
+
         if let renderTarget {
             publishRenderSurfaceDiagnostic(
                 "mpv renderer attached output=\(renderTarget.drawableWidth)x"
@@ -186,10 +210,12 @@ package extension MPVSession {
     @discardableResult
     func withNativeSurfaceRetirement(_ body: () -> Void) -> Bool {
         dispatchPrecondition(condition: .onQueue(queue))
+
         let layer = videoOutput == .metal ? renderTarget?.layerOwner as? any MPVNativeSurfaceOwner : nil
         layer?.beginNativeResizeTransaction()
         defer { layer?.endNativeResizeTransaction() }
         body()
+
         return layer?.invalidateDrawablePoolAfterNativeTeardown() ?? false
     }
 
@@ -199,30 +225,43 @@ package extension MPVSession {
         diagnosticsTimer?.cancel()
         diagnosticsTimer = nil
         completePiPSeek(false)
+
         // A deferred load has no native session to retire. Preserve its
         // pending state across surface changes, but fully clear it on shutdown.
         if handle == nil, preservePlayback {
             return
         }
+
         if handle != nil, preservePlayback, isFileLoaded || isLoading {
             lastPosition =
                 pendingSeekAfterLoad
                     ?? getDouble("time-pos").flatMap(Duration.init(mpvSeconds:))
                     ?? lastPosition
+
             pendingStartTime = lastPosition
             pendingSeekAfterLoad = nil
+
             if !isDisplaySwitchInProgress {
                 shouldAutoPlay = !(getFlag("pause") ?? isPaused)
             }
+
             needsSourceLoad = sourceURL != nil
             snapshotRuntimeProperties()
             pendingExternalTracks = externalTracks
         }
 
         if let oldHandle = handle {
+            if pendingPreloadHookID != nil {
+                // Abort before releasing the hook. Teardown must never start
+                // the decoders of an item that was waiting for a surface.
+                _ = runCommand(["stop"])
+                releasePendingPreload()
+            }
+
             handle = nil
             mpv_set_wakeup_callback(oldHandle, nil, nil)
             mpv_wakeup(oldHandle)
+
             withNativeSurfaceRetirement {
                 if alreadyShuttingDown {
                     mpv_destroy(oldHandle)
@@ -230,8 +269,10 @@ package extension MPVSession {
                     mpv_terminate_destroy(oldHandle)
                 }
             }
+
             lifecycleDiagnostics.handlesDestroyed &+= 1
         }
+
         clearTextSubtitleSnapshot()
 
         isLoading = false

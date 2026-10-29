@@ -9,13 +9,16 @@ enum ExampleDisplayFormat {
         guard let duration, duration >= .zero else { return "—" }
 
         let wholeSeconds = Duration.seconds(duration.components.seconds)
+
         let pattern: Duration.TimeFormatStyle.Pattern =
             wholeSeconds >= .seconds(3600) ? .hourMinuteSecond : .minuteSecond
+
         return wholeSeconds.formatted(.time(pattern: pattern))
     }
 
     static func dimensions(width: Int, height: Int) -> String {
         guard width > 0, height > 0 else { return "—" }
+
         return "\(width)×\(height)"
     }
 
@@ -27,31 +30,39 @@ enum ExampleDisplayFormat {
         if framesPerSecond.rounded() == framesPerSecond {
             return "\(Int(framesPerSecond)) fps"
         }
+
         return "\(number(framesPerSecond, fractionDigits: 2)) fps"
     }
 
     static func dataRate(_ bytesPerSecond: Int64) -> String {
         let nonnegativeRate = max(0, bytesPerSecond)
+
         if nonnegativeRate >= 1_000_000 {
             return "\(number(Double(nonnegativeRate) / 1_000_000, fractionDigits: 1)) MB/s"
         }
+
         if nonnegativeRate >= 1000 {
             return "\(number(Double(nonnegativeRate) / 1000, fractionDigits: 1)) KB/s"
         }
+
         return "\(nonnegativeRate) B/s"
     }
 
     static func bytes(_ byteCount: Int64?) -> String {
         guard let byteCount, byteCount >= 0 else { return "—" }
+
         if byteCount >= 1_000_000_000 {
             return "\(number(Double(byteCount) / 1_000_000_000, fractionDigits: 2)) GB"
         }
+
         if byteCount >= 1_000_000 {
             return "\(number(Double(byteCount) / 1_000_000, fractionDigits: 1)) MB"
         }
+
         if byteCount >= 1000 {
             return "\(number(Double(byteCount) / 1000, fractionDigits: 1)) KB"
         }
+
         return "\(byteCount) B"
     }
 
@@ -62,11 +73,13 @@ enum ExampleDisplayFormat {
 
     static func decimal(_ value: Double?, suffix: String = "") -> String {
         guard let value, value.isFinite else { return "—" }
+
         let rendered: String = if value.rounded() == value {
             "\(Int(value))"
         } else {
             number(value, fractionDigits: 2)
         }
+
         return suffix.isEmpty ? rendered : "\(rendered) \(suffix)"
     }
 
@@ -110,24 +123,31 @@ enum ExampleDisplayFormat {
 
     static func track(_ track: MPVMediaTrack) -> String {
         let values: [String?] = [track.title, track.language, track.codec]
+
         var parts: [String] =
             values
                 .compactMap { value -> String? in
                     guard let value, !value.isEmpty else { return nil }
+
                     return value
                 }
+
         if track.isDefault {
             parts.append("Default")
         }
+
         if track.isForced {
             parts.append("Forced")
         }
+
         if track.isExternal {
             parts.append("External")
         }
+
         if let role = track.subtitleRole {
             parts.append(role == .primary ? "Primary" : "Secondary")
         }
+
         return parts.isEmpty ? "Track \(track.mpvID)" : parts.joined(separator: " · ")
     }
 

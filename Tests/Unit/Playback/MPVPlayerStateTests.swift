@@ -32,11 +32,12 @@ struct MPVPlayerStateTests {
     @Test
     func `player reflects configuration before surface attachment`() {
         let configuration = MPVPlayerConfiguration(
-            autoPlay: false,
+            automaticallyPlays: false,
             hdrPolicy: .disabled,
             playbackRate: 1.5,
             volume: 42
         )
+
         let player = MPVPlayer(configuration: configuration)
 
         #expect((player.configuration) == configuration)
@@ -79,17 +80,20 @@ struct MPVPlayerStateTests {
         #expect((player.lastError) == nil)
 
         player.setProperty(" volume ", to: "0")
+
         for _ in 0 ..< 20 {
             if player.lastError != nil {
                 break
             }
+
             await Task.yield()
         }
 
         #expect((player.volume) == 42)
         #expect(player.lastError == .reservedProperty(name: "volume"))
+
         #expect(
-            (player.lastError?.localizedDescription)
+            (player.lastError?.message)
                 == "The mpv property 'volume' is managed by MPVUI."
         )
     }
@@ -98,16 +102,18 @@ struct MPVPlayerStateTests {
     @Test
     func `command errors preserve native code and context without failing playback`() async throws {
         let player = MPVPlayer()
-        player.command("seek", arguments: ["10"])
+        player.executeCommand("seek", arguments: ["10"])
 
         for _ in 0 ..< 100 {
             if player.lastError != nil {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(10))
         }
 
         let error = try #require(player.lastError)
+
         guard case let .commandFailed(context, code, message) = error else {
             Issue.record("Expected a command error, got \(error)")
             return

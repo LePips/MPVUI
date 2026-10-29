@@ -23,6 +23,7 @@ extension MPVPlayerSurface: PlatformViewRepresentable {
         platformView.swiftUISourceWasDismantled()
 
         guard shouldRestorePreviousSurface else { return }
+
         DispatchQueue.main.async {
             MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
         }
@@ -32,12 +33,14 @@ extension MPVPlayerSurface: PlatformViewRepresentable {
         let platformView = MPVPlatformVideoPlayer(player: player)
         updateOverlay(platformView)
         MPVPlayerSurfaceRegistry.shared.register(platformView, for: player)
+
         platformView.addSubview(
             MPVPlayerSurfaceLifecycleObserver(
                 surface: platformView,
                 player: player
             )
         )
+
         return platformView
     }
 

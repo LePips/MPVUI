@@ -68,7 +68,7 @@ val verifyNative by tasks.registering {
         for (abi in listOf("arm64-v8a", "x86_64")) {
             val folder = nativeRoot.dir("jniLibs/$abi").asFile
             val manifestFile = nativeRoot.file("assets/mpvui/build-$abi.json").asFile
-            check(manifestFile.isFile) { "Build both native ABIs with make build-android" }
+            check(manifestFile.isFile) { "Build both native ABIs with make build PLATFORM=android" }
             val manifest = JsonSlurper().parse(manifestFile) as Map<*, *>
             val inventory = manifest["libraries"] as Map<*, *>
             check(inventory.keys.containsAll(listOf("libmpv.so", "libmpvui.so", "libMPVCoreAndroid.so", "libswiftCore.so", "libc++_shared.so"))) {
@@ -81,7 +81,7 @@ val verifyNative by tasks.registering {
                 val library = folder.resolve(name as String)
                 check(library.isFile) { "Missing $abi/$name" }
                 val actual = MessageDigest.getInstance("SHA-256").digest(library.readBytes()).joinToString("") { "%02x".format(it) }
-                check(actual == expected) { "Checksum mismatch for $abi/$name; run make build-android" }
+                check(actual == expected) { "Checksum mismatch for $abi/$name; run make build PLATFORM=android" }
             }
         }
     }

@@ -5,7 +5,7 @@ import UIKit
 
 typealias PlatformColor = UIColor
 /// The UIKit view type used by the video surface.
-public typealias PlatformView = UIView
+public typealias MPVPlatformView = UIView
 typealias PlatformViewRepresentable = UIViewRepresentable
 typealias PlatformWindow = UIWindow
 #elseif canImport(AppKit)
@@ -14,7 +14,7 @@ import SwiftUI
 
 typealias PlatformColor = NSColor
 /// The AppKit view type used by the video surface.
-public typealias PlatformView = NSView
+public typealias MPVPlatformView = NSView
 typealias PlatformViewRepresentable = NSViewRepresentable
 typealias PlatformWindow = NSWindow
 #endif

@@ -25,8 +25,10 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
     /// Explicitly clear ICC state when automatic system conversion owns output.
     var options: [(String, String)] {
         let referenceWhite = status.referenceWhite ?? 203
+
         let calibrated = status.conversionOwner == .libplaceboCalibratedICC
             || status.conversionOwner == .libplaceboCalibratedLUT
+
         return [
             ("target-prim", status.targetPrimaries ?? "auto"),
             ("target-trc", status.targetTransfer ?? "auto"),
@@ -77,6 +79,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
         let management = configuration.colorManagement
         let headroom = outputHeadroom.isFinite ? max(1, outputHeadroom) : 1
         var fallback: MPVRenderColorStatus.FallbackReason?
+
         if case let .calibratedLUT(url, input) = management.displayProfile {
             if !supportsCalibratedICC {
                 fallback = .calibratedICCRequiresMacOS
@@ -106,6 +109,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
                 fallback = .currentDisplayProfileUnavailable
             }
         }
+
         if case let .calibratedICC(url, intent) = management.displayProfile {
             if !supportsCalibratedICC {
                 fallback = .calibratedICCRequiresMacOS
@@ -133,6 +137,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
                 fallback = .currentDisplayProfileUnavailable
             }
         }
+
         if native {
             return Self(
                 iccIntent: .relativeColorimetric,
@@ -148,12 +153,15 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
                 usesExtendedDynamicRange: false
             )
         }
+
         let wide = usesExtendedDynamicRange || (supportsWideGamut && configuration.sdrOutput != .compatibility8Bit)
         let float = usesExtendedDynamicRange || wide || configuration.sdrOutput == .highPrecision
         let primaries = wide ? "display-p3" : "bt.709"
         let transfer = float ? "linear" : "srgb"
+
         let spaceName = wide ? CGColorSpace.extendedLinearDisplayP3
             : (float ? CGColorSpace.extendedLinearSRGB : CGColorSpace.sRGB)
+
         return Self(
             iccIntent: .relativeColorimetric,
             layerColorSpace: CGColorSpace(name: spaceName)!,
@@ -199,7 +207,9 @@ struct MPVCalibratedDisplayProfile {
             isValidLUT = Self.validateLUT(url)
             return
         }
+
         isValidLUT = false
+
         guard case let .calibratedICC(url, _) = policy,
               url.isFileURL,
               let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
@@ -212,6 +222,7 @@ struct MPVCalibratedDisplayProfile {
             colorSpace = nil
             return
         }
+
         colorSpace = profile
     }
 
@@ -221,55 +232,72 @@ struct MPVCalibratedDisplayProfile {
               data.count <= 16 * 1024 * 1024,
               let text = String(data: data, encoding: .utf8)
         else { return false }
+
         var size: Int?
         var entries = 0
         var domains: Set<String> = []
+
         // Match the pinned native cube parser, including its narrower numeric
         // grammar. Accepting a file it rejects would leave the identity display
         // contract active without a calibration LUT.
         func number(_ token: Substring) -> Float? {
             guard token.allSatisfy({ "0123456789.-+e".contains($0) }),
                   let value = Float(token), value.isFinite else { return nil }
+
             return value
         }
+
         for rawLine in text.split(separator: "\n") {
             let line = rawLine.last == "\r" ? rawLine.dropLast() : rawLine[...]
+
             if line.allSatisfy({ $0 == " " || $0 == "\t" }) {
                 continue
             }
+
             if entries == 0, line.hasPrefix("#") || line.hasPrefix("TITLE ") {
                 continue
             }
+
             let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
             guard let first = parts.first else { continue }
+
             if first == "DOMAIN_MIN" || first == "DOMAIN_MAX" {
                 // The native parser treats DOMAIN as a table-output rescale,
                 // not an input-domain transform. Only unit RGB is our contract.
                 let domainParts = line.split(separator: " ", omittingEmptySubsequences: false)
                 let expected: Float = first == "DOMAIN_MIN" ? 0 : 1
+
                 guard entries == 0, domains.insert(String(first)).inserted,
                       domainParts.count == 4, domainParts.first == first,
                       domainParts.dropFirst().allSatisfy({ number($0) == expected })
                 else { return false }
+
                 continue
             }
+
             if first == "LUT_3D_SIZE" {
                 guard entries == 0, size == nil, parts.count == 2,
                       let value = Int(parts[1]), (2 ... 65).contains(value),
                       line == "LUT_3D_SIZE \(value)" else { return false }
+
                 size = value
                 continue
             }
+
             guard size != nil, parts.count == 3, parts.allSatisfy({ number($0) != nil }),
                   line.allSatisfy({ "0123456789.-+e \t".contains($0) }) else { return false }
+
             if entries == 0 {
                 // Native header parsing recognizes the first table row only
                 // when its very first byte is a digit or minus sign.
                 guard let initial = line.first, "0123456789-".contains(initial) else { return false }
             }
+
             entries += 1
         }
+
         guard let size else { return false }
+
         return entries == size * size * size
     }
 }

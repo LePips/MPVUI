@@ -1,7 +1,7 @@
 /// Requested native decoder strategy.
 public enum MPVHardwareDecoding: String, CaseIterable, Equatable, Sendable {
 
-    /// Selects a safe hardware decoder, preferring VideoToolbox for Metal output.
+    /// Selects a safe hardware decoder supported by the platform and video output.
     case automatic = "auto-safe"
 
     /// Requests Apple's VideoToolbox decoder.
@@ -23,7 +23,7 @@ public enum MPVHDRPolicy: String, CaseIterable, Equatable, Sendable {
     /// Requests HDR output whenever the platform permits it.
     case always
 
-    /// Disables HDR output and tone-map HDR sources to SDR.
+    /// Disables HDR output and tone-maps HDR sources to SDR.
     case disabled
 
     /// Requests HDR with the system's constrained brightness policy when supported.
@@ -67,12 +67,12 @@ public enum MPVVideoOutput: String, CaseIterable, Equatable, Sendable {
     /// Full `gpu-next` rendering through Metal and MoltenVK.
     case metal
 
-    /// Native AVFoundation output with iOS PiP. Requires the native-output Libmpv build.
+    /// Native AVFoundation output with iOS picture in picture. Requires the native-output Libmpv build.
     /// AVFoundation handles color conversion, bypassing `gpu-next` shaders and tone mapping.
     /// Unsupported native formats report a playback error.
     case sampleBuffer
 
-    /// Android gpu-next rendering through OpenGL ES.
+    /// Android `gpu-next` rendering through OpenGL ES.
     case gpu
 
     /// Android MediaCodec direct surface presentation.

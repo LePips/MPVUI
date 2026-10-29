@@ -89,6 +89,12 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         end = vo_source.index("\n}", start) + 2
         upload_functions.append(vo_source[start:end])
     (work / "video/out/upload_cache_functions.h").write_text("\n\n".join(upload_functions))
+    validation_functions = []
+    for signature in ["static void report_unsupported_dovi(", "static bool validate_native_dovi_frame("]:
+        start = vo_source.index(signature)
+        end = vo_source.index("\n}", start) + 2
+        validation_functions.append(vo_source[start:end])
+    (work / "video/out/native_dovi_validation.h").write_text("\n\n".join(validation_functions))
     start = vo_source.index("// Presentation pool capacity")
     end = vo_source.index("// Create pixel-buffer pool.", start)
     (work / "video/out/pool_functions.h").write_text(vo_source[start:end])
@@ -105,7 +111,12 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         subprocess.run(["git", "apply", str(root / patch["path"])], cwd=ffwork, env=env, check=True)
     vt_source = (ffwork / "libavcodec/videotoolbox.c").read_text()
     dovi_functions = []
-    for function in ["videotoolbox_dovi_is_apple_hevc", "videotoolbox_dovi_p7_allowed", "videotoolbox_dovi_rpu_matches"]:
+    for function in [
+        "videotoolbox_dovi_configure_from_metadata",
+        "videotoolbox_dovi_is_apple_hevc",
+        "videotoolbox_dovi_p7_allowed",
+        "videotoolbox_dovi_rpu_matches",
+    ]:
         start = vt_source.index("static int " + function + "(")
         end = vt_source.index("\n}", start) + 2
         dovi_functions.append(vt_source[start:end])
@@ -198,6 +209,7 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         ("metadata", "m"),
         ("hdr10plus", "m"),
         ("dovi", "c"),
+        ("dovi_validation", "m"),
     ]:
         output = work / name
         command = [
@@ -224,12 +236,12 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         if name == "hdr10plus":
             command += [str(ffobject), str(ffmpeg / "lib/libavutil.a")]
         if name == "dovi":
-            command += dovi_objects + ["-Wl,-dead_strip", str(ffmpeg / "lib/libavutil.a")]
+            command += dovi_objects + ["-Wl,-dead_strip", str(ffmpeg / "lib/libavcodec.a"), str(ffmpeg / "lib/libavutil.a")]
         if ext == "m":
             for framework in ["Foundation", "CoreVideo", "CoreMedia", "CoreGraphics", "CoreImage"]:
                 command += ["-framework", framework]
         subprocess.run(command, check=True)
         arguments = [str(output)]
         if name == "dovi":
-            arguments += [str(media / "dolby-vision-p5.rpu"), str(media / "dolby-vision-p81.rpu")]
+            arguments += [str(media / "dolby-vision-p5.rpu"), str(media / "dolby-vision-p81.rpu"), str(media / "dolby-vision-p7.rpu")]
         subprocess.run(arguments, check=True)

@@ -10,11 +10,14 @@ struct MPVNodeValueTests {
     func `absent and malformed native lists produce empty owned collections`(format: UInt32) {
         var node = mpv_node()
         node.format = mpv_format(rawValue: format)
+
         let empty: MPVNodeValue = node.format == MPV_FORMAT_NODE_MAP ? .map([:]) : .array([])
 
         #expect(MPVNodeValue(copying: node) == empty)
+
         var list = mpv_node_list()
         list.num = 2
+
         withUnsafeMutablePointer(to: &list) { pointer in
             node.u.list = pointer
 
@@ -28,25 +31,31 @@ struct MPVNodeValueTests {
     @Test
     func `byte arrays own their bytes after the native event storage changes`() {
         var bytes: [UInt8] = [0, 17, 128, 255]
+
         let copied = bytes.withUnsafeMutableBytes { buffer -> MPVNodeValue in
             var byteArray = mpv_byte_array()
             byteArray.data = buffer.baseAddress
             byteArray.size = buffer.count
+
             return withUnsafeMutablePointer(to: &byteArray) { pointer in
                 var node = mpv_node()
                 node.format = MPV_FORMAT_BYTE_ARRAY
                 node.u.ba = pointer
+
                 return MPVNodeValue(copying: node)
             }
         }
         bytes[1] = 99
 
         #expect(copied == .data(Data([0, 17, 128, 255])))
+
         var empty = mpv_node()
         empty.format = MPV_FORMAT_BYTE_ARRAY
 
         #expect(MPVNodeValue(copying: empty) == .data(Data()))
+
         var byteArray = mpv_byte_array()
+
         withUnsafeMutablePointer(to: &byteArray) { pointer in
             empty.u.ba = pointer
 
@@ -59,20 +68,25 @@ struct MPVNodeValueTests {
         var value = mpv_node()
         value.format = MPV_FORMAT_INT64
         value.u.int64 = 42
+
         var values = [value, value]
         var name = Array("answer".utf8CString)
+
         let copied = name.withUnsafeMutableBufferPointer { text in
             var keys: [UnsafeMutablePointer<CChar>?] = [nil, text.baseAddress]
+
             return keys.withUnsafeMutableBufferPointer { keys in
                 values.withUnsafeMutableBufferPointer { values in
                     var list = mpv_node_list()
                     list.num = 2
                     list.values = values.baseAddress
                     list.keys = keys.baseAddress
+
                     return withUnsafeMutablePointer(to: &list) { pointer in
                         var node = mpv_node()
                         node.format = MPV_FORMAT_NODE_MAP
                         node.u.list = pointer
+
                         return MPVNodeValue(copying: node)
                     }
                 }
@@ -90,7 +104,9 @@ struct MPVNodeValueTests {
         node.format = MPV_FORMAT_OSD_STRING
 
         #expect(MPVNodeValue(copying: node) == .none)
+
         var integer: Int64 = 1
+
         withUnsafeMutablePointer(to: &integer) { pointer in
             var property = mpv_event_property()
             property.format = MPV_FORMAT_NONE
@@ -98,6 +114,7 @@ struct MPVNodeValueTests {
 
             #expect(MPVNodeValue(copying: property) == nil)
         }
+
         #expect(MPVNodeValue.integer(-1).boolValue == true)
         #expect(MPVNodeValue.integer(0).boolValue == false)
         #expect(MPVNodeValue.string("1").boolValue == nil)
@@ -107,10 +124,12 @@ struct MPVNodeValueTests {
     @Test(arguments: [Int64.min, -1, 0, 2, Int64.max])
     func `integer property values own their value after native storage changes`(value: Int64) {
         var integer = value
+
         let copied = withUnsafeMutablePointer(to: &integer) { pointer in
             var property = mpv_event_property()
             property.format = MPV_FORMAT_INT64
             property.data = UnsafeMutableRawPointer(pointer)
+
             return MPVNodeValue(copying: property)
         }
         integer = value == 0 ? 1 : 0
@@ -121,10 +140,12 @@ struct MPVNodeValueTests {
     @Test(arguments: [Int32(0), 1, -1])
     func `flag property values own their value after native storage changes`(value: Int32) {
         var flag = value
+
         let copied = withUnsafeMutablePointer(to: &flag) { pointer in
             var property = mpv_event_property()
             property.format = MPV_FORMAT_FLAG
             property.data = UnsafeMutableRawPointer(pointer)
+
             return MPVNodeValue(copying: property)
         }
         flag = value == 0 ? 1 : 0
@@ -135,10 +156,12 @@ struct MPVNodeValueTests {
     @Test
     func `property event values survive their native storage being reused`() {
         var position = 12.5
+
         let copiedPosition = withUnsafeMutablePointer(to: &position) { pointer in
             var property = mpv_event_property()
             property.format = MPV_FORMAT_DOUBLE
             property.data = UnsafeMutableRawPointer(pointer)
+
             return MPVNodeValue(copying: property)
         }
         position = 30
@@ -148,12 +171,15 @@ struct MPVNodeValueTests {
         var node = mpv_node()
         node.format = MPV_FORMAT_INT64
         node.u.int64 = 42
+
         let copiedNode = withUnsafeMutablePointer(to: &node) { pointer in
             var property = mpv_event_property()
             property.format = MPV_FORMAT_NODE
             property.data = UnsafeMutableRawPointer(pointer)
+
             return MPVNodeValue(copying: property)
         }
+
         node.u.int64 = 99
 
         #expect(copiedNode == .integer(42))

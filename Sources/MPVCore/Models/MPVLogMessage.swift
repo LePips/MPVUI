@@ -7,7 +7,8 @@ public struct MPVLogMessage: Equatable, Sendable {
     public let level: MPVLogLevel
     /// The copied diagnostic text.
     public let message: String
-    /// Copies a native component, severity, and message into a value.
+
+    /// Creates a log message with its native component and severity.
     public init(prefix: String, level: MPVLogLevel, message: String) {
         self.prefix = prefix
         self.level = level

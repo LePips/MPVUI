@@ -15,6 +15,7 @@ struct TextSubtitleSnapshotTests {
             textAlignment: .right,
             writingDirection: .verticalGrowingLeft
         )
+
         let snapshot = TextSubtitleSnapshot(regions: [
             TextSubtitleRegion(text: "first"),
             TextSubtitleRegion(text: "second", placement: .webVTT(placement)),

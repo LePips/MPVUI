@@ -20,18 +20,20 @@ final class AndroidPlayer: Observable {
 
     init(configuration: MPVPlayerConfiguration = .init()) {
         let names = configuration.additionalOptions.keys.sorted()
+
         bridge = AndroidPlayerBridge(
-            autoPlay: configuration.autoPlay,
-            loop: configuration.loop,
+            automaticallyPlays: configuration.automaticallyPlays,
+            isLoopingEnabled: configuration.isLoopingEnabled,
             rate: configuration.playbackRate,
             volume: configuration.volume,
             start: configuration.startTime?.seconds ?? 0,
             hasStart: configuration.startTime != nil,
-            buffer: configuration.initialBufferSeconds.seconds,
-            cache: configuration.networkCacheSeconds.seconds,
+            buffer: configuration.initialBufferDuration.seconds,
+            cache: configuration.networkCacheDuration.seconds,
             optionNames: names,
             optionValues: names.map { configuration.additionalOptions[$0]! }
         )
+
         let session = MPVAndroidSession.consumeRetainedHandle(bridge.retainSession())!
         controller = MPVSessionController(session: session)
         pictureInPicture = MPVPictureInPictureController(bridge: bridge)
@@ -43,14 +45,20 @@ final class AndroidPlayer: Observable {
     // with Skip's registrar as well, preserving selective Compose invalidation.
     subscript<Value: Equatable>(dynamicMember path: KeyPath<MPVSessionController, Value>) -> Value {
         registrar.access(self, keyPath: \.[dynamicMember: path])
+
         if observed.insert(path).inserted {
             observe(path)
         }
+
         return controller[keyPath: path]
     }
 
-    func load(_ url: URL, autoPlay: Bool? = nil, startTime: Duration? = nil) {
-        controller.load(url, autoPlay: bridge.prepareLoad(autoPlay ?? controller.configuration.autoPlay), startTime: startTime)
+    func load(_ url: URL, playAutomatically: Bool? = nil, startTime: Duration? = nil) {
+        controller.load(
+            url,
+            playAutomatically: bridge.prepareLoad(playAutomatically ?? controller.configuration.automaticallyPlays),
+            startTime: startTime
+        )
     }
 
     func play() {
@@ -99,9 +107,11 @@ final class AndroidPlayer: Observable {
     private func observe(_ path: KeyPath<MPVSessionController, some Equatable>) {
         let invalidate: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self else { return }
+
             self.registrar.withMutation(of: self, keyPath: \.[dynamicMember: path]) {}
             self.observe(path)
         }
+
         withObservationTracking { _ = controller[keyPath: path] } onChange: {
             Task { await invalidate() }
         }
@@ -117,13 +127,17 @@ final class MPVPictureInPictureController {
     private(set) var isActive = false
     private(set) var isTransitioning = false
     private(set) var lastError: MPVPlayerError?
+
     @ObservationIgnored
     private let bridge: AndroidPlayerBridge
+
     init(bridge: AndroidPlayerBridge) {
         self.bridge = bridge
+
         bridge.observePictureInPicture { [weak self] supported, possible, active, transitioning, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+
                 self.isSupported = supported
                 self.isPossible = possible
                 self.isActive = active

@@ -23,18 +23,22 @@ struct MPVRenderingBenchmarkTests {
         let repetitions = min(10, max(1, Int(environment["MPVUI_BENCHMARK_REPETITIONS"] ?? "3") ?? 3))
         let presets: [MPVRenderingQuality.Preset] = [.battery, .balanced, .highQuality]
         var measurements: [[String: Any]] = []
+
         for sampleIndex in 0 ..< repetitions * presets.count {
             let repetition = sampleIndex / presets.count
             let preset = presets[(sampleIndex % presets.count + repetition) % presets.count]
+
             let player = MPVPlayer(configuration: .init(
-                autoPlay: true,
+                automaticallyPlays: true,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .disabled,
                 renderingQuality: .init(preset: preset),
                 sdrOutput: .compatibility8Bit,
                 videoOutput: .metal
             ))
+
             let surface = MPVPlatformVideoPlayer(player: player)
+
             let window = NSWindow(
                 contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
                 styleMask: [.titled],
@@ -47,18 +51,25 @@ struct MPVRenderingBenchmarkTests {
             surface.activateRenderingSurface()
             player.setDiagnosticsEnabled(true)
             player.load(media)
+
             for _ in 0 ..< 100 {
                 if player.state == .playing || player.lastError != nil {
                     break
                 }
+
                 try await Task.sleep(for: .milliseconds(50))
             }
+
             try #require(player.state == .playing)
+
             // Exclude shader compilation, decoder startup and the first statistics interval.
             try await Task.sleep(for: .seconds(1))
+
             let cpuStart = clock()
             let wallStart = ContinuousClock.now
+
             try await Task.sleep(for: .seconds(duration))
+
             let cpuSeconds = Double(clock() - cpuStart) / Double(CLOCKS_PER_SEC)
             let wallSeconds = wallStart.duration(to: .now).seconds
             let observed = player.playbackDiagnostics
@@ -69,6 +80,7 @@ struct MPVRenderingBenchmarkTests {
             #expect(player.mediaInformation.hdr.output.primaries == "bt.709")
             #expect(player.mediaInformation.hdr.output.transferFunction == .sRGB)
             #expect(player.mediaInformation.hdr.output.pixelFormat?.contains("8") == true)
+
             var sample: [String: Any] = [
                 "preset": preset.rawValue,
                 "repetition": repetition + 1,
@@ -102,6 +114,7 @@ struct MPVRenderingBenchmarkTests {
             window.contentView = nil
             window.orderOut(nil)
         }
+
         let report: [String: Any] = [
             "operatingSystem": ProcessInfo.processInfo.operatingSystemVersionString,
             "fixture": media.lastPathComponent,
@@ -119,9 +132,12 @@ struct MPVRenderingBenchmarkTests {
             """,
             "measurements": measurements,
         ]
+
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+
         let defaultOutput = TestPaths.repositoryRoot
             .appendingPathComponent(".build/renderer-benchmark.json")
+
         let output = environment["MPVUI_BENCHMARK_OUTPUT"].map { URL(fileURLWithPath: $0) } ?? defaultOutput
         try data.write(to: output, options: .atomic)
         print("Renderer benchmark: \(output.path)")

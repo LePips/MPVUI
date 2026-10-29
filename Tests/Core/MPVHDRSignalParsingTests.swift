@@ -41,6 +41,7 @@ struct MPVHDRSignalParsingTests {
             level: .error,
             message: "hevc: MPVUI_NATIVE_DOLBY_VISION_UNSUPPORTED: declared profile=7 cannot use the requested native Dolby Vision policy\n"
         )) == "declared profile=7 cannot use the requested native Dolby Vision policy")
+
         for channel in ["demux", "ffmpeg/demuxer", "vd"] {
             #expect(MPVSession.nativeOutputRejectionReason(MPVLogMessage(
                 prefix: channel,
@@ -61,6 +62,7 @@ struct MPVHDRSignalParsingTests {
         #expect(!MPVSession.nativeDiagnosticMatchesCurrentEntry(requested: 102, active: 101))
         #expect(!MPVSession.nativeDiagnosticMatchesCurrentEntry(requested: 102, active: nil))
         #expect(MPVSession.nativeDiagnosticMatchesCurrentEntry(requested: 102, active: 102))
+
         // A rejected native file can end before its diagnostic is drained.
         #expect(MPVSession.nativeDiagnosticMatchesCurrentEntry(requested: nil, active: nil))
     }
@@ -135,10 +137,12 @@ struct MPVHDRSignalParsingTests {
             "gamma": .string("pq"),
             "max-luma": .double(1000),
         ]))
+
         let output = MPVVideoSignalParser.parse(.map([
             "gamma": .string("srgb"),
             "primaries": .string("bt.709"),
         ]))
+
         let hdr = MPVHDRStatus(source: source, output: output)
 
         #expect(hdr.isHDRContent)

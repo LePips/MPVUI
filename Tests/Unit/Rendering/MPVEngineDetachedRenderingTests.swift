@@ -13,6 +13,7 @@ struct MPVEngineDetachedRenderingTests {
         engine.queue.sync { engine.renderTarget = original }
 
         #expect(await engine.resizeRenderTargetAndWait(width: 800, height: 450, forLayerAddress: 1))
+
         let resized = engine.queue.sync { engine.renderTarget }
 
         #expect(resized?.drawableWidth == 800 && resized?.drawableHeight == 450)
@@ -21,9 +22,11 @@ struct MPVEngineDetachedRenderingTests {
         #expect(resized?.matches(original) == false)
         #expect(await engine.resizeRenderTargetAndWait(width: 800, height: 450, forLayerAddress: 1))
         #expect(await !engine.resizeRenderTargetAndWait(width: 900, height: 600, forLayerAddress: 2))
+
         for size in [(0, 20), (20, 1), (Int.max, 20), (20, Int.max)] {
             #expect(await !engine.resizeRenderTargetAndWait(width: size.0, height: size.1, forLayerAddress: 1))
         }
+
         #expect(engine.queue.sync { engine.renderTarget === resized })
         #expect(await engine.renderOutputSize() == nil)
     }
@@ -59,6 +62,7 @@ struct MPVEngineDetachedRenderingTests {
         _ = await engine.lifecycleSnapshot()
 
         #expect(engine.queue.sync { engine.renderTarget == nil && engine.handle == nil })
+
         engine.queue.sync {
             engine.renderTarget = target()
             engine.detachCurrentRenderTargetSynchronously()

@@ -24,6 +24,7 @@ extension PlaybackBenchmarkView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black
+
             if let player = benchmark.mpv {
                 MPVVideoPlayer(player: player)
             } else if let player = benchmark.av {
@@ -63,6 +64,7 @@ extension BenchmarkAVSurface: UIViewRepresentable {
         let view = BenchmarkAVView()
         view.playerLayer.videoGravity = .resizeAspect
         view.playerLayer.player = player
+
         return view
     }
 
@@ -101,11 +103,13 @@ private struct PlaybackBenchmarkSettings {
 
     static var failureOutput: URL {
         let arguments = ProcessInfo.processInfo.arguments
+
         if let index = arguments.firstIndex(of: "--benchmark-output"), index + 1 < arguments.count,
            let output = try? outputURL(filename: arguments[index + 1])
         {
             return output
         }
+
         return documents.appendingPathComponent("Benchmarks/playback-benchmark-error-\(UUID().uuidString).json")
     }
 
@@ -126,7 +130,7 @@ private struct PlaybackBenchmarkSettings {
         .init(
             additionalOptions: options,
             audio: .init(audioSession: .hostManaged),
-            autoPlay: true,
+            automaticallyPlays: true,
             hardwareDecoding: softwareDecoding ? .disabled : .automatic,
             logLevel: .none,
             sdrOutput: sdrOutput,
@@ -142,6 +146,7 @@ private struct PlaybackBenchmarkSettings {
         components?.password = nil
         components?.query = nil
         components?.fragment = nil
+
         return [
             "player": player,
             "media": components?.string ?? media.lastPathComponent,
@@ -164,27 +169,35 @@ private struct PlaybackBenchmarkSettings {
         var options: [String: String] = [:]
         var software = false
         var index = 1
+
         while index < arguments.count {
             let key = arguments[index]
+
             if key == "--playback-benchmark" {
                 index += 1
                 continue
             }
+
             if key == "--benchmark-software-decoding" {
                 software = true
                 index += 1
                 continue
             }
+
             guard key.hasPrefix("--benchmark-") else { index += 1
                 continue
             }
             guard index + 1 < arguments.count else { throw BenchmarkFailure(message: "Missing value for \(key)") }
+
             let value = arguments[index + 1]
+
             if key == "--benchmark-option" {
                 let parts = value.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+
                 guard parts.count == 2, !parts[0].isEmpty else {
                     throw BenchmarkFailure(message: "Use --benchmark-option key=value")
                 }
+
                 options[String(parts[0])] = String(parts[1])
             } else {
                 guard [
@@ -198,49 +211,65 @@ private struct PlaybackBenchmarkSettings {
                 ].contains(key) else {
                     throw BenchmarkFailure(message: "Unknown benchmark argument \(key)")
                 }
+
                 values[key] = value
             }
+
             index += 2
         }
+
         player = values["--benchmark-player"] ?? "mpv"
         guard ["mpv", "avplayer"].contains(player) else { throw BenchmarkFailure(message: "Player must be mpv or avplayer") }
         guard let source = values["--benchmark-media"], !source.isEmpty else {
             throw BenchmarkFailure(message: "--benchmark-media is required")
         }
+
         let documents = Self.documents
+
         if let url = URL(string: source), let scheme = url.scheme {
             guard ["file", "http", "https"].contains(scheme.lowercased()) else {
                 throw BenchmarkFailure(message: "Media must be a file, HTTP, or HTTPS URL")
             }
+
             media = url
         } else if source.hasPrefix("/") {
             media = URL(fileURLWithPath: source)
         } else {
             media = documents.appendingPathComponent(source)
         }
+
         if media.isFileURL, !FileManager.default.fileExists(atPath: media.path) {
             throw BenchmarkFailure(message: "Media file does not exist: \(media.lastPathComponent)")
         }
+
         output = try Self.outputURL(filename: values["--benchmark-output"] ?? "playback-benchmark.json")
         seconds = Double(values["--benchmark-seconds"] ?? "30") ?? .nan
         warmup = Double(values["--benchmark-warmup"] ?? "5") ?? .nan
+
         guard seconds.isFinite, (2 ... 300).contains(seconds), warmup.isFinite, (0 ... 60).contains(warmup) else {
             throw BenchmarkFailure(message: "Sample must be 2–300 seconds and warmup 0–60 seconds")
         }
+
         requestedBackend = values["--benchmark-backend"] ?? "default"
+
         guard ["default", "sampleBuffer", "metal"].contains(requestedBackend) else {
             throw BenchmarkFailure(message: "Backend must be default, sampleBuffer or metal")
         }
+
         backend = MPVPlayerConfiguration.VideoOutput(rawValue: requestedBackend)
+
         let sdrName = values["--benchmark-sdr-output"] ?? "automatic"
+
         guard ["automatic", "compatibility8Bit"].contains(sdrName),
               let sdr = MPVSDROutputPolicy(rawValue: sdrName)
         else {
             throw BenchmarkFailure(message: "SDR output must be automatic or compatibility8Bit")
         }
+
         sdrOutput = sdr
         softwareDecoding = software
         self.options = options
+
         if player == "avplayer", software || !options.isEmpty || backend == .metal || sdrOutput != .automatic {
             throw BenchmarkFailure(message: "MPV options, software decoding, SDR policy and Metal backend selection apply only to mpv")
         }
@@ -250,6 +279,7 @@ private struct PlaybackBenchmarkSettings {
         guard !filename.isEmpty, filename != ".", filename != "..", !filename.contains("/"), !filename.contains("\\") else {
             throw BenchmarkFailure(message: "--benchmark-output must be a filename")
         }
+
         return documents.appendingPathComponent("Benchmarks", isDirectory: true).appendingPathComponent(filename)
     }
 }
@@ -261,6 +291,7 @@ private final class PlaybackBenchmark {
     var mpv: MPVPlayer?
     var av: AVPlayer?
     var status = "Preparing playback benchmark"
+
     @ObservationIgnored
     var surfaceSize = CGSize.zero
     @ObservationIgnored
@@ -332,117 +363,161 @@ private final class PlaybackBenchmark {
 
     func run() async {
         guard !hasRun else { return }
+
         hasRun = true
         beginUptime = ProcessInfo.processInfo.systemUptime
+
         let previousIdleTimer = UIApplication.shared.isIdleTimerDisabled
+
         UIApplication.shared.isIdleTimerDisabled = true
         UIDevice.current.isBatteryMonitoringEnabled = true
+
         var settings: PlaybackBenchmarkSettings?
         var failure: String?
         var environment: [String: Any] = [:]
+
         defer {
             releasePlayers()
             _ = ExampleAudioSession.deactivate()
             UIApplication.shared.isIdleTimerDisabled = previousIdleTimer
         }
+
         do {
             let parsed = try PlaybackBenchmarkSettings(arguments: ProcessInfo.processInfo.arguments)
             settings = parsed
+
             guard !FileManager.default.fileExists(atPath: parsed.output.path) else {
                 throw BenchmarkFailure(message: "Report already exists; choose a new --benchmark-output")
             }
+
             // SwiftUI can start this task before a device launch enters the
             // foreground. Audio activation and display sampling require it.
             let foregroundDeadline = ProcessInfo.processInfo.systemUptime + 30
+
             while !UIApplication.shared.connectedScenes.contains(where: { $0.activationState == .foregroundActive }) {
                 try Task.checkCancellation()
+
                 guard ProcessInfo.processInfo.systemUptime < foregroundDeadline else {
                     throw BenchmarkFailure(message: "App did not enter the foreground; unlock the device and rerun")
                 }
+
                 try await Task.sleep(for: .milliseconds(100))
             }
+
             lostForeground = false
+
             if let audioError = ExampleAudioSession.activate() {
                 throw BenchmarkFailure(message: audioError)
             }
+
             // Create this once for both players before baseline sampling. Device
             // creation and framework setup must not be mistaken for playback cost.
             metalDevice = MTLCreateSystemDefaultDevice()
             try await measure("baseline", seconds: 1)
             environment = environmentSnapshot()
+
             guard ProcessInfo.processInfo.thermalState == .nominal else {
                 throw BenchmarkFailure(message: "Device must cool to nominal thermal state before benchmarking")
             }
+
             // The first startup memory sample precedes engine, decoder and renderer allocation.
             try await measure("startup", timeout: 30, action: { self
                     .createPlayer(parsed)
             }, until: {
                 self.isPlaying && self.position > 0.2
             })
+
             guard duration.isFinite, duration > parsed.warmup + parsed.seconds + 8 else {
                 throw BenchmarkFailure(message: "Use seekable VOD at least warmup + sample + 8 seconds long; observed duration \(duration)")
             }
+
             validation["sourceDurationSeconds"] = duration
             diagnostics["started"] = diagnosticSnapshot()
             try await measure("warmup", seconds: parsed.warmup, requiresPlayback: true)
             diagnostics["steadyStart"] = diagnosticSnapshot()
+
             let steadyStartPosition = position
+
             try await measure("steady", seconds: parsed.seconds, requiresPlayback: true)
+
             let steadyProgress = position - steadyStartPosition
+
             guard let steadyPhase = phases["steady"] as? [String: Any],
                   let steadyWallSeconds = steadyPhase["wallSeconds"] as? Double,
                   steadyWallSeconds.isFinite, steadyWallSeconds > 0
             else {
                 throw BenchmarkFailure(message: "Steady phase wall time is unavailable")
             }
+
             validation["steadyProgressSeconds"] = steadyProgress
             validation["steadyProgressPerWallSecond"] = steadyProgress / steadyWallSeconds
+
             guard (0.85 ... 1.15).contains(steadyProgress / steadyWallSeconds) else {
                 throw BenchmarkFailure(message: "Playback did not advance smoothly through the steady interval: \(steadyProgress) seconds")
             }
+
             diagnostics["steadyEnd"] = diagnosticSnapshot()
+
             try await measure("pausing", timeout: 5, action: { self
                     .pause()
             }, until: { self.isPaused })
+
             // Allow the last published mpv position and hardware audio clock to settle.
             try await measure("pauseSettling", seconds: 0.5)
+
             let pausedPosition = position
+
             try await measure("pause", seconds: 3)
+
             let pauseMovement = abs(position - pausedPosition)
             validation["pausePositionDeltaSeconds"] = pauseMovement
             guard isPaused, pauseMovement < 0.15 else { throw BenchmarkFailure(message: "Playback advanced while paused") }
+
             let target = duration * 0.25
             validation["seekTargetSeconds"] = target
+
             try await measure("seek", timeout: 10, action: { self
                     .seek(to: target)
             }, until: {
                 self.isPaused && abs(self.position - target) < 0.15
             })
+
             validation["seekPositionSeconds"] = position
             diagnostics["seekCompleted"] = diagnosticSnapshot()
+
             let resumedPosition = position
+
             try await measure("resuming", timeout: 10, action: { self
                     .play()
             }, until: {
                 self.isPlaying && self.position > resumedPosition + 0.2
             })
+
             let resumeStart = position
+
             try await measure("resume", seconds: 3, requiresPlayback: true)
             validation["resumeProgressSeconds"] = position - resumeStart
+
             guard position - resumeStart > 2.4
             else { throw BenchmarkFailure(message: "Playback failed to advance after seeking and resuming") }
+
             diagnostics["beforeStop"] = diagnosticSnapshot()
+
             try await measure("stopping", timeout: 5, action: { self
                     .stop()
             }, until: { self.isStopped })
+
             try await measure("stopped", seconds: 5)
             releasePlayers()
             try await measure("released", seconds: 5)
             validation["playerDeallocated"] = releasedMPV == nil && releasedAV == nil
+
             guard releasedMPV == nil && releasedAV == nil else {
                 throw BenchmarkFailure(message: "Player is still retained five seconds after its surface was removed")
             }
+
             let after = environmentSnapshot()
+
             let stableKeys = [
                 "surfaceWidthPoints",
                 "surfaceHeightPoints",
@@ -452,12 +527,14 @@ private final class PlaybackBenchmark {
                 "audioRoute",
                 "systemOutputVolume"
             ]
+
             let changed = stableKeys.filter { key in
                 let first = try? JSONSerialization.data(withJSONObject: [nullable(environment[key])], options: .sortedKeys)
                 let last = try? JSONSerialization.data(withJSONObject: [nullable(after[key])], options: .sortedKeys)
                 return first != last
             }
             validation["environmentChangedKeys"] = changed
+
             guard changed.isEmpty else {
                 throw BenchmarkFailure(message: "Measurement conditions changed: \(changed.joined(separator: ", "))")
             }
@@ -465,9 +542,12 @@ private final class PlaybackBenchmark {
             failure = error is CancellationError
                 ? "Benchmark cancelled"
                 : (error as? BenchmarkFailure)?.localizedDescription ?? error.localizedDescription
+
             releasePlayers()
         }
+
         environment["after"] = environmentSnapshot()
+
         var metrics: [String: Any] = [
             "lifetimeSampledPeakFootprintBytes": maximumFootprint,
             "lifetimeSampledPeakResidentBytes": maximumResident,
@@ -476,6 +556,7 @@ private final class PlaybackBenchmark {
             "maximumTotalDemuxerCacheBytes": nullable(maximumTotalCacheBytes),
             "maximumAbsoluteAudioVideoDriftSeconds": observedAVDrift ? maximumAbsoluteAVDrift as Any : NSNull(),
         ]
+
         for (phase, prefix) in [
             ("baseline", "baseline"),
             ("startup", "startup"),
@@ -498,15 +579,19 @@ private final class PlaybackBenchmark {
                 }
             }
         }
+
         for (name, value) in phases {
             guard let phase = value as? [String: Any] else { continue }
+
             metrics[name + "MaximumAbsoluteAudioVideoDriftSeconds"] = phase["audioVideoDriftMaxAbsoluteSeconds"]
             metrics[name + "MeanAbsoluteAudioVideoDriftSeconds"] = phase["audioVideoDriftMeanAbsoluteSeconds"]
         }
+
         metrics["startupObservedLatencySeconds"] = (phases["startup"] as? [String: Any])?["wallSeconds"]
         metrics["seekObservedLatencySeconds"] = (phases["seek"] as? [String: Any])?["wallSeconds"]
         metrics["startRestartLatencySeconds"] = (diagnostics["beforeStop"] as? [String: Any])?["startLatencySeconds"]
         metrics["seekRestartLatencySeconds"] = (diagnostics["beforeStop"] as? [String: Any])?["seekLatencySeconds"]
+
         let report: [String: Any] = [
             "schemaVersion": 4,
             "status": failure == nil ? "passed" : "failed",
@@ -556,9 +641,12 @@ private final class PlaybackBenchmark {
                 """,
             ],
         ]
+
         let output = settings?.output ?? PlaybackBenchmarkSettings.failureOutput
+
         do {
             try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+
             let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: output, options: .withoutOverwriting)
             status = failure.map { "FAILED: \($0)\n\(output.lastPathComponent)" } ?? "PASSED: \(output.lastPathComponent)"
@@ -612,15 +700,19 @@ private final class PlaybackBenchmark {
 
     private func checkFailure() throws {
         try Task.checkCancellation()
+
         if lostForeground {
             throw BenchmarkFailure(message: "App left the foreground; rerun without interruption")
         }
+
         if memoryReadFailed {
             throw BenchmarkFailure(message: "task_info memory measurements are unavailable")
         }
+
         if let error = mpv?.lastError {
             throw BenchmarkFailure(message: String(describing: error))
         }
+
         if let error = av?.error ?? av?.currentItem?.error {
             throw error
         }
@@ -635,26 +727,35 @@ private final class PlaybackBenchmark {
         until: (() -> Bool)? = nil
     ) async throws {
         status = "Playback benchmark: \(name)"
+
         var accumulator = BenchmarkPhase()
         accumulator.beginDiagnostics(revision: mpv?.playbackDiagnostics.engineActivity.diagnosticsSnapshots)
         defer { phases[name] = accumulator.json }
         recordMemory(into: &accumulator, phase: name)
         action?()
+
         let limit = interval ?? timeout
+
         repeat {
             try checkFailure()
+
             if requiresPlayback, mpv?.state == .ended || av?.currentItem?.status == .failed {
                 throw BenchmarkFailure(message: "Playback ended or failed during \(name)")
             }
+
             recordMemory(into: &accumulator, phase: name)
+
             if let until, until() {
                 return
             }
+
             if accumulator.elapsed >= limit {
                 break
             }
+
             try await Task.sleep(for: .milliseconds(100))
         } while true
+
         if until != nil {
             throw BenchmarkFailure(message: "Timed out during \(name)")
         }
@@ -662,32 +763,42 @@ private final class PlaybackBenchmark {
 
     private func recordMemory(into phase: inout BenchmarkPhase, phase name: String) {
         let memory = BenchmarkMemory.read(metalAllocatedBytes: metalDevice.map { UInt64($0.currentAllocatedSize) })
+
         if memory == nil {
             memoryReadFailed = true
         }
+
         phase.record(memory)
         maximumFootprint = max(maximumFootprint, memory?.footprint ?? 0)
         maximumResident = max(maximumResident, memory?.resident ?? 0)
+
         if let metal = memory?.metalAllocatedBytes {
             maximumMetalAllocated = max(maximumMetalAllocated ?? 0, metal)
         }
+
         maximumCacheBytes = max(maximumCacheBytes, mpv?.bufferStatus.bytesAhead ?? 0)
+
         if let total = mpv?.bufferStatus.totalBytes {
             maximumTotalCacheBytes = max(maximumTotalCacheBytes ?? 0, total)
         }
+
         if let drift = mpv?.playbackDiagnostics.audioVideoDriftSeconds, drift.isFinite {
             maximumAbsoluteAVDrift = max(maximumAbsoluteAVDrift, abs(drift))
             observedAVDrift = true
         }
+
         if let player = mpv {
             phase.recordDiagnostics(
                 player.playbackDiagnostics,
                 backend: player.videoOutput.rawValue
             )
         }
+
         let uptime = ProcessInfo.processInfo.systemUptime
+
         if uptime - lastTimelineUptime >= 1, timeline.count < 480 {
             lastTimelineUptime = uptime
+
             timeline.append([
                 "elapsedSeconds": uptime - beginUptime,
                 "phase": name,
@@ -707,11 +818,13 @@ private final class PlaybackBenchmark {
     private func diagnosticSnapshot() -> [String: Any] {
         if let player = mpv {
             let d = player.playbackDiagnostics
+
             let session: String = switch d.decoder.session {
             case .unknown: "unknown"
             case .software: "software"
             case let .hardware(name): name
             }
+
             return [
                 "effectiveBackend": player.videoOutput.rawValue,
                 "fallbackReasons": d.fallbackReasons,
@@ -745,7 +858,7 @@ private final class PlaybackBenchmark {
                 "audioOutputFormat": nullable(d.audio.outputFormat),
                 "cacheBytesAhead": player.bufferStatus.bytesAhead,
                 "cacheTotalBytes": nullable(player.bufferStatus.totalBytes),
-                "cacheSecondsAhead": seconds(player.bufferStatus.secondsBufferedAhead),
+                "cacheSecondsAhead": seconds(player.bufferStatus.bufferedDurationAhead),
                 "buffering": player.bufferStatus.isBuffering,
                 "engineActivity": [
                     "nativeWakeups": d.engineActivity.nativeWakeups,
@@ -760,8 +873,11 @@ private final class PlaybackBenchmark {
                 ],
             ]
         }
+
         guard let item = av?.currentItem else { return [:] }
+
         let event = item.accessLog()?.events.last
+
         return [
             "effectiveBackend": "AVPlayerLayer",
             "decoderSession": "unavailable",
@@ -783,11 +899,13 @@ private final class PlaybackBenchmark {
     private func environmentSnapshot() -> [String: Any] {
         let process = ProcessInfo.processInfo
         let session = AVAudioSession.sharedInstance()
+
         let screen = UIApplication.shared
             .connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive }?
             .screen
+
         return [
             "deviceModel": UIDevice.current.model,
             "hardwareModel": hardwareModel(),
@@ -823,12 +941,15 @@ private struct BenchmarkMemory {
     static func read(metalAllocatedBytes: UInt64?) -> Self? {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+
         let status = withUnsafeMutablePointer(to: &info) { pointer in
             pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
+
         guard status == KERN_SUCCESS else { return nil }
+
         return Self(
             footprint: info.phys_footprint,
             resident: info.resident_size,
@@ -863,6 +984,7 @@ private struct BenchmarkPhase {
     var json: [String: Any] {
         let wall = elapsed
         let cpu = benchmarkCPUSeconds() - cpuStart
+
         return [
             "wallSeconds": wall,
             "cpuSeconds": cpu,
@@ -898,15 +1020,19 @@ private struct BenchmarkPhase {
     mutating func recordDiagnostics(_ value: MPVPlaybackDiagnostics, backend: String) {
         let revision = value.engineActivity.diagnosticsSnapshots
         guard revision != lastDiagnosticsRevision else { return }
+
         lastDiagnosticsRevision = revision
+
         let session: String = switch value.decoder.session {
         case .unknown: "unknown"
         case .software: "software"
         case let .hardware(name): name
         }
+
         if let drift = value.audioVideoDriftSeconds, drift.isFinite {
             driftValues.append(drift)
         }
+
         diagnosticSamples.append([
             "observedElapsedSeconds": elapsed,
             "diagnosticsRevision": revision,
@@ -926,15 +1052,18 @@ private struct BenchmarkPhase {
 
     mutating func record(_ value: BenchmarkMemory?) {
         guard let value else { return }
+
         if first == nil {
             first = value
         }
+
         last = value
         count += 1
         footprintSum += Double(value.footprint)
         residentSum += Double(value.resident)
         footprintPeak = max(footprintPeak, value.footprint)
         residentPeak = max(residentPeak, value.resident)
+
         if let metal = value.metalAllocatedBytes {
             metalCount += 1
             metalSum += Double(metal)
@@ -946,6 +1075,7 @@ private struct BenchmarkPhase {
 private func benchmarkCPUSeconds() -> Double {
     var usage = rusage()
     guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+
     return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
         + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
 }
@@ -965,7 +1095,9 @@ private func finite(_ value: Double?) -> Any {
 private func hardwareModel() -> String {
     var info = utsname()
     uname(&info)
+
     let capacity = MemoryLayout.size(ofValue: info.machine)
+
     return withUnsafePointer(to: &info.machine) { pointer in
         pointer.withMemoryRebound(to: CChar.self, capacity: capacity) {
             String(cString: $0)

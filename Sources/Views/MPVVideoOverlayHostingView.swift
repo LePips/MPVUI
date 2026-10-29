@@ -54,14 +54,19 @@ final class MPVVideoOverlayHostingView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+
         var ancestor: UIResponder? = superview
+
         while let candidate = ancestor, !(candidate is UIViewController) {
             ancestor = candidate.next
         }
+
         let parent = window == nil ? nil : ancestor as? UIViewController
         guard controller.parent !== parent else { return }
+
         controller.willMove(toParent: nil)
         controller.removeFromParent()
+
         if let parent {
             parent.addChild(controller)
             controller.didMove(toParent: parent)

@@ -20,9 +20,11 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
         let (stream, continuation) = AsyncStream<TextSubtitleSnapshot>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
+
         let id = UUID()
 
         lock.lock()
+
         guard !state.isTerminated else {
             lock.unlock()
             continuation.finish()
@@ -30,6 +32,7 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
         }
 
         state.continuations[id] = continuation
+
         // Replay while holding the same lock used by `publish(_:)`. The new
         // continuation is not yet visible outside this object, so this cannot
         // call client code and guarantees that replay precedes a racing update.
@@ -39,17 +42,22 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in
             self?.removeSubscriber(id)
         }
+
         return stream
     }
 
     func publish(_ snapshot: TextSubtitleSnapshot) {
         lock.lock()
+
         guard !state.isTerminated, state.latest != snapshot else {
             lock.unlock()
             return
         }
+
         state.latest = snapshot
+
         let continuations = Array(state.continuations.values)
+
         lock.unlock()
 
         for continuation in continuations {
@@ -64,14 +72,19 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
     /// Clears the active cue and finishes current and future subscriptions.
     func terminate() {
         lock.lock()
+
         guard !state.isTerminated else {
             lock.unlock()
             return
         }
+
         let shouldClear = !state.latest.isEmpty
+
         state.latest = TextSubtitleSnapshot()
         state.isTerminated = true
+
         let continuations = Array(state.continuations.values)
+
         state.continuations.removeAll()
         lock.unlock()
 
@@ -79,6 +92,7 @@ final class TextSubtitleSnapshotBroadcaster: @unchecked Sendable {
             if shouldClear {
                 continuation.yield(TextSubtitleSnapshot())
             }
+
             continuation.finish()
         }
     }

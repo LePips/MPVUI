@@ -23,9 +23,11 @@ final class BuildDiagnostics: @unchecked Sendable {
 
     func record(stage: String, name: String, key: String, action: String, reason: String, since start: Date) {
         let event = Event(stage: stage, name: name, key: key, action: action, reason: reason, seconds: Date().timeIntervalSince(start))
+
         lock.lock()
         events.append(event)
         lock.unlock()
+
         if explain {
             print("explain \(stage)/\(name): \(reason); \(action) \(key)")
         }
@@ -37,8 +39,11 @@ final class BuildDiagnostics: @unchecked Sendable {
             let elapsedSeconds: Double
             let events: [Event]
         }
+
         lock.lock()
+
         let snapshot = events
+
         lock.unlock()
         try write(Report(elapsedSeconds: Date().timeIntervalSince(started), events: snapshot), path)
     }

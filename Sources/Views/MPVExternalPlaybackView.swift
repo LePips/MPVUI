@@ -32,6 +32,7 @@ extension MPVExternalPlaybackView: UIViewControllerRepresentable {
         let controller = AVPlayerViewController()
         controller.player = player.externalPlayback.systemPlayer
         controller.allowsPictureInPicturePlayback = false
+
         return controller
     }
 

@@ -159,6 +159,31 @@ class TestMediaPreparationTests(unittest.TestCase):
         self.assertNotIn("retired", state)
         self.assertNotIn("image-retired.webp", state["image"]["files"])
 
+    def test_inband_dolby_vision_derives_from_the_chart_and_survives_preparation(self):
+        self.output.mkdir()
+        chart = Path(self.directory.name) / "chart.mp4"
+        chart.write_bytes(b"chart")
+
+        def extract(command, **kwargs):
+            self.assertEqual(command[command.index("-i") + 1], str(chart))
+            self.assertEqual(command[command.index("-bsf:v") + 1], "hevc_mp4toannexb")
+            Path(command[-1]).write_bytes(b"annexb")
+
+        with patch.object(media.subprocess, "run", side_effect=extract):
+            media.prepare_inband_dolby_vision(self.output, chart)
+        self.assertEqual((self.output / media.INBAND_DOLBY_VISION).read_bytes(), b"annexb")
+        self.assertEqual([path.name for path in self.output.iterdir()], [media.INBAND_DOLBY_VISION])
+        self.prepare()
+        self.assertTrue((self.output / media.INBAND_DOLBY_VISION).exists())
+
+    def test_missing_chart_removes_a_stale_inband_stream(self):
+        self.output.mkdir()
+        (self.output / media.INBAND_DOLBY_VISION).write_bytes(b"stale")
+        with patch.object(media.subprocess, "run") as run, patch("sys.stdout"):
+            media.prepare_inband_dolby_vision(self.output, Path(self.directory.name) / "missing.mp4")
+        run.assert_not_called()
+        self.assertFalse((self.output / media.INBAND_DOLBY_VISION).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

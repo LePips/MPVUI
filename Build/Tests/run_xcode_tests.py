@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the generated iOS test project with Xcode and retain its result bundle."""
+"""Generate the iOS test project, run it on a device or simulator, and retain its result bundle."""
 
 import argparse
 from datetime import datetime, timezone
@@ -9,14 +9,14 @@ import subprocess
 import sys
 import uuid
 
+from generate_device_test_project import add_team_argument, generate
 from prepare_test_media import prepare
+from run_swift_tests import keep_awake
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from validation import publish_evidence
 
 ROOT = Path(__file__).resolve().parents[2]
-PROJECT = ROOT / ".build/device-tests/MPVUIRegressionTests.xcodeproj"
-DERIVED_DATA = ROOT / ".build/device-tests/DerivedData"
 
 
 def test_command(*, project, derived_data, platform, device_id, result_bundle, only_testing=None):
@@ -67,33 +67,41 @@ def result_summary(result_bundle):
     return summary
 
 
+def simulators():
+    """Return available simulator names by identifier."""
+    listing = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"], check=True, capture_output=True, text=True)
+    return {device["udid"]: device["name"] for devices in json.loads(listing.stdout)["devices"].values() for device in devices}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=("device", "simulator"), required=True)
-    selector = parser.add_mutually_exclusive_group(required=True)
-    selector.add_argument("--device-id")
-    selector.add_argument("--simulator-id")
-    parser.add_argument("--project", type=Path, default=PROJECT)
-    parser.add_argument("--derived-data", type=Path, default=DERIVED_DATA)
+    parser.add_argument("--device", help="Device or simulator identifier. Omit it to list both")
+    add_team_argument(parser)
     parser.add_argument("--only-testing", help="Xcode test identifier to select")
     args = parser.parse_args(argv)
-    if args.platform == "device" and not args.device_id or args.platform == "simulator" and not args.simulator_id:
-        parser.error("The identifier must match --platform")
-    if not args.project.is_dir():
-        parser.error(f"Generate the device test project first: {args.project}")
-    prepare(args.project.resolve().parent / "GeneratedMedia")
+    available = simulators()
+    if not args.device:
+        subprocess.run(["xcrun", "devicectl", "list", "devices"])
+        print(
+            "Simulators:\n"
+            + "\n".join(f"  {name}: {identifier}" for identifier, name in sorted(available.items(), key=lambda item: item[1]))
+        )
+        parser.error("Choose a device or simulator identifier")
+    output = ROOT / ".build/device-tests"
+    project = generate(ROOT, output, args.team)
+    prepare(output / "GeneratedMedia")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     bundle = ROOT / ".build/device-tests/Results" / (stamp + ".xcresult")
     bundle.parent.mkdir(parents=True, exist_ok=True)
     command = test_command(
-        project=args.project,
-        derived_data=args.derived_data,
-        platform=args.platform,
-        device_id=args.device_id or args.simulator_id,
+        project=project,
+        derived_data=output / "DerivedData",
+        platform="simulator" if args.device in available else "device",
+        device_id=args.device,
         result_bundle=bundle,
         only_testing=args.only_testing,
     )
-    completed = subprocess.run(command)
+    completed = subprocess.run(keep_awake(command))
     if not bundle.exists():
         raise ValueError(f"Xcode produced no result bundle (exit {completed.returncode})")
     summary = result_summary(bundle)

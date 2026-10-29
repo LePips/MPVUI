@@ -1,8 +1,10 @@
 import Foundation
 import Observation
 
-/// An observable UI projection of a session's complete states. Playback rules
-/// remain in the session; unchanged fields do not invalidate their observers.
+/// Observable playback state and controls for an existing ``MPVSession``.
+///
+/// Unchanged fields do not invalidate their observers. Releasing the controller
+/// stops observation without closing its session.
 @MainActor
 @Observable
 public final class MPVSessionController {
@@ -17,15 +19,15 @@ public final class MPVSessionController {
     public private(set) var position: Duration = .zero
     /// Source duration, or zero when unknown.
     public private(set) var duration: Duration = .zero
-    /// Current pause intention.
+    /// Whether playback is intended to remain paused, including while seeking or buffering.
     public private(set) var isPaused = true
-    /// Whether the current source can seek.
+    /// Whether the current source supports seeking.
     public private(set) var isSeekable = false
     /// Whether the current source has produced a video frame.
     public private(set) var hasVideoFrame = false
-    /// Current volume in the range zero through one hundred.
+    /// The playback volume in mpv's `0...100` range.
     public private(set) var volume = 100.0
-    /// Current mute state.
+    /// Whether audio output is muted.
     public private(set) var isMuted = false
     /// Current playback speed multiplier.
     public private(set) var playbackRate = 1.0
@@ -47,6 +49,7 @@ public final class MPVSessionController {
     public private(set) var videoFeatureRequestResult: MPVVideoFeatureRequestResult?
     /// Current chapter index, when one is active.
     public private(set) var currentChapterIndex: Int?
+
     @ObservationIgnored
     private var delivery: Task<Void, Never>?
     @ObservationIgnored
@@ -58,6 +61,8 @@ public final class MPVSessionController {
     }
 
     /// Renderer capabilities evaluated from the shared source and output evidence.
+    ///
+    /// - Complexity: O(n), where n is the number of reported tracks.
     public var videoFeatureCapabilities: MPVVideoFeatureCapabilities {
         MPVVideoFeatureCapabilities(
             backend: videoOutput,
@@ -68,15 +73,18 @@ public final class MPVSessionController {
         )
     }
 
-    /// Observes an existing session without creating a second native client.
+    /// Creates a controller that observes an existing session.
     public init(session: MPVSession) {
         self.session = session
         configuration = session.configuration
         apply(session.snapshot)
-        let events = session.events()
+
+        let events = session.makeEventStream()
+
         delivery = Task { [weak self] in
             for await event in events {
                 guard !Task.isCancelled else { break }
+
                 if case let .snapshot(snapshot) = event {
                     self?.apply(snapshot)
                 }
@@ -86,17 +94,17 @@ public final class MPVSessionController {
 
     deinit { delivery?.cancel() }
 
-    /// Submits a typed command and preserves the accepted generation.
+    /// Submits a typed command and reports submission failures through ``lastError``.
     public func send(_ command: MPVSessionCommand) {
         do { generation = try session.send(command).generation }
         catch { lastError = error as? MPVPlayerError ?? .clientUnavailable }
     }
 
     /// Replaces the source with optional per-load playback settings.
-    public func load(_ url: URL, autoPlay: Bool? = nil, startTime: Duration? = nil) {
+    public func load(_ url: URL, playAutomatically: Bool? = nil, startTime: Duration? = nil) {
         send(.load(
             url,
-            autoPlay: autoPlay,
+            playAutomatically: playAutomatically,
             startTime: startTime
         ))
     }
@@ -123,12 +131,12 @@ public final class MPVSessionController {
 
     /// Seeks to an absolute source timestamp.
     public func seek(to time: Duration) {
-        send(.seek(time))
+        send(.seek(to: time))
     }
 
     /// Seeks relative to the current or pending position.
     public func seek(by offset: Duration) {
-        send(.seekRelative(offset))
+        send(.seekByOffset(offset))
     }
 
     /// Selects a track from the current source.
@@ -138,78 +146,97 @@ public final class MPVSessionController {
 
     /// Selects or disables one subtitle role.
     public func selectSubtitle(_ id: MPVMediaTrackIdentifier?, for role: MPVSubtitleRole = .primary) {
-        send(.selectSubtitle(id, role: role))
+        send(.selectSubtitle(id, for: role))
     }
 
-    /// Enables detailed diagnostics while they are needed by the UI.
+    /// Enables or disables detailed diagnostics sampling.
     public func setDiagnosticsEnabled(_ enabled: Bool) {
-        send(.diagnostics(enabled))
+        send(.setDiagnosticsEnabled(enabled))
     }
 
-    /// Enables semantic subtitle delivery.
+    /// Enables or disables text subtitle interception and delivery.
     public func setTextSubtitleInterceptionEnabled(_ enabled: Bool) {
-        send(.interceptTextSubtitles(enabled))
+        send(.setTextSubtitleInterceptionEnabled(enabled))
     }
 
     /// Clears a recoverable failure.
     public func clearLastError() {
-        send(.clearError)
+        send(.clearLastError)
     }
 
     private func apply(_ value: MPVSessionSnapshot) {
         guard value.generation >= generation else { return }
+
         generation = value.generation
+
         if state != value.state {
             state = value.state
         }
+
         if position != value.position {
             position = value.position
         }
+
         if duration != value.duration {
             duration = value.duration
         }
+
         if isPaused != value.isPaused {
             isPaused = value.isPaused
         }
+
         if isSeekable != value.isSeekable {
             isSeekable = value.isSeekable
         }
+
         if hasVideoFrame != value.hasVideoFrame {
             hasVideoFrame = value.hasVideoFrame
         }
+
         if volume != value.volume {
             volume = value.volume
         }
+
         if isMuted != value.isMuted {
             isMuted = value.isMuted
         }
+
         if playbackRate != value.playbackRate {
             playbackRate = value.playbackRate
         }
+
         if mediaInformation != value.mediaInformation {
             mediaInformation = value.mediaInformation
         }
+
         if bufferStatus != value.buffer {
             bufferStatus = value.buffer
         }
+
         if playbackDiagnostics != value.diagnostics {
             playbackDiagnostics = value.diagnostics
         }
+
         if renderColorStatus != value.color {
             renderColorStatus = value.color
         }
+
         if dolbyVisionStatus != value.dolbyVision {
             dolbyVisionStatus = value.dolbyVision
         }
+
         if textSubtitles != value.subtitles {
             textSubtitles = value.subtitles
         }
+
         if lastError != value.error {
             lastError = value.error
         }
+
         if videoFeatureRequestResult != value.videoFeatureRequestResult {
             videoFeatureRequestResult = value.videoFeatureRequestResult
         }
+
         if currentChapterIndex != value.currentChapterIndex {
             currentChapterIndex = value.currentChapterIndex
         }

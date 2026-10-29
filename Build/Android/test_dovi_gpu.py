@@ -21,7 +21,7 @@ def run(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--serial", help="adb device serial")
+    parser.add_argument("--device", help="adb device serial")
     args = parser.parse_args()
     sdk = Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk"))
     lock = inputs_for(load(ROOT), "android")
@@ -72,7 +72,7 @@ def main():
         "-o",
         executable,
     )
-    adb = [str(sdk / "platform-tools/adb")] + (["-s", args.serial] if args.serial else [])
+    adb = [str(sdk / "platform-tools/adb")] + (["-s", args.device] if args.device else [])
     destination = "/data/local/tmp/mpvui-dovi-gpu-test"
     run(*adb, "shell", "mkdir", "-p", destination)
     fixtures = scripts / "deps/libdovi/assets/tests"

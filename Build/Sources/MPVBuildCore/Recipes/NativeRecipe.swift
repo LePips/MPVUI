@@ -15,9 +15,11 @@ func relativePath(from base: URL, to destination: URL) -> String {
     let a = base.standardizedFileURL.pathComponents
     let b = destination.standardizedFileURL.pathComponents
     var common = 0
+
     while common < min(a.count, b.count) && a[common] == b[common] {
         common += 1
     }
+
     return (Array(repeating: "..", count: a.count - common) + b.dropFirst(common)).joined(separator: "/")
 }
 
@@ -47,51 +49,65 @@ struct RecipeContext: Sendable {
             "-ffile-prefix-map=\(work.path)=/mpvbuild/\(component)",
             "-ffile-prefix-map=\(root.path)=/mpvbuild/repository"
         ]
+
         if ["tvos", "xros"].contains(slice.platform) {
             flags.append("-DHAVE_FORK=0")
         }
+
         if slice.variant == "maccatalyst" {
             flags += [
                 "-iframework",
                 sdk.appendingPathComponent("System/iOSSupport/System/Library/Frameworks").path
             ]
         }
+
         flags += ["-I" + sdk.appendingPathComponent("usr/include/libxml2").path]
+
         for id in dependencies.keys.sorted() {
             let path = dependencies[id]!
             flags += ["-ffile-prefix-map=\(path.path)=/mpvbuild/dependencies/\(id)"]
+
             flags +=
                 ["-ffile-prefix-map=\(relativePath(from: work.appendingPathComponent("build"), to: path))=/mpvbuild/dependencies/\(id)"]
+
             flags += ["-I" + path.appendingPathComponent("include").path]
+
             if id == "libsmbclient" {
                 flags += ["-I" + path.appendingPathComponent("include/samba-4.0").path]
             }
         }
+
         return flags
     }
 
     var linkFlags: [String] {
         var result = ["-arch", arch, "-isysroot", sdk.path, "-target", slice.triple(arch), "-lc++"]
+
         if slice.variant == "maccatalyst" {
             result += [
                 "-iframework",
                 sdk.appendingPathComponent("System/iOSSupport/System/Library/Frameworks").path
             ]
         }
+
         for id in dependencies.keys.sorted() {
             result.append("-L" + dependencies[id]!.appendingPathComponent("lib").path)
         }
+
         // Samba's per-target pkg-config bundles do not consistently carry its private static dependencies.
         // Keep the same explicit GnuTLS/GMP/nettle and Apple system linkage as the imported recipes.
         for (id, libraries) in [("gmp", ["gmp"]), ("nettle", ["nettle", "hogweed"]), ("gnutls", ["gnutls"])] where dependencies[id] != nil {
             result += libraries.map { "-l" + $0 }
         }
+
         if dependencies["gnutls"] != nil {
             result += ["-framework", "Security", "-framework", "CoreFoundation"]
         }
+
         if dependencies["libsmbclient"] != nil {
             result += ["-lresolv", "-lpthread", "-lz", "-liconv"]
         }
+
         return result
     }
 
@@ -100,7 +116,9 @@ struct RecipeContext: Sendable {
             .sorted()
             .map { dependencies[$0]!.appendingPathComponent("lib/pkgconfig").path } +
             [root.appendingPathComponent("Build/Support/apple-system").path]
+
         let flags = flags.map(shellQuote).joined(separator: " ")
+
         return [
             "CC": "/usr/bin/clang",
             "CXX": "/usr/bin/clang++",
@@ -127,13 +145,16 @@ struct RecipeContext: Sendable {
             var text = try String(contentsOf: file, encoding: .utf8)
             text = text.replacingOccurrences(of: prefix.path, with: "${pcfiledir}/../..")
             text = text.replacingOccurrences(of: "/usr/local", with: "${pcfiledir}/../..")
+
             for dependency in dependencies.values.sorted(by: { $0.path.count > $1.path.count }) {
                 let destination = "${pcfiledir}/../../" + relativePath(from: prefix, to: dependency)
                 text = text.replacingOccurrences(of: dependency.path, with: destination)
+
                 text = text.replacingOccurrences(
                     of: relativePath(from: work.appendingPathComponent("build"), to: dependency),
                     with: destination
                 )
+
                 // The consuming recipe supplies every locked dependency's current include/library path.
                 // Keep transitive library/framework flags, but never bake a previous cache node's location
                 // into these internal pkg-config products (including after a verifier-only key change).
@@ -141,6 +162,7 @@ struct RecipeContext: Sendable {
                 let expression = try NSRegularExpression(pattern: pattern)
                 text = expression.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
             }
+
             try put(text, file)
         }
     }
@@ -153,23 +175,29 @@ enum FFmpegRecipe {
     static func build(_ context: RecipeContext) throws {
         let c = context
         try c.prepareDirectories()
+
         let build = c.work.appendingPathComponent("build")
+
         // FFmpeg supports a relative src/ tree even when the checkout path contains whitespace.
         try fm.createSymbolicLink(atPath: build.appendingPathComponent("src").path, withDestinationPath: "../source")
+
         // FFmpeg expands flag variables without reparsing shell quotes. Clang response files preserve path arguments.
         try put(c.flags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-cflags.rsp"))
         try put(c.linkFlags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-ldflags.rsp"))
+
         // Build-time utilities run on macOS even when the output targets another Apple platform.
         // Pin their SDK too: an unqualified host compiler can otherwise select newer CLT headers
         // and libraries that the locked Xcode linker cannot read.
         let hostFlags = try ["-isysroot", c.runner.sdk("macosx").path]
         try put(hostFlags.map(shellQuote).joined(separator: "\n") + "\n", build.appendingPathComponent("mpvbuild-hostflags.rsp"))
+
         // pkg-config preserves relative search paths in its output. FFmpeg expands that output as
         // shell words, so relative paths avoid backslash-escaped spaces being split a second time.
         let pkgPaths = c.dependencies.keys.sorted().map { relativePath(
             from: build,
             to: c.dependencies[$0]!.appendingPathComponent("lib/pkgconfig")
         ) } + [c.root.appendingPathComponent("Build/Support/apple-system").path]
+
         let environment = c.environment.merging([
             "CFLAGS": "@mpvbuild-cflags.rsp",
             "CPPFLAGS": "",
@@ -179,6 +207,7 @@ enum FFmpegRecipe {
             "TMPDIR": "../tmp",
             "PKG_CONFIG_LIBDIR": pkgPaths.joined(separator: ":")
         ]) { _, new in new }
+
         var args = try FFmpegFlags.configureFlags + [
             "--prefix=/usr/local",
             "--arch=\(c.arch == "x86_64" ? "x86_64" : "aarch64")",
@@ -202,13 +231,16 @@ enum FFmpegRecipe {
             // FFmpeg 9 compiles Vulkan shaders ahead of time with a host tool.
             "--glslc=\(c.runner.executable("glslc").path)",
         ]
+
         // NASM 3.02 cannot emit a Catalyst LC_BUILD_VERSION. Keep that one
         // target's previous C fallback; ARM Catalyst uses Clang's assembler.
         let assemblyEnabled = !(c.arch == "x86_64" && c.slice.variant == "maccatalyst")
         args += [assemblyEnabled ? "--enable-asm" : "--disable-asm", c.arch == "x86_64" ? "--disable-neon" : "--enable-neon"]
+
         if c.arch == "x86_64", assemblyEnabled {
             try args += ["--x86asmexe=\(c.runner.executable("nasm").path)"]
         }
+
         for id in [
             "gmp",
             "gnutls",
@@ -227,6 +259,7 @@ enum FFmpegRecipe {
             try require(c.dependencies[id] != nil, "Missing explicit FFmpeg dependency \(id)")
             args.append("--enable-" + id)
         }
+
         args += [
             "--enable-protocol=libsmbclient",
             "--enable-decoder=libdav1d",
@@ -235,29 +268,37 @@ enum FFmpegRecipe {
             "--enable-filter=subtitles",
             "--enable-filter=libplacebo"
         ]
+
         try c.runner.run(build.appendingPathComponent("src/configure").path, args, cwd: build, env: environment)
+
         if c.arch == "x86_64", assemblyEnabled {
             let platforms = ["macos": "macos", "isimulator": "iossimulator", "tvsimulator": "tvossimulator"]
             guard let platform = platforms[c.slice.id] else { throw BuildError("No NASM platform for \(c.slice.id)") }
+
             // FFmpeg preincludes config.asm for every NASM object. Emit the same
             // platform/minimum OS as Clang, rather than leaving the header untagged.
             let assemblyConfig = build.appendingPathComponent("config.asm")
+
             let contents = try String(contentsOf: assemblyConfig, encoding: .utf8) +
                 "\n%pragma macho build_version \(platform),\(c.slice.minimumOS.replacingOccurrences(of: ".", with: ","))\n"
             try put(contents, assemblyConfig)
             try put(contents, c.prefix.appendingPathComponent("config.asm"))
         }
+
         let components = try String(contentsOf: build.appendingPathComponent("config_components.h"), encoding: .utf8)
+
         try require(
             components.contains("#define CONFIG_SPDIF_MUXER 1"),
             "FFmpeg must provide the SPDIF muxer for mpv compressed-audio output"
         )
+
         for filter in ["avgblur", "blend", "bwdif", "chromaber", "flip", "gblur", "hflip", "nlmeans", "overlay", "v360", "vflip", "xfade"] {
             try require(
                 components.contains("#define CONFIG_\(filter.uppercased())_VULKAN_FILTER 1"),
                 "FFmpeg lost \(filter)_vulkan; verify the locked host GLSL compiler"
             )
         }
+
         for component in [
             "WEBP_DECODER",
             "WEBP_ANIM_DECODER",
@@ -274,19 +315,24 @@ enum FFmpegRecipe {
         ] {
             try require(components.contains("#define CONFIG_\(component) 1"), "FFmpeg lost required component \(component)")
         }
+
         // Retain actual configure results; requested flags alone do not prove availability.
         try put(components, c.prefix.appendingPathComponent("config_components.h"))
+
         // configure embeds its invocation. Normalize only the reported string; compilation still uses actual paths.
         let config = build.appendingPathComponent("config.h")
         var text = try String(contentsOf: config, encoding: .utf8)
+
         if assemblyEnabled {
             let assemblyFeature = c.arch == "x86_64" ? "X86ASM" : "NEON"
             try require(text.contains("#define HAVE_\(assemblyFeature) 1"), "FFmpeg lost \(assemblyFeature) optimizations")
+
             try require(
                 text.contains("#define HAVE_\(c.arch == "x86_64" ? "SSE2_EXTERNAL" : "NEON_EXTERNAL") 1"),
                 "FFmpeg did not enable external assembly routines"
             )
         }
+
         let lines = text.components(separatedBy: "\n").map { line in
             line.hasPrefix("#define FFMPEG_CONFIGURATION ") ? line.replacingOccurrences(of: c.prefix.path, with: "/mpvbuild/install")
                 .replacingOccurrences(
@@ -299,19 +345,25 @@ enum FFmpegRecipe {
         try put(text, config)
         try put(text, c.prefix.appendingPathComponent("config.h"))
         try c.runner.run("/usr/bin/make", ["-j\(c.jobs)"], cwd: build, env: environment)
+
         let install = c.work.appendingPathComponent("install")
         try c.runner.run("/usr/bin/make", ["-j\(c.jobs)", "install", "DESTDIR=" + install.path], cwd: build, env: environment)
+
         let stagedPrefix = install.appendingPathComponent("usr/local")
+
         for name in try fm.contentsOfDirectory(atPath: stagedPrefix.path) {
             try fm.copyItem(
                 at: stagedPrefix.appendingPathComponent(name),
                 to: c.prefix.appendingPathComponent(name)
             )
         }
+
         for lib in libraries {
             try require(exists(c.prefix.appendingPathComponent("lib/lib\(lib).a")), "FFmpeg did not produce \(lib)")
         }
+
         try c.normalizePkgConfig()
+
         // Resolved options are evidence, with paths normalized independently of their local invocation.
         try put(
             args.map { $0.replacingOccurrences(of: c.prefix.path, with: "/mpvbuild/install") }.joined(separator: "\n") + "\n",

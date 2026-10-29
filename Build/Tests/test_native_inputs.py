@@ -106,6 +106,53 @@ class NativeInputTests(unittest.TestCase):
         self.assertEqual(len(changes), 1)
         self.assertEqual(load(ROOT), self.lock)
 
+    def test_source_update_to_an_explicit_ref_skips_release_ordering(self):
+        class Upstream:
+            def resolve(self, url, ref):
+                self.request = (url, ref)
+                return "b" * 40
+
+        upstream = Upstream()
+        with patch.object(update_dependencies, "verify_patches"):
+            outputs, changes = update_dependencies.prepare_update(ROOT, "mpv", upstream, ref="master")
+        source = next(s for s in json.loads(outputs[LOCK_PATH])["sources"] if s["id"] == "mpv")
+        self.assertEqual(upstream.request[1], "master")
+        self.assertEqual((source["ref"], source["commit"], source["version"]), ("master", "b" * 40, "master"))
+        self.assertEqual(changes[0].version, "master")
+        with self.assertRaisesRegex(ValueError, "single source"):
+            update_dependencies.prepare_update(ROOT, "sdk-mpvkit-openssl-build", upstream, ref="1.0")
+
+    def test_versioned_refs_drop_only_release_prefixes(self):
+        self.assertEqual(update_dependencies.source_version("v0.40.0"), "0.40.0")
+        self.assertEqual(update_dependencies.source_version("n7.1"), "7.1")
+        self.assertEqual(update_dependencies.source_version("next"), "next")
+
+    def test_recipe_review_stages_upstream_sources_without_changing_the_lock(self):
+        recipes = self.lock["apple"]["recipeSource"]
+
+        class Upstream:
+            def resolve(self, url, ref):
+                self.request = (url, ref)
+                return "c" * 40
+
+            def fetch(self, url, commit, checkout):
+                scripts = checkout / "Sources/BuildScripts/XCFrameworkBuild"
+                scripts.mkdir(parents=True)
+                for name in ("base.swift", "main.swift"):
+                    (scripts / name).write_text(name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / LOCK_PATH).parent.mkdir(parents=True)
+            (root / LOCK_PATH).write_text((ROOT / LOCK_PATH).read_text())
+            upstream = Upstream()
+            review = update_dependencies.stage_recipe_review(root, upstream)
+            self.assertEqual(upstream.request, (recipes["url"], recipes["ref"]))
+            self.assertEqual(review, root / ".build/updates" / ("recipes-" + "c" * 40))
+            self.assertEqual((review / "upstream-main.swift").read_text(), "main.swift")
+            self.assertIn(recipes["commit"], (review / "REVIEW.md").read_text())
+            self.assertEqual((root / LOCK_PATH).read_text(), (ROOT / LOCK_PATH).read_text())
+
     def test_failed_patch_validation_does_not_write_an_update(self):
         class Upstream:
             def source_release(self, source):

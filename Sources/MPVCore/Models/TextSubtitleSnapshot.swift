@@ -7,6 +7,8 @@ public struct TextSubtitleSnapshot: Sendable, Hashable {
     public let regions: [TextSubtitleRegion]
 
     /// Region text joined with newlines in presentation order.
+    ///
+    /// - Complexity: O(n + m), where n is the number of regions and m is their total text length.
     public var text: String {
         regions.map(\.text).joined(separator: "\n")
     }
@@ -16,7 +18,7 @@ public struct TextSubtitleSnapshot: Sendable, Hashable {
         regions.isEmpty
     }
 
-    /// Creates an immutable subtitle value.
+    /// Creates a subtitle snapshot from regions in presentation order.
     public init(regions: [TextSubtitleRegion] = []) {
         self.regions = regions
     }

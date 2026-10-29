@@ -18,6 +18,8 @@ import sys
 import tempfile
 
 SCRIPTS = Path(__file__).resolve().parent
+DOLBY_VISION_CHART = SCRIPTS.parents[1] / "Example/Sources/MPVUIExample/Resources/Media/dolby-vision-p5-chart.mp4"
+INBAND_DOLBY_VISION = "dolby-vision-inband.hevc"
 GROUPS = {
     "baseline": (("ffmpeg",), ("baseline.mp4", "baseline.en.srt", "baseline.es.srt")),
     "multitrack": (("ffmpeg", "ffprobe"), ("multitrack.mkv",)),
@@ -27,6 +29,7 @@ GROUPS = {
             "video-hevc-8bit.mkv",
             "video-vp9.mkv",
             "video-vp9-ac3.mkv",
+            "video-vp9-opus.mkv",
             "video-av1-10bit.mkv",
             "video-h264-120fps.mkv",
             "video-h264-long-gop.mkv",
@@ -37,13 +40,20 @@ GROUPS = {
         ("ffmpeg", "ffprobe", "dovi_tool"),
         (
             "dolby-vision-p5.mp4",
+            "dolby-vision-p7.mp4",
             "dolby-vision-p81.mp4",
             "dolby-vision-p84.mp4",
+            "dolby-vision-p5-untagged.mp4",
+            "dolby-vision-p7-untagged.mp4",
+            "dolby-vision-p7-invalid-base.mp4",
+            "dolby-vision-p81-untagged.mp4",
+            "dolby-vision-p84-untagged.mp4",
             "dolby-vision-p5-hls.mp4",
             "dolby-vision-p81-hls.mp4",
             "dolby-vision-p81-declared-extended.ts",
             "dolby-vision-p81-extended.ts",
             "dolby-vision-p5.rpu",
+            "dolby-vision-p7.rpu",
             "dolby-vision-p81.rpu",
         ),
     ),
@@ -111,12 +121,7 @@ def prune(output, state):
     return changed
 
 
-def prepare(output, groups=tuple(GROUPS)):
-    unknown = set(groups) - GROUPS.keys()
-    if unknown:
-        raise ValueError(f"Unknown test media groups: {', '.join(sorted(unknown))}")
-    output = output.resolve()
-    output.mkdir(parents=True, exist_ok=True)
+def tool_environment():
     # Xcode may omit Homebrew from PATH. Keep an explicitly configured tool first.
     environment = dict(os.environ)
     environment["PATH"] = os.pathsep.join(
@@ -126,6 +131,16 @@ def prepare(output, groups=tuple(GROUPS)):
             "/usr/local/bin",
         ]
     )
+    return environment
+
+
+def prepare(output, groups=tuple(GROUPS)):
+    unknown = set(groups) - GROUPS.keys()
+    if unknown:
+        raise ValueError(f"Unknown test media groups: {', '.join(sorted(unknown))}")
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    environment = tool_environment()
     state_path = output.parent / (output.name + ".state.json")
     with (output.parent / (output.name + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -177,6 +192,52 @@ def prepare(output, groups=tuple(GROUPS)):
                 write_json(state_path, state)
 
 
+def prepare_inband_dolby_vision(output, chart=None):
+    """Derive the optional untagged Dolby Vision stream for Android detection tests from the local chart."""
+    source = Path(chart or os.environ.get("MPVUI_DOLBY_VISION_CHART") or DOLBY_VISION_CHART)
+    target = output / INBAND_DOLBY_VISION
+    if not source.is_file():
+        target.unlink(missing_ok=True)
+        print(
+            "Optional Dolby Vision raw-stream test skipped: add dolby-vision-p5-chart.mp4 to the shared Media folder "
+            "or set MPVUI_DOLBY_VISION_CHART."
+        )
+        return
+    # Keep the chart's RGB primaries but remove all container DV configuration.
+    # RPU remains in the HEVC NAL units, as it does in untagged transport streams.
+    temporary = target.with_suffix(".tmp.hevc")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-nostdin",
+            "-y",
+            "-ss",
+            "25",
+            "-i",
+            str(source),
+            "-map",
+            "0:v:0",
+            "-frames:v",
+            "3",
+            "-c:v",
+            "copy",
+            "-an",
+            "-map_metadata",
+            "-1",
+            "-bsf:v",
+            "hevc_mp4toannexb",
+            "-f",
+            "hevc",
+            str(temporary),
+        ],
+        check=True,
+        env=tool_environment(),
+    )
+    temporary.replace(target)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=SCRIPTS.parents[1] / ".build/test-media")
@@ -184,6 +245,8 @@ def main():
     args = parser.parse_args()
     try:
         prepare(args.output, args.group or tuple(GROUPS))
+        if not args.group:
+            prepare_inband_dolby_vision(args.output.resolve())
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Test media preparation failed: {error}\n")
 

@@ -21,6 +21,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
         #expect(result.videoToolboxSupportsCodec == true)
         #expect(result.session == .software)
         #expect(result.fallbackReason != nil)
+
         let unknown = MPVPlaybackDiagnosticsParser.decoder(
             codec: "not-a-codec",
             hardwareDecoder: nil,
@@ -32,6 +33,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
 
         #expect(unknown.videoToolboxSupportsCodec == nil)
         #expect(unknown.session == .unknown)
+
         let selectedOnly = MPVPlaybackDiagnosticsParser.decoder(
             codec: "hevc",
             hardwareDecoder: "videotoolbox",
@@ -43,6 +45,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
 
         #expect(selectedOnly.selectedDecoder == "videotoolbox")
         #expect(selectedOnly.session == .unknown)
+
         let observedSession = MPVPlaybackDiagnosticsParser.decoder(
             codec: "hevc",
             hardwareDecoder: "videotoolbox",
@@ -67,6 +70,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
 
         #expect(native?.pixelBufferCopies == 8)
         #expect(native?.sampleBuildCount == 3)
+
         let valid = MPVLogMessage(
             prefix: "ffmpeg/video",
             level: .info,
@@ -74,6 +78,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
         )
 
         #expect(MPVPlaybackDiagnosticsParser.videoToolboxSession(valid) == .hardware)
+
         let unsupported = MPVLogMessage(
             prefix: "ffmpeg/video",
             level: .info,
@@ -86,6 +91,7 @@ struct MPVPlaybackDiagnosticsParsingTests {
     @Test
     func `absent and invalid timing is unknown`() {
         #expect(MPVPlaybackDiagnosticsParser.renderPasses(nil) == nil)
+
         let passes = MPVPlaybackDiagnosticsParser.renderPasses(.array([
             .map(["desc": .string("scale"), "last": .integer(300), "avg": .integer(-1), "peak": .double(.infinity)])
         ]))

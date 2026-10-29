@@ -25,7 +25,9 @@ struct MPVTVDisplayMatchingTests {
         update(coordinator, manager: manager)
 
         #expect(manager.assignments.count == 1)
+
         let first = try #require(manager.preferredDisplayCriteria)
+
         update(coordinator, manager: manager, state: .seeking)
         update(coordinator, manager: manager, state: .paused)
 
@@ -34,6 +36,7 @@ struct MPVTVDisplayMatchingTests {
 
         #expect(manager.assignments.count == 2)
         #expect(manager.preferredDisplayCriteria !== first)
+
         update(coordinator, manager: manager, fps: 24, dolbyVision: .init(
             effectiveProfile: 8,
             effectiveBaseLayerCompatibilityID: 1,
@@ -82,9 +85,11 @@ struct MPVTVDisplayMatchingTests {
         let manager = DisplayManager()
         let old = MPVDisplayMatchingCoordinator()
         let current = MPVDisplayMatchingCoordinator()
+
         defer { old.detach()
             current.detach()
         }
+
         update(old, manager: manager)
         update(current, manager: manager)
         old.detach()

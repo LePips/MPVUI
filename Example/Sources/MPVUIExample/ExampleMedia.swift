@@ -47,6 +47,7 @@ enum ExamplePlayback {
         return .init(additionalOptions: options, nativeVideoFeaturePolicy: .preferFeatures, videoOutput: .automaticAndroid)
         #else
         let useMetalVideoOutput = ProcessInfo.processInfo.arguments.contains("--metal-video-output")
+
         return .init(
             additionalOptions: options,
             audio: .init(audioSession: .hostManaged),
@@ -74,6 +75,7 @@ struct ExampleMedia {
             .compactMap(URL.init(string:))
         #endif
         let extensions = Set(["mp4", "mkv", "mov", "m4v", "webm", "ts", "mp3", "m4a", "aac", "flac", "wav", "ogg", "webp"])
+
         return files.filter { extensions.contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             .map { ExampleMedia(url: $0) }
@@ -109,12 +111,14 @@ extension View {
             .onChange(of: isPresented.wrappedValue) { [model] _, shown in
                 if shown {
                     isPresented.wrappedValue = false
+
                     model.player.bridge.openFile { [weak model] source, name in
                         Task { @MainActor [weak model] in
                             guard !source.isEmpty, let url = URL(string: source) else {
                                 model?.selectionError = name
                                 return
                             }
+
                             model?.load(url, name: name)
                         }
                     }

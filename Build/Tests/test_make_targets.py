@@ -1,4 +1,4 @@
-"""Exercise the public Make interface without building native dependencies or using a device."""
+"""Exercise the Make front end without building native dependencies or using a device."""
 
 import json
 import os
@@ -27,13 +27,11 @@ class MakeTargetsTests(unittest.TestCase):
             "import json,os,sys,time\n"
             "from pathlib import Path\n"
             "args=sys.argv[1:]\n"
-            "if '--kind' in args:\n"
-            "    kind=args[args.index('--kind')+1]\n"
-            "    if os.environ.get('CHECK_ORDER'):\n"
-            "        marker=Path('build-complete')\n"
-            "        if kind=='build': time.sleep(0.05); marker.touch()\n"
-            "        if kind=='test' and not marker.exists(): sys.exit(9)\n"
-            "leaked={k:os.environ[k] for k in ('MAKEFLAGS','MAKEOVERRIDES','ARGS','PROFILE','TARGET','JSON') if k in os.environ}\n"
+            "if os.environ.get('CHECK_ORDER'):\n"
+            "    marker=Path('build-complete')\n"
+            "    if args[1]=='build': time.sleep(0.05); marker.touch()\n"
+            "    if args[1]=='test' and not marker.exists(): sys.exit(9)\n"
+            "leaked={k:os.environ[k] for k in ('MAKEFLAGS','MAKEOVERRIDES','ARGS','SUITE','PLATFORM','JSON') if k in os.environ}\n"
             "print(json.dumps({'cwd':os.getcwd(),'args':args,'leaked':leaked}))\n"
             "sys.exit(int(os.environ.get('STUB_EXIT','0')))\n"
         )
@@ -41,11 +39,7 @@ class MakeTargetsTests(unittest.TestCase):
 
     def make(self, *args, env=None):
         # Do not inherit a parent's make flags/jobserver or command-line overrides.
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL", "ARGS", "PROFILE", "TARGET", "PYTHON", "JSON")
-        }
+        environment = {key: value for key, value in os.environ.items() if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
         environment.update(env or {})
         return subprocess.run(
             ["make", f"PYTHON={self.python}", *args],
@@ -60,82 +54,38 @@ class MakeTargetsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return [json.loads(line) for line in result.stdout.splitlines()]
 
-    def test_both_entry_points_resolve_paths_from_repository_root(self):
-        left = self.records(self.make("test-unit"))
-        right = self.records(self.make("-C", "Build", "test-unit"))
+    def test_both_entry_points_forward_the_command_options_and_tool_arguments(self):
+        left = self.records(self.make("test", "SUITE=unit", "JSON=1", "ARGS=--check"))
+        right = self.records(self.make("-C", "Build", "test", "SUITE=unit", "JSON=1", "ARGS=--check"))
         self.assertEqual(left, right)
         self.assertEqual(left[0]["cwd"], str(self.root.resolve()))
-        self.assertEqual(left[0]["args"][:4], ["Build/validation.py", "--kind", "test", "--"])
-        self.assertEqual(left[0]["args"][-3:], ["Build/Tests/coverage.py", "--lane", "unit"])
+        self.assertEqual(left[0]["args"][:2], ["Build/commands.py", "test"])
+        self.assertEqual(sorted(left[0]["args"][2:4]), ["JSON=1", "SUITE=unit"])
+        self.assertEqual(left[0]["args"][4:], ["--", "--check"])
+        self.assertEqual(left[0]["leaked"], {})
 
-    def test_forwarded_options_preserve_quoted_paths(self):
-        result = self.records(self.make("benchmark-device", 'ARGS=--label candidate --media "/tmp/my movie\'s clip.mp4"'))[0]
-        self.assertEqual(result["args"][-4:], ["--label", "candidate", "--media", "/tmp/my movie's clip.mp4"])
-        self.assertEqual(result["args"][2], "benchmark")
+    def test_unknown_options_reach_the_router_for_validation(self):
+        args = self.records(self.make("build", "PLATFROM=android"))[0]["args"]
+        self.assertEqual(args, ["Build/commands.py", "build", "PLATFROM=android", "--"])
 
-    def test_json_option_is_explicit_and_not_forwarded_to_tools(self):
-        for entry_point in ((), ("-C", "Build")):
-            with self.subTest(entry_point=entry_point):
-                default = self.records(self.make(*entry_point, "format"))[0]
-                disabled = self.records(self.make(*entry_point, "format", "JSON=0"))[0]
-                enabled = self.records(self.make(*entry_point, "format", "JSON=1"))[0]
-                self.assertEqual(default, disabled)
-                self.assertEqual(default["args"], ["Build/validation.py", "--kind", "command", "--", "pre-commit", "run", "--all-files"])
-                self.assertEqual(enabled["args"][:5], ["Build/validation.py", "--kind", "command", "--json", "--"])
-                self.assertEqual(enabled["args"][5:], default["args"][4:])
-                self.assertEqual(enabled["leaked"], {})
-        phases = self.records(self.make("verify", "JSON=1"))
-        self.assertEqual([item["args"][3:5] for item in phases], [["--json", "--"], ["--json", "--"]])
+    def test_quoted_values_and_paths_survive(self):
+        args = self.records(self.make("benchmark", "DEVICE=my device's id", 'ARGS=--label candidate --media "/tmp/my movie\'s clip.mp4"'))[
+            0
+        ]["args"]
+        self.assertIn("DEVICE=my device's id", args)
+        self.assertEqual(args[-5:], ["--", "--label", "candidate", "--media", "/tmp/my movie's clip.mp4"])
 
-    def test_verify_is_serial_even_with_parallel_make_and_does_not_benchmark(self):
-        records = self.records(self.make("-j8", "verify", "BUILD_ARGS=--offline", "TEST_ARGS=--lane unit", env={"CHECK_ORDER": "1"}))
-        self.assertEqual([item["args"][2] for item in records], ["build", "test"])
-        self.assertIn("Build/mpvbuild", records[0]["args"])
-        self.assertIn("Build/Tests/coverage.py", records[1]["args"])
-        self.assertEqual(records[0]["args"][-1], "--offline")
-        self.assertEqual(records[1]["args"][-2:], ["--lane", "unit"])
-        self.assertNotIn("--offline", records[1]["args"])
-        self.assertNotIn("--lane", records[0]["args"])
+    def test_commands_run_in_order_even_with_parallel_make_and_stop_on_failure(self):
+        records = self.records(self.make("-j8", "build", "test", "PLATFORM=android", env={"CHECK_ORDER": "1"}))
+        self.assertEqual([item["args"][1] for item in records], ["build", "test"])
+        self.assertTrue(all("PLATFORM=android" in item["args"] for item in records))
+        failed = self.make("build", "test", env={"STUB_EXIT": "7"})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(len(failed.stdout.splitlines()), 1)
 
-    def test_verify_stops_after_a_failed_build(self):
-        result = self.make("verify", env={"STUB_EXIT": "7"})
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(len(result.stdout.splitlines()), 1)
-        self.assertEqual(json.loads(result.stdout)["args"][2], "build")
-
-    def test_help_needs_no_build_tools_and_target_help_is_not_hidden_in_json(self):
-        result = self.make("help", "PYTHON=/does/not/exist")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("benchmark-compare", result.stdout)
-        self.assertIn("JSON=1", result.stdout)
-        details = self.records(self.make("help", "TARGET=benchmark-ab", "ARGS=run"))[0]["args"]
-        self.assertEqual(details, ["Build/Benchmarks/run_device_ab.py", "run", "--help"])
-        self.assertNotEqual(self.make("help", "TARGET=unknown").returncode, 0)
-
-    def test_build_profile_and_device_test_safety_arguments_are_forwarded(self):
-        build = self.records(self.make("build", "PROFILE=release", "ARGS=--offline"))[0]["args"]
-        self.assertEqual(build[4:6], [str(self.python), "Build/mpvbuild"])
-        self.assertEqual(build[-3:], ["--profile", "release", "--offline"])
-        self.assertEqual(self.records(self.make("build", "PROFILE=release", "ARGS=--offline"))[0]["leaked"], {})
-        device = self.records(self.make("test-device", "ARGS=--device-id example"))[0]["args"]
-        self.assertEqual(device[:7], ["Build/validation.py", "--kind", "test", "--", "caffeinate", "-disu", str(self.python)])
-        self.assertEqual(device[7:10], ["Build/Tests/run_xcode_tests.py", "--platform", "device"])
-        self.assertEqual(device[-2:], ["--device-id", "example"])
-
-    def test_package_build_has_no_media_step_and_swift_tests_use_fixture_runner(self):
-        build = self.records(self.make("build-swift", "ARGS=--arch arm64"))
-        self.assertEqual(len(build), 1)
-        self.assertEqual(
-            build[0]["args"], ["Build/validation.py", "--kind", "build", "--", "swift", "build", "--package-path", ".", "--arch", "arm64"]
-        )
-        tests = self.records(self.make("test-swift", "ARGS=--filter PlaybackTests"))
-        self.assertEqual(len(tests), 1)
-        self.assertEqual(tests[0]["args"][-4:], [str(self.python), "Build/Tests/run_swift_tests.py", "--filter", "PlaybackTests"])
-
-    def test_android_candidate_is_local_and_accepts_a_version(self):
-        result = self.records(self.make("release-android-candidate", "JSON=1", "ARGS=--version 0.7.0"))[0]
-        self.assertEqual(result["args"][2], "build")
-        self.assertEqual(result["args"][-4:], [str(self.python), "Build/Android/release.py", "--version", "0.7.0"])
+    def test_help_is_the_default_command_and_old_targets_do_not_exist(self):
+        self.assertEqual(self.records(self.make())[0]["args"], ["Build/commands.py", "help", "--"])
+        self.assertNotEqual(self.make("test-unit").returncode, 0)
 
 
 if __name__ == "__main__":

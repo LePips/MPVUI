@@ -13,13 +13,13 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
     public package(set) var duration: Duration = .zero
     /// Whether seeking is available.
     public package(set) var isSeekable = false
-    /// User pause intention, including during buffering.
+    /// Whether playback is intended to remain paused, including while seeking or buffering.
     public package(set) var isPaused = true
     /// Whether playback has produced a frame for this load.
     public package(set) var hasPlaybackFrame = false
-    /// Current chapter, or nil when none is active.
+    /// The current chapter index, or `nil` when no chapter is active.
     public package(set) var currentChapterIndex: Int?
-    /// Volume in the range zero through one hundred.
+    /// The playback volume in mpv's `0...100` range.
     public package(set) var volume = 100.0
     /// Whether audio is muted.
     public package(set) var isMuted = false
@@ -43,13 +43,16 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
     public package(set) var interceptsTextSubtitles = false
     /// Most recent command or playback failure.
     public package(set) var error: MPVPlayerError?
-    /// Native renderer reported for the current source, or nil before initialization.
+    /// The native renderer reported for the current source, or `nil` before initialization.
     public package(set) var nativeVideoOutput: String?
     /// Whether the session has permanently closed.
     public package(set) var isClosed = false
 
     package var requestedVideoFeatures: Set<MPVVideoFeature>?
-    /// Composition capabilities of the current renderer. OS PiP readiness is separate.
+
+    /// The composition capabilities of the current renderer, independent of system picture-in-picture readiness.
+    ///
+    /// - Complexity: O(n), where n is the number of reported tracks.
     public var videoFeatureCapabilities: MPVVideoFeatureCapabilities {
         .init(
             backend: mediaInformation.hdr.presentation.backend,
@@ -61,8 +64,10 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
     }
 
     /// The current source's accumulated feature request, when one has been made.
+    ///
+    /// - Complexity: O(n), where n is the number of reported tracks.
     public var videoFeatureRequestResult: MPVVideoFeatureRequestResult? {
-        requestedVideoFeatures.map { videoFeatureCapabilities.resolve($0) }
+        requestedVideoFeatures.map { videoFeatureCapabilities.requestResult(for: $0) }
     }
 
     /// Whether this load has produced a frame with known video dimensions.
@@ -77,18 +82,19 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
         source: URL,
         configuration: MPVSessionConfiguration,
         generation: UInt64,
-        autoPlay: Bool?,
+        automaticallyPlays: Bool?,
         startTime: Duration?
     ) -> Self {
         var snapshot = Self()
         snapshot.generation = generation
         snapshot.state = .loading
-        snapshot.isPaused = !(autoPlay ?? configuration.autoPlay)
+        snapshot.isPaused = !(automaticallyPlays ?? configuration.automaticallyPlays)
         snapshot.position = (startTime ?? configuration.startTime ?? .zero).clampPositiveOrZero
         snapshot.mediaInformation = .init(sourceURL: source)
         snapshot.volume = configuration.volume
         snapshot.playbackRate = configuration.playbackRate
         snapshot.dolbyVision = .init(requestedPolicy: configuration.dolbyVisionPolicy)
+
         return snapshot
     }
 
@@ -96,54 +102,74 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
         switch update {
         case let .state(value):
             state = value
+
             switch value {
             case .loading, .stopped, .idle, .failed:
                 hasPlaybackFrame = false
                 currentChapterIndex = nil
+
             default: break
             }
+
             if value == .stopped || value == .idle {
                 nativeVideoOutput = nil
             }
+
             if let failure = value.error {
                 error = failure
             }
+
         case let .paused(value): isPaused = value
+
         case let .timing(value, total, seekable):
             position = value
             duration = total
             isSeekable = seekable
             mediaInformation.duration = total > .zero ? total : nil
+
         case let .frameRate(value): mediaInformation.framesPerSecond = value
+
         case let .chapter(value): currentChapterIndex = value
+
         case let .videoFrame(value): hasPlaybackFrame = value
+
         case let .buffer(value): buffer = value
+
         case let .media(value):
             mediaInformation = value
+
             if let total = value.duration {
                 duration = total
             }
+
         case let .diagnostics(value): diagnostics = value
+
         case let .dolbyVision(value): dolbyVision = value
+
         case let .color(value): color = value
+
         case let .audio(value, muted, rate):
             volume = value
             isMuted = muted
             playbackRate = rate
+
         case let .textSubtitles(value): subtitles = value
+
         case let .error(value, fatal):
             error = value
+
             if fatal {
                 state = .failed(value)
                 hasPlaybackFrame = false
                 currentChapterIndex = nil
             }
+
         case .log: break
         }
     }
 }
 
-/// Ordered session output; terminal states, errors, and subtitle clears are lossless.
+/// An ordered session update containing a complete playback state or a log message.
 public enum MPVSessionEvent: Sendable {
 
     /// Complete state copied after an ordered native update.
@@ -160,14 +186,17 @@ package extension MPVSession {
         latestSnapshot.interceptsTextSubtitles = isTextSubtitleInterceptionEnabled
         latestSnapshot.isClosed = isClosed
         latestSnapshot.apply(update)
+
         let event: MPVSessionEvent = if case let .log(log) = update {
             .log(log)
         } else {
             .snapshot(latestSnapshot)
         }
+
         for observer in observers.values {
             observer.yield(event)
         }
+
         for observer in nativeObservers.values {
             observer(event)
         }

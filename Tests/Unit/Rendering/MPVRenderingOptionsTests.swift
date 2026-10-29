@@ -12,6 +12,7 @@ struct MPVRenderingOptionsTests {
         let battery = MPVRenderingOptions.resolve(.init(), backend: .gpu, lowPowerMode: true)
         #expect(battery.preset == .battery)
         #expect(battery.options["dither"] == "no")
+
         let requested = MPVRenderingOptions.resolve(.init(dithering: .ordered), backend: .gpu, lowPowerMode: true)
         #expect(requested.options["dither"] == "ordered")
     }
@@ -52,6 +53,7 @@ struct MPVRenderingOptionsTests {
         #expect(battery.options["scale"] == "lanczos")
         #expect(battery.options["scale-antiring"] == "1.0")
         #expect(battery.options["hdr-compute-peak"] == "no")
+
         let balanced = MPVRenderingOptions.resolve(.init(), backend: .metal, lowPowerMode: false)
 
         #expect(balanced.preset == .balanced)
@@ -80,6 +82,7 @@ struct MPVRenderingOptionsTests {
         let policy = MPVDeinterlacePolicy(mode: .automatic)
 
         #expect(MPVRenderingOptions.deinterlaceOptions(policy)["deinterlace"] == "auto")
+
         let progressive = MPVRenderingOptions.deinterlaceStatus(
             policy: policy,
             interlaced: false,
@@ -88,6 +91,7 @@ struct MPVRenderingOptionsTests {
         )
 
         #expect(progressive.requiresSoftwareFrames == false)
+
         let interlaced = MPVRenderingOptions.deinterlaceStatus(
             policy: policy,
             interlaced: false,
@@ -97,6 +101,7 @@ struct MPVRenderingOptionsTests {
 
         #expect(interlaced.requiresSoftwareFrames == true)
         #expect(interlaced.reason?.contains("downloaded") == true)
+
         let unknown = MPVRenderingOptions.deinterlaceStatus(policy: policy, interlaced: nil, hardwareDecoder: "videotoolbox")
 
         #expect(unknown.requiresSoftwareFrames == nil)
@@ -104,7 +109,7 @@ struct MPVRenderingOptionsTests {
 
     @Test
     func `explicit field order and detection use double rate software graph`() {
-        let policy = MPVDeinterlacePolicy(algorithm: .yadif, analyzeFieldOrder: true, fieldOrder: .bottomFirst, mode: .forced)
+        let policy = MPVDeinterlacePolicy(algorithm: .yadif, analyzesFieldOrder: true, fieldOrder: .bottomFirst, mode: .forced)
         let result = MPVRenderingOptions.deinterlaceOptions(policy)
 
         #expect(result["deinterlace"] == "no")

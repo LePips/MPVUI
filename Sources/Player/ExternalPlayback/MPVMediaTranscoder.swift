@@ -28,8 +28,6 @@ final class MPVMediaTranscoder: @unchecked Sendable {
         let message: String
     }
 
-    static let sourceOptionNames = MPVMediaPackagingOptions.sourceOptionNames
-
     let updates: AsyncStream<Update>
     private let queue = DispatchQueue(label: "com.lepips.MPVUI.transcoder", qos: .userInitiated)
     private let events: DispatchSourceUserDataAdd
@@ -49,10 +47,12 @@ final class MPVMediaTranscoder: @unchecked Sendable {
 
     deinit {
         events.cancel()
+
         if let handle {
             mpv_set_wakeup_callback(handle, nil, nil)
             mpv_terminate_destroy(handle)
         }
+
         securityScopedURL?.stopAccessingSecurityScopedResource()
         continuation.finish()
     }
@@ -60,9 +60,11 @@ final class MPVMediaTranscoder: @unchecked Sendable {
     static func options(for request: Request) -> [String: String] {
         var options = request.options
         let scale = "w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"
+
         let filter = request.toneMapHDR
             ? "libplacebo=\(scale):format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
             : "scale=\(scale),format=yuv420p"
+
         let owned = [
             "config": "no",
             "load-scripts": "no",
@@ -89,6 +91,7 @@ final class MPVMediaTranscoder: @unchecked Sendable {
             "vf": "lavfi=[\(filter),fps=30]",
         ]
         options.merge(owned) { _, owned in owned }
+
         return options
     }
 
@@ -99,39 +102,54 @@ final class MPVMediaTranscoder: @unchecked Sendable {
     func start(_ request: Request) {
         queue.async { [self] in
             guard handle == nil, !isFinished else { return }
+
             if request.source.isFileURL, request.source.startAccessingSecurityScopedResource() {
                 securityScopedURL = request.source
             }
+
             guard let client = mpv_create() else {
                 fail("Unable to create the media conversion client.")
                 return
             }
+
             handle = client
+
             do {
                 for (name, value) in Self.options(for: request).sorted(by: { $0.key < $1.key }) {
                     let result = mpv_set_option_string(client, name, value)
+
                     // Builds without scripting support do not expose load-scripts or osc.
                     if result == MPV_ERROR_OPTION_NOT_FOUND.rawValue, ["load-scripts", "osc"].contains(name) {
                         continue
                     }
+
                     guard result >= 0 else { throw ConversionError(message: "Configure \(name): \(Self.message(result))") }
                 }
+
                 mpv_request_log_messages(client, "error")
+
                 let result = mpv_initialize(client)
+
                 guard result >= 0 else {
                     throw ConversionError(
                         message: "Initialize HLS conversion: \(Self.message(result)). Use a Libmpv build with the HLS muxer enabled."
                     )
                 }
+
                 context = WeakBox(self)
+
                 mpv_set_wakeup_callback(client, { pointer in
                     guard let pointer else { return }
+
                     Unmanaged<WeakBox<MPVMediaTranscoder>>.fromOpaque(pointer).takeUnretainedValue().value?.events.add(data: 1)
                 }, Unmanaged.passUnretained(context!).toOpaque())
+
                 mpv_observe_property(client, 1, "time-pos", MPV_FORMAT_DOUBLE)
+
                 let arguments = ["loadfile", MPVSession.mpvPath(for: request.source), "replace"]
                 let strings = arguments.map { strdup($0) }
                 defer { strings.forEach { free($0) } }
+
                 var pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer($0) } } + [nil]
                 let status = mpv_command(client, &pointers)
                 guard status >= 0 else { throw ConversionError(message: "Open conversion source: \(Self.message(status))") }
@@ -145,8 +163,10 @@ final class MPVMediaTranscoder: @unchecked Sendable {
     func setPaused(_ paused: Bool, synchronously: Bool = false) {
         let update: @Sendable () -> Void = { [self] in
             guard let handle, !isFinished else { return }
+
             mpv_set_property_string(handle, "pause", paused ? "yes" : "no")
         }
+
         if synchronously {
             queue.sync(execute: update)
         } else {
@@ -165,6 +185,7 @@ final class MPVMediaTranscoder: @unchecked Sendable {
 
     private func drainEvents() {
         guard let handle, !isFinished else { return }
+
         while let event = mpv_wait_event(handle, 0), event.pointee.event_id != MPV_EVENT_NONE {
             switch event.pointee.event_id {
             case MPV_EVENT_PROPERTY_CHANGE:
@@ -172,25 +193,31 @@ final class MPVMediaTranscoder: @unchecked Sendable {
                       data.pointee.format == MPV_FORMAT_DOUBLE,
                       let value = data.pointee.data?.assumingMemoryBound(to: Double.self).pointee,
                       value.isFinite else { continue }
+
                 continuation.yield(.progress(value))
+
             case MPV_EVENT_LOG_MESSAGE:
                 if let log = event.pointee.data?.assumingMemoryBound(to: mpv_event_log_message.self),
                    let message = log.pointee.text
                 {
                     failureMessage = String(cString: message).trimmingCharacters(in: .whitespacesAndNewlines)
                 }
+
             case MPV_EVENT_END_FILE:
                 guard let end = event.pointee.data?.assumingMemoryBound(to: mpv_event_end_file.self) else { continue }
+
                 if end.pointee.reason == MPV_END_FILE_REASON_ERROR {
                     fail(failureMessage ?? Self.message(end.pointee.error))
                     return
                 }
+
             case MPV_EVENT_SHUTDOWN:
                 // Shutdown follows the final segment write and ENDLIST marker.
                 // END_FILE can arrive before those writes finish.
                 continuation.yield(.finished)
                 finish()
                 return
+
             default:
                 break
             }
@@ -204,11 +231,13 @@ final class MPVMediaTranscoder: @unchecked Sendable {
 
     private func finish() {
         isFinished = true
+
         if let handle {
             mpv_set_wakeup_callback(handle, nil, nil)
             mpv_terminate_destroy(handle)
             self.handle = nil
         }
+
         context = nil
         securityScopedURL?.stopAccessingSecurityScopedResource()
         securityScopedURL = nil

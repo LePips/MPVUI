@@ -7,7 +7,7 @@ public struct MPVMediaTrackIdentifier: Hashable, Sendable {
     /// The integer identifier assigned by mpv within that category.
     public let mpvID: Int
 
-    /// Identifies a native track within its media category.
+    /// Creates an identifier for a native track within its media category.
     public init(type: MPVTrackType, mpvID: Int) {
         self.type = type
         self.mpvID = mpvID

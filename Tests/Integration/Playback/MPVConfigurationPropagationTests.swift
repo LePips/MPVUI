@@ -14,7 +14,7 @@ struct MPVConfigurationPropagationTests {
         let quality = MPVRenderingQuality(
             antiringing: 0.25,
             chromaScaling: .bicubic,
-            debanding: false,
+            isDebandingEnabled: false,
             dithering: .ordered,
             gamutMapping: .relative,
             peakDetection: .disabled,
@@ -22,23 +22,28 @@ struct MPVConfigurationPropagationTests {
             scaling: .lanczos,
             toneMapping: .reinhard
         )
+
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no", "scale": "bilinear", "deband": "yes"],
-            autoPlay: false,
+            automaticallyPlays: false,
             renderingQuality: quality,
             videoOutput: output
         ))
         defer { fixture.close() }
         fixture.player.setDiagnosticsEnabled(true)
         try await fixture.loadPaused(TestPaths.testMedia("color-hdr10.mkv"))
+
         let player = fixture.player
+
         try await eventually("accepted rendering quality diagnostics") {
             player.playbackDiagnostics.renderingQuality.requested == quality
         }
+
         let status = player.playbackDiagnostics.renderingQuality
 
         #expect(status.resolvedPreset == .battery)
         #expect(status.backend == output.coreValue)
+
         if output == .sampleBuffer {
             #expect(status.effectiveOptions.isEmpty)
             #expect(!status.unsupportedFeatures.isEmpty)
@@ -55,6 +60,7 @@ struct MPVConfigurationPropagationTests {
             #expect(options["tone-mapping"] == "reinhard")
             #expect(status.unsupportedFeatures.isEmpty)
         }
+
         #expect(player.lastError == nil)
     }
 
@@ -76,23 +82,26 @@ struct MPVConfigurationPropagationTests {
                 "target-contrast": "invalid-contrast",
             ],
             audio: .init(audioSession: .hostManaged, spatialization: .disabled),
-            autoPlay: false,
+            automaticallyPlays: false,
             hardwareDecoding: .disabled,
-            initialBufferSeconds: .milliseconds(250),
+            initialBufferDuration: .milliseconds(250),
             logLevel: .info,
-            loop: true,
-            networkCacheSeconds: .seconds(21),
+            isLoopingEnabled: true,
+            networkCacheDuration: .seconds(21),
             playbackRate: 1.25,
             startTime: .milliseconds(400),
             videoOutput: output,
             volume: 37
         ))
         defer { fixture.close() }
+
         let player = fixture.player
         player.load(TestPaths.baselineMedia)
+
         try await eventually("configured initial position and pause", timeout: .seconds(15)) {
             player.state == .paused && abs(player.position.seconds - 0.4) < 0.1
         }
+
         let expectedOutput = output
 
         #expect(player.videoOutput == expectedOutput)
@@ -111,32 +120,42 @@ struct MPVConfigurationPropagationTests {
             "ao-avfoundation-manage-audio-session",
             "sub-font",
         ]
+
         var observed: [String: String] = [:]
+
         player.logHandler = { message in
             guard let marker = message.message.range(of: "CONFIG_AUDIT|") else { return }
+
             for field in message.message[marker.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|") {
                 let parts = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+
                 if parts.count == 2 {
                     observed[String(parts[0])] = String(parts[1])
                 }
             }
         }
+
         for recreate in [false, true] {
             if recreate {
                 let previous = await player.lifecycleDiagnostics()
+
                 player.stop()
                 try await eventually("configured player stopped") { player.state == .stopped }
                 player.load(TestPaths.baselineMedia)
+
                 try await eventually("configuration restored after recreation") {
                     let current = await player.lifecycleDiagnostics()
+
                     return current.handlesCreated == previous.handlesCreated + 1
                         && player.state == .paused && player.isSeekable
                         && abs(player.position.seconds - 0.4) < 0.1
                 }
             }
+
             observed = [:]
+
             let query = "CONFIG_AUDIT|" + properties.map { "\($0)=${=options/\($0)}" }.joined(separator: "|")
-            player.command("expand-properties", arguments: ["print-text", query])
+            player.executeCommand("expand-properties", arguments: ["print-text", query])
             try await eventually("real mpv option readback") { observed.count == properties.count }
 
             #expect(observed["vo"] == (expectedOutput == .metal ? "gpu-next" : "avfoundation"))

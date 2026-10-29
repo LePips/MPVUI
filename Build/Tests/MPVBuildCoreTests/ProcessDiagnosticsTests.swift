@@ -8,9 +8,11 @@ struct ProcessDiagnosticsTests {
         let assertions = (1 ... 6).map { "Test \"case \($0)\" recorded an issue at Tests.swift:\($0):13: Expectation failed: false" }
         let output = assertions.joined(separator: "\n") + String(repeating: "\npassed unrelated work", count: 2000)
         let excerpt = ProcessDiagnostics.excerpt(output)
+
         for assertion in assertions {
             #expect(excerpt.contains(assertion))
         }
+
         #expect(excerpt.count < 12000)
     }
 

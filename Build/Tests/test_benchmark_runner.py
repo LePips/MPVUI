@@ -8,12 +8,14 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "Benchmarks"))
 import benchmark
-from test_comparison import report
+from test_benchmark_comparison import report
 
 
 class RunnerTests(unittest.TestCase):

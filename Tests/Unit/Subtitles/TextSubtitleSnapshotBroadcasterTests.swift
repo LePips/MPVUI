@@ -14,6 +14,7 @@ struct TextSubtitleSnapshotBroadcasterTests {
         broadcaster.terminate()
         broadcaster.terminate()
         broadcaster.publish(TextSubtitleSnapshot(regions: [TextSubtitleRegion(text: "too late")]))
+
         var late = broadcaster.subscribe().makeAsyncIterator()
 
         #expect(await existing.next() == nil)
@@ -74,11 +75,13 @@ struct TextSubtitleSnapshotBroadcasterTests {
             TextSubtitleRegion(text: "displayed"),
         ])
         broadcaster.publish(displayed)
+
         let received = await values.next()
 
         #expect(received == displayed)
 
         broadcaster.terminate()
+
         let cleared = await values.next()
         let finished = await values.next()
 
@@ -91,12 +94,15 @@ struct TextSubtitleSnapshotBroadcasterTests {
     func `player stream starts empty and interception is explicitly controlled`() async {
         let player = MPVPlayer()
         #expect(!player.isTextSubtitleInterceptionEnabled)
-        let stream = player.textSubtitleStream()
+
+        let stream = player.makeTextSubtitleStream()
+
         #expect(!player.isTextSubtitleInterceptionEnabled)
         player.setTextSubtitleInterceptionEnabled(true)
         #expect(player.isTextSubtitleInterceptionEnabled)
         player.setTextSubtitleInterceptionEnabled(false)
         #expect(!player.isTextSubtitleInterceptionEnabled)
+
         var values = stream.makeAsyncIterator()
 
         let initial = await values.next()

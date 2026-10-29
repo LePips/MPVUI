@@ -28,6 +28,7 @@ package extension MPVSession {
                     MPVMediaPackagingOptions.sourceOptionNames.contains($0.key)
                         || $0.key.hasPrefix("sub-") || $0.key.hasPrefix("secondary-sub-")
                 }
+
                 for name in [
                     "vid",
                     "aid",
@@ -43,15 +44,25 @@ package extension MPVSession {
                         options[name] = desiredProperties[name] ?? configuration.additionalOptions[name] ?? "auto"
                         continue
                     }
+
                     if let value = getString(name) ?? desiredProperties[name] {
                         options[name] = value
                     }
                 }
+
                 var packaging = MPVMediaPackagingOptions(
                     mpv: options,
                     httpHeaders: getNode("options/http-header-fields")?.arrayValue?.compactMap(\.stringValue)
                 )
+
                 let tracks = getNode("track-list")?.arrayValue ?? []
+
+                packaging.hasSelectedExternalTracks = Self.parseTracks(.array(tracks)).contains { track in
+                    guard track.isSelected, track.isExternal else { return false }
+
+                    return track.type != .subtitle || options[(track.subtitleRole ?? .primary).visibilityProperty] != "no"
+                }
+
                 for (property, type) in [("vid", "video"), ("aid", "audio")] {
                     guard let selected = options[property], let id = Int64(selected),
                           let track = tracks.first(where: {
@@ -60,16 +71,19 @@ package extension MPVSession {
                           let index = track["ff-index"]?.integerValue, let nativeIndex = Int32(exactly: index)
                     else {
                         if options[property] != "no", options[property] != "auto" {
-                            packaging.requiresRenderer = true
+                            packaging.renderingReasons.insert(.trackSelection)
                         }
+
                         continue
                     }
+
                     if property == "vid" {
                         packaging.videoIndex = nativeIndex
                     } else {
                         packaging.audioIndex = nativeIndex
                     }
                 }
+
                 continuation.resume(returning: packaging)
             }
         }
@@ -86,6 +100,7 @@ package extension MPVSession {
     func selectSubtitle(_ id: MPVMediaTrackIdentifier?, for role: MPVSubtitleRole = .primary) {
         queue.async { [weak self] in
             guard let self, !self.isClosed else { return }
+
             if let id {
                 guard id.type == .subtitle,
                       Self.parseTracks(self.getNode("track-list")).contains(where: { $0.id == id })
@@ -94,6 +109,7 @@ package extension MPVSession {
                     return
                 }
             }
+
             self.selectSubtitleImmediatelyOrDefer(id, for: role)
         }
     }
@@ -110,8 +126,11 @@ package extension MPVSession {
     ) {
         queue.async { [weak self] in
             guard let self else { return }
+
             let track = ExternalTrack(url: url, type: type, select: select, subtitleRole: subtitleRole)
+
             self.startExternalSecurityScopedAccessIfNeeded(for: url)
+
             if type != .subtitle || !self.externalTracks.contains(where: { $0.url == url && $0.type == type }) {
                 self.externalTracks.append(track)
             }
@@ -142,10 +161,13 @@ package extension MPVSession {
         guard isFileLoaded else { return }
 
         let tracks = pendingExternalTracks
+
         pendingExternalTracks.removeAll()
+
         let selections = desiredProperties.filter {
             ["vid", "aid", "sid", "secondary-sid"].contains($0.key)
         }
+
         for track in tracks {
             loadExternalTrackImmediately(track)
         }
@@ -159,10 +181,14 @@ package extension MPVSession {
             _ = setPropertyImmediately("sid", to: "no")
             _ = setPropertyImmediately("secondary-sid", to: "no")
         }
+
         for name in ["vid", "aid", "sid", "secondary-sid"] {
             guard let value = selections[name] else { continue }
+
             desiredProperties[name] = value
+
             let status = setPropertyImmediately(name, to: value)
+
             if status < 0 {
                 publishCommandError(status, context: "Restore \(name)")
             }
@@ -173,6 +199,7 @@ package extension MPVSession {
         for url in externalSecurityScopedURLs {
             platform.endSourceAccess(url)
         }
+
         externalSecurityScopedURLs.removeAll()
     }
 
@@ -181,15 +208,18 @@ package extension MPVSession {
         for role: MPVSubtitleRole = .primary
     ) {
         dispatchPrecondition(condition: .onQueue(queue))
+
         if let id {
             // mpv cannot decode the same track in both slots. Explicitly
             // move it, and retain the resulting Off state for recreation.
             let other = role.other.selectionProperty
             let selected = getString(other) ?? desiredProperties[other]
+
             if selected == String(id.mpvID) {
                 setPropertyImmediatelyOrDefer(other, to: "no")
             }
         }
+
         setPropertyImmediatelyOrDefer(
             role.selectionProperty,
             to: id.map { String($0.mpvID) } ?? "no"
@@ -198,10 +228,13 @@ package extension MPVSession {
 
     private func loadExternalTrackImmediately(_ track: ExternalTrack) {
         dispatchPrecondition(condition: .onQueue(queue))
+
         // Stop releases scoped access while retaining the track descriptions.
         // Replay must reacquire access before the native client reopens them.
         startExternalSecurityScopedAccessIfNeeded(for: track.url)
+
         let path = platform.mediaPath(track.url)
+
         // mpv may already have discovered a sidecar beside the video. Reuse it
         // when loading explicitly, including after renderer recreation.
         if track.type == .subtitle,
@@ -214,8 +247,10 @@ package extension MPVSession {
             if track.select {
                 selectSubtitleImmediatelyOrDefer(id, for: track.subtitleRole)
             }
+
             return
         }
+
         let commandName: String =
             switch track.type {
             case .video: "video-add"
@@ -224,13 +259,16 @@ package extension MPVSession {
             }
 
         let selectsAfterAdding = track.type == .subtitle || (track.type == .video && renderTarget == nil)
+
         let previousIDs = selectsAfterAdding
             ? Set(Self.parseTracks(getNode("track-list")).map(\.id)) : []
+
         let status = runCommand([
             commandName,
             path,
             track.select && !selectsAfterAdding ? "select" : "auto",
         ])
+
         if status < 0 {
             publishCommandError(status, context: "Load external \(track.type.rawValue) track")
         } else if selectsAfterAdding, track.select,
@@ -250,6 +288,7 @@ package extension MPVSession {
     private func startExternalSecurityScopedAccessIfNeeded(for url: URL) {
         guard url.isFileURL, !externalSecurityScopedURLs.contains(url) else { return }
         guard platform.beginSourceAccess(url) else { return }
+
         externalSecurityScopedURLs.insert(url)
     }
 }

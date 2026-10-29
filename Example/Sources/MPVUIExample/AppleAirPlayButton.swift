@@ -35,7 +35,7 @@ extension AppleAirPlayButton: View {
             )) {
                 Button("OK") { model.player.externalPlayback.clearLastError() }
             } message: {
-                Text(model.player.externalPlayback.lastError?.localizedDescription ?? "Unable to prepare AirPlay.")
+                Text(model.player.externalPlayback.lastError?.message ?? "Unable to prepare AirPlay.")
             }
     }
 }
@@ -67,6 +67,7 @@ extension AppleAirPlaySurface: View {
 
     private var message: some View {
         let playback = model.player.externalPlayback
+
         return VStack(spacing: 8) {
             Text(playback.isPreparing ? "Preparing AirPlay…" : playback.isActive ? "AirPlay" : "Connecting to AirPlay…")
                 .font(.title2.weight(.semibold))
@@ -74,6 +75,7 @@ extension AppleAirPlaySurface: View {
             Text(playback.isActive ? "This media is playing on your AirPlay device." : "Playback will begin on your selected device.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+
             if playback.isPreparing {
                 Button("Cancel") { playback.stop() }
                     .buttonStyle(.bordered)

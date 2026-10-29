@@ -1,7 +1,10 @@
 import MPVCore
 import SwiftUI
 
-/// Fits primary and secondary text captions to the video's displayed aspect ratio.
+/// A noninteractive overlay that fits text subtitles to the video's displayed aspect ratio.
+///
+/// Primary subtitles appear at the bottom and secondary subtitles at the top.
+/// The overlay uses subtitle roles rather than authored WebVTT placement.
 @MainActor
 public struct MPVTextSubtitleOverlay<Caption: View> {
 
@@ -12,6 +15,7 @@ public struct MPVTextSubtitleOverlay<Caption: View> {
     private var referenceCanvasSize: CGSize {
         let referenceHeight: CGFloat = 540
         let fallback = CGSize(width: 960, height: referenceHeight)
+
         guard let videoSize,
               videoSize.width.isFinite, videoSize.height.isFinite,
               videoSize.width > 0, videoSize.height > 0
@@ -19,10 +23,16 @@ public struct MPVTextSubtitleOverlay<Caption: View> {
 
         let width = referenceHeight * (videoSize.width / videoSize.height)
         guard width.isFinite, width > 0 else { return fallback }
+
         return CGSize(width: width, height: referenceHeight)
     }
 
     /// Creates an overlay with caller-provided caption styling.
+    ///
+    /// - Parameters:
+    ///   - snapshot: The complete subtitle presentation to display.
+    ///   - videoSize: The video's display dimensions. Uses a 16:9 aspect ratio when absent or invalid.
+    ///   - caption: A view builder that styles each text region.
     public init(snapshot: TextSubtitleSnapshot, videoSize: CGSize? = nil, @ViewBuilder caption: @escaping (TextSubtitleRegion) -> Caption) {
         self.snapshot = snapshot
         self.videoSize = videoSize
@@ -32,13 +42,16 @@ public struct MPVTextSubtitleOverlay<Caption: View> {
 
 extension MPVTextSubtitleOverlay: View {
 
+    /// The primary and secondary subtitle views within the video frame.
     public var body: some View {
         GeometryReader { geometry in
             let referenceCanvas = referenceCanvasSize
+
             let videoScale = min(
                 geometry.size.width / referenceCanvas.width,
                 geometry.size.height / referenceCanvas.height
             )
+
             let videoFrame = CGSize(
                 width: referenceCanvas.width * videoScale,
                 height: referenceCanvas.height * videoScale
@@ -48,6 +61,7 @@ extension MPVTextSubtitleOverlay: View {
                 if !snapshot.isEmpty {
                     subtitleStack(for: .secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
                     subtitleStack(for: .primary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
@@ -82,7 +96,8 @@ extension MPVTextSubtitleOverlay: View {
 
 public extension MPVTextSubtitleOverlay where Caption == Text {
 
-    /// Creates a basic caption overlay; use the caption closure for system or app styling.
+    /// Creates an overlay with white text in the system title-3 font.
+    /// Uses a 16:9 aspect ratio when `videoSize` is absent or invalid.
     init(snapshot: TextSubtitleSnapshot, videoSize: CGSize? = nil) {
         self.init(snapshot: snapshot, videoSize: videoSize) { region in
             Text(region.text).font(.title3).foregroundColor(.white)

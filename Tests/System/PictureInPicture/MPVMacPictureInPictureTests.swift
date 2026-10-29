@@ -17,28 +17,37 @@ struct MPVMacPictureInPictureTests {
     @MainActor
     func `live overlay preserves environment state and intercepted subtitles in system PiP`() async throws {
         _ = NSApplication.shared
-        let player = MPVPlayer(configuration: .init(autoPlay: false, hdrPolicy: .disabled))
+
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled))
         let model = LiveOverlayModel()
+
         func video() -> some View {
             MPVVideoPlayer(player: player)
                 .videoOverlay { LiveOverlayProbe(model: model) }
                 .environment(\.colorScheme, .dark)
         }
+
         let window = makeWindow()
         let host = NSHostingView(rootView: AnyView(video()))
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         host.layoutSubtreeIfNeeded()
+
         let pip = player.pictureInPicture
+
         player.setTextSubtitleInterceptionEnabled(true)
-        let subtitles = player.textSubtitleStream()
+
+        let subtitles = player.makeTextSubtitleStream()
+
         let observation = Task { @MainActor in
             for await snapshot in subtitles {
                 model.caption = snapshot.text
             }
         }
+
         let subtitle = FileManager.default.temporaryDirectory.appendingPathComponent("overlay-\(UUID()).srt")
         try "1\n00:00:00,000 --> 00:00:10,000\nIntercepted caption\n".write(to: subtitle, atomically: true, encoding: .utf8)
+
         defer {
             observation.cancel()
             pip.stop()
@@ -47,12 +56,15 @@ struct MPVMacPictureInPictureTests {
             window.contentView = nil
             try? FileManager.default.removeItem(at: subtitle)
         }
-        player.load(TestPaths.baselineMedia, autoPlay: false, startTime: .seconds(1))
+
+        player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(1))
         player.loadExternalTrack(subtitle, type: .subtitle, select: true)
         try #require(await waitUntil { pip.isPossible && model.caption == "Intercepted caption" && model.identity != nil })
 
         let identity = try #require(model.identity)
+
         #expect(model.colorScheme == .dark)
+
         let surface = try #require(findSurface(in: host))
         let overlayHost = try #require(surface.videoOverlayHost)
 
@@ -108,7 +120,8 @@ struct MPVMacPictureInPictureTests {
     @MainActor
     func `SwiftUI source layout updates preserve the system hosted surface`() async throws {
         _ = NSApplication.shared
-        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled))
+
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: true, hdrPolicy: .disabled))
         let sourceWindow = makeWindow()
         let inlineHost = NSHostingView(rootView: AnyView(MPVVideoPlayer(player: player)))
         sourceWindow.contentView = inlineHost
@@ -118,12 +131,14 @@ struct MPVMacPictureInPictureTests {
 
         let surface = try #require(findSurface(in: inlineHost))
         let pip = player.pictureInPicture
+
         defer {
             pip.stop()
             surface.detach()
             sourceWindow.orderOut(nil)
             sourceWindow.contentView = nil
         }
+
         player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
         pip.start()
@@ -178,28 +193,35 @@ struct MPVMacPictureInPictureTests {
     @MainActor
     func `stalled application restoration cannot retain active PiP indefinitely`() async throws {
         _ = NSApplication.shared
-        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled))
+
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: true, hdrPolicy: .disabled))
         let surface = MPVPlatformVideoPlayer(player: player)
         let sourceWindow = makeWindow()
         sourceWindow.contentView = surface
         sourceWindow.makeKeyAndOrderFront(nil)
         surface.layoutSubtreeIfNeeded()
+
         let pip = MPVMacPictureInPictureController(player: player, restorationTimeout: .milliseconds(100))
         pip.attach(to: surface)
+
         var lastFailure: MPVPlayerError?
         var restorationWasCancelled = false
         pip.onFailure = { lastFailure = $0 }
-        pip.restoreUserInterface = {
+
+        pip.userInterfaceRestorationHandler = {
             do { try await Task.sleep(for: .seconds(60)) }
             catch { restorationWasCancelled = true }
+
             return true
         }
+
         defer {
             pip.invalidate()
             surface.detach()
             sourceWindow.orderOut(nil)
             sourceWindow.contentView = nil
         }
+
         try #require(pip.isSupported)
         player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
@@ -225,7 +247,8 @@ struct MPVMacPictureInPictureTests {
     @MainActor
     func `real system host plays resizes and restores one mpv session`() async throws {
         _ = NSApplication.shared
-        let player = MPVPlayer(configuration: .init(autoPlay: true, hdrPolicy: .disabled, videoOutput: .metal))
+
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: true, hdrPolicy: .disabled, videoOutput: .metal))
         let surface = MPVPlatformVideoPlayer(player: player)
         let sourceWindow = makeWindow()
         sourceWindow.title = "MPVUI PiP validation"
@@ -233,16 +256,20 @@ struct MPVMacPictureInPictureTests {
         sourceWindow.makeKeyAndOrderFront(nil)
         surface.layoutSubtreeIfNeeded()
         surface.updateRenderingConfiguration()
+
         let pip = player.pictureInPicture
+
         defer {
             pip.stop()
             surface.detach()
             sourceWindow.orderOut(nil)
             sourceWindow.contentView = nil
         }
+
         try #require(pip.isSupported)
         player.load(TestPaths.baselineMedia)
         try #require(await waitUntil { player.state == .playing && pip.isPossible })
+
         let layer = surface.metalLayer
         let initialLifecycle = await player.lifecycleDiagnostics()
         let positionBeforeStart = player.position
@@ -259,10 +286,12 @@ struct MPVMacPictureInPictureTests {
         try #require(await waitUntil { player.position > positionBeforeStart + .seconds(1) })
 
         let originalPiPSize = surface.bounds.size
+
         pipWindow.setContentSize(NSSize(width: 360, height: 203))
         surface.layoutSubtreeIfNeeded()
         surface.requestAuthoritativeFinalResize()
         try #require(await waitUntil { surface.bounds.size != originalPiPSize })
+
         let resizedPixels = MPVRenderSurfaceConfiguration.drawableSize(
             for: surface.bounds.size,
             scale: surface.metalLayer.contentsScale
@@ -292,11 +321,13 @@ struct MPVMacPictureInPictureTests {
         try #require(await waitUntil { !pip.isActive && !pip.isTransitioning })
 
         #expect(surface.window === sourceWindow)
+
         let finalLifecycle = await player.lifecycleDiagnostics()
 
         #expect(finalLifecycle.handlesCreated == initialLifecycle.handlesCreated)
         #expect(finalLifecycle.loadCommands == initialLifecycle.loadCommands)
         #expect(player.lastError == nil)
+
         print("MPVUI_PIP_EVIDENCE platform=macOS mechanism=private-system-host media=baseline-h264 "
             + "active=true nativeSize=\(Int(resizedPixels.width))x\(Int(resizedPixels.height)) "
             + "pauseSeekResume=true restored=true cycles=2 "
@@ -321,20 +352,25 @@ struct MPVMacPictureInPictureTests {
             if condition() {
                 return true
             }
+
             try? await Task.sleep(for: .milliseconds(50))
         }
+
         return condition()
     }
 
     @MainActor
     private func waitForOutput(_ player: MPVPlayer, size: CGSize) async -> Bool {
         let expected = MPVRenderOutputSize(width: Int(size.width), height: Int(size.height))
+
         for _ in 0 ..< 160 {
             if await player.renderOutputSize() == expected {
                 return true
             }
+
             try? await Task.sleep(for: .milliseconds(50))
         }
+
         return await player.renderOutputSize() == expected
     }
 
@@ -343,11 +379,13 @@ struct MPVMacPictureInPictureTests {
         if let surface = view as? MPVPlatformVideoPlayer {
             return surface
         }
+
         for child in view.subviews {
             if let surface = findSurface(in: child) {
                 return surface
             }
         }
+
         return nil
     }
 }

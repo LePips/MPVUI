@@ -98,10 +98,13 @@ struct PlaybackTimeline: View {
             if !scrubbing {
                 scrubPosition = model.position
             }
+
             scrubbing = true
         } else if scrubbing {
             let target = min(max(scrubPosition, 0), upperBound)
+
             scrubbing = false
+
             if model.seekable {
                 model.player.seek(to: .seconds(target))
             }

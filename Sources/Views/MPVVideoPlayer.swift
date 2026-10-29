@@ -26,7 +26,7 @@ public struct MPVVideoPlayer {
     private let player: MPVPlayer
     private var overlay: MPVVideoOverlay?
 
-    /// Displays an existing player.
+    /// Creates a video surface for an existing player.
     public init(player: MPVPlayer) {
         self.player = player
     }
@@ -48,23 +48,25 @@ extension MPVVideoPlayer: View {
             #endif
     }
 
-    /// Places content inside the video surface, including picture in picture.
+    /// Returns a video surface with the supplied overlay, including in picture in picture.
     ///
     /// macOS moves the live view into PiP. iOS rasterizes SwiftUI drawing into
     /// native frames. `ImageRenderer` cannot capture platform views such as web or
     /// video views. The iOS copy is noninteractive and has separate local state.
     /// Use a shared observable model for changing content.
     ///
-    /// Supports custom subtitles from ``MPVPlayer/textSubtitleStream()`` without
+    /// Supports custom subtitles from ``MPVPlayer/makeTextSubtitleStream()`` without
     /// changing interception. Repeated calls replace the previous overlay.
     public func videoOverlay(
         alignment: Alignment = .center,
         @ViewBuilder content: () -> some View
     ) -> Self {
         var copy = self
+
         copy.overlay = MPVVideoOverlay(
             content: AnyView(content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment))
         )
+
         return copy
     }
 }

@@ -9,6 +9,7 @@ struct MPVTextSubtitleParsingTests {
     func `malformed snapshot regions are ignored and omitted WebVTT settings use defaults`() {
         #expect(MPVTextSubtitleParser.snapshot(from: nil).isEmpty)
         #expect(MPVTextSubtitleParser.snapshot(from: .string("not a list")).isEmpty)
+
         let snapshot = MPVTextSubtitleParser.snapshot(from: .array([
             .none,
             .map([:]),
@@ -135,6 +136,7 @@ struct MPVTextSubtitleParsingTests {
 
         #expect(snapshot.text == "ordinary\npositioned")
         #expect(snapshot.regions.first?.placement == .automatic)
+
         #expect(
             snapshot.regions.last?.placement
                 == .webVTT(

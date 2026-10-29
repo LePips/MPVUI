@@ -36,6 +36,7 @@ struct NativePatchRegistrationTests {
         var android = try #require(object["android"] as? [String: Any])
         android["recipe"] = String(repeating: "a", count: 40)
         object["android"] = android
+
         let changed = try JSONDecoder().decode(NativeLock.self, from: JSONSerialization.data(withJSONObject: object))
 
         #expect(try fingerprint(native.appleBuildInputs) == fingerprint(changed.appleBuildInputs))
@@ -49,6 +50,7 @@ struct NativePatchRegistrationTests {
         let lock = try lock()
         let fixture = try copiedPatchTree()
         defer { try? FileManager.default.removeItem(at: fixture) }
+
         let patches = source == "libplacebo" ? lock.android.git[source]?.patches ?? [] : try lock.source(source).patches
 
         let patch = try #require(patches.first)
@@ -71,6 +73,7 @@ struct NativePatchRegistrationTests {
         let lock = try lock()
         let fixture = try copiedPatchTree()
         defer { try? FileManager.default.removeItem(at: fixture) }
+
         let directory = source == "Android" ? "Build/Android/Patches" : "Build/Patches/\(source)"
         try Data("unregistered patch".utf8).write(to: fixture.appendingPathComponent("\(directory)/unregistered.patch"))
 
@@ -89,17 +92,22 @@ struct NativePatchRegistrationTests {
 
     private func copiedPatchTree() throws -> URL {
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("native-patch-tests-\(UUID())")
+
         do {
             try FileManager.default.createDirectory(at: fixture.appendingPathComponent("Build"), withIntermediateDirectories: true)
+
             try FileManager.default.copyItem(
                 at: root.appendingPathComponent("Build/Patches"),
                 to: fixture.appendingPathComponent("Build/Patches")
             )
+
             try FileManager.default.createDirectory(at: fixture.appendingPathComponent("Build/Android"), withIntermediateDirectories: true)
+
             try FileManager.default.copyItem(
                 at: root.appendingPathComponent("Build/Android/Patches"),
                 to: fixture.appendingPathComponent("Build/Android/Patches")
             )
+
             return fixture
         } catch {
             try? FileManager.default.removeItem(at: fixture)

@@ -41,22 +41,26 @@ struct MPVDisplayMatchingState {
               playbackState != .seeking,
               playbackState != .buffering
         else { return .keep }
-
         guard let candidate else {
             // Retain a known format during same-item metadata refreshes; an
             // audio-only or unknown-format next item must release the old mode.
             return self.mediaGeneration == mediaGeneration ? .keep : clear()
         }
+
         self.mediaGeneration = mediaGeneration
         guard content != candidate else { return .keep }
+
         content = candidate
+
         return .apply(candidate)
     }
 
     private mutating func clear() -> Action {
         mediaGeneration = nil
         guard content != nil else { return .keep }
+
         content = nil
+
         return .clear
     }
 }
@@ -128,7 +132,9 @@ final class MPVDisplayMatchingCoordinator {
             detach()
             return
         }
+
         attach(to: target)
+
         latestInput = Input(
             media: media,
             mediaGeneration: mediaGeneration,
@@ -137,6 +143,7 @@ final class MPVDisplayMatchingCoordinator {
             videoOutput: videoOutput,
             dolbyVisionStatus: dolbyVisionStatus
         )
+
         refresh()
     }
 
@@ -145,6 +152,7 @@ final class MPVDisplayMatchingCoordinator {
             Self.owners.removeValue(forKey: target.identity)
             target.apply(nil)
         }
+
         releaseObservations()
         target = nil
         matchingState = MPVDisplayMatchingState()
@@ -156,8 +164,11 @@ final class MPVDisplayMatchingCoordinator {
         guard self.target?.identity != target.identity
             || Self.owners[target.identity]?.value !== self
         else { return }
+
         detach()
+
         let key = target.identity
+
         // Relinquish the retiring owner's notifications without clearing the
         // active criteria. This prevents an unnecessary intermediate blackout.
         if let previous = Self.owners[key]?.value {
@@ -169,8 +180,10 @@ final class MPVDisplayMatchingCoordinator {
             previous.matchingState = MPVDisplayMatchingState()
             previous.setModeSwitchInProgress(false)
         }
+
         self.target = target
         Self.owners[key] = WeakBox(self)
+
         cancelObservation = target.observeChanges { [weak self] in
             self?.refresh()
         }
@@ -180,13 +193,16 @@ final class MPVDisplayMatchingCoordinator {
         guard let target, let input = latestInput,
               Self.owners[target.identity]?.value === self
         else { return }
+
         setModeSwitchInProgress(target.isModeSwitchInProgress)
+
         let candidate = MPVDisplayMatchingContent(
             media: input.media,
             outputUsesHDR: input.outputUsesHDR,
             videoOutput: input.videoOutput,
             dolbyVisionStatus: input.dolbyVisionStatus
         )
+
         let action = matchingState.update(
             candidate: candidate,
             mediaGeneration: input.mediaGeneration,
@@ -195,6 +211,7 @@ final class MPVDisplayMatchingCoordinator {
             isActive: true,
             modeSwitchInProgress: isDisplayModeSwitchInProgress
         )
+
         switch action {
         case .keep:
             break
@@ -211,6 +228,7 @@ final class MPVDisplayMatchingCoordinator {
 
     private func setModeSwitchInProgress(_ value: Bool) {
         guard isDisplayModeSwitchInProgress != value else { return }
+
         isDisplayModeSwitchInProgress = value
         displayModeSwitchDidChange?(value)
     }

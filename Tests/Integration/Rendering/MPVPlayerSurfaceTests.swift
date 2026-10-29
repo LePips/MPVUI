@@ -32,7 +32,7 @@ struct MPVPlayerSurfaceTests {
         let surface = representable.makePlatformView()
         defer { dismantleRepresentableSurface(surface) }
 
-        let platformView: PlatformView = surface
+        let platformView: MPVPlatformView = surface
 
         #expect(platformView === surface)
         #expect(surface.player === player)
@@ -46,6 +46,7 @@ struct MPVPlayerSurfaceTests {
         representable.updatePlatformView(surface)
 
         #expect(!surface.isActiveRenderingSurface)
+
         #expect(
             surface.subviews.count {
                 $0 is MPVPlayerSurfaceLifecycleObserver
@@ -58,12 +59,14 @@ struct MPVPlayerSurfaceTests {
     func `dismantled helper surface and lifecycle observer deallocate`() {
         let player = MPVPlayer()
         let representable = MPVPlayerSurface(player: player)
+
         weak var releasedSurface: MPVPlatformVideoPlayer?
         weak var releasedObserver: MPVPlayerSurfaceLifecycleObserver?
 
         autoreleasepool {
             let surface = representable.makePlatformView()
             releasedSurface = surface
+
             releasedObserver =
                 surface.subviews.first {
                     $0 is MPVPlayerSurfaceLifecycleObserver
@@ -81,21 +84,25 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `registry schedules restoration of previous attached surface`() async {
         let player = MPVPlayer()
+
         let registry = MPVSwiftUISurfaceRegistry<SurfaceProbe>(
             isAttachedToWindow: { $0.isAttachedToWindow },
             activate: { $0.activationCount += 1 }
         )
+
         let firstSurface = SurfaceProbe()
         let supersedingSurface = SurfaceProbe()
 
         registry.register(firstSurface, for: player)
         registry.register(supersedingSurface, for: player)
+
         registry.surfaceDidMoveToWindow(
             firstSurface,
             player: player,
             isInWindow: true,
             shouldRestorePreviousSurface: false
         )
+
         registry.surfaceDidMoveToWindow(
             supersedingSurface,
             player: player,
@@ -104,12 +111,14 @@ struct MPVPlayerSurfaceTests {
         )
 
         supersedingSurface.isAttachedToWindow = false
+
         registry.surfaceDidMoveToWindow(
             supersedingSurface,
             player: player,
             isInWindow: false,
             shouldRestorePreviousSurface: true
         )
+
         await waitForNextMainQueueTurn()
 
         #expect(firstSurface.activationCount == 1)
@@ -120,8 +129,9 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `dismantling superseding surface reattaches previous live surface`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
         let firstSurface = firstRepresentable.makePlatformView()
@@ -136,18 +146,23 @@ struct MPVPlayerSurfaceTests {
             if !secondWasDismantled {
                 dismantleRepresentableSurface(secondSurface)
             }
+
             detachPlatformWindow(secondWindow)
+
             if !firstWasDismantled {
                 dismantleRepresentableSurface(firstSurface)
             }
+
             detachPlatformWindow(firstWindow)
         }
 
         attach(firstSurface, to: firstWindow)
         firstRepresentable.updatePlatformView(firstSurface)
+
         let firstAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= 1
         }
+
         let firstGeneration = firstSurface.resizeDiagnosticSnapshot
             .surfaceGeneration
 
@@ -158,6 +173,7 @@ struct MPVPlayerSurfaceTests {
 
         attach(secondSurface, to: secondWindow)
         secondRepresentable.updatePlatformView(secondSurface)
+
         let supersedingAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= firstAttachment.handlesCreated + 1
                 && $0.handlesDestroyed >= firstAttachment.handlesDestroyed + 1
@@ -165,6 +181,7 @@ struct MPVPlayerSurfaceTests {
 
         #expect(!firstSurface.isActiveRenderingSurface)
         #expect(secondSurface.isActiveRenderingSurface)
+
         #expect(
             supersedingAttachment.handlesCreated
                 == firstAttachment.handlesCreated + 1
@@ -190,6 +207,7 @@ struct MPVPlayerSurfaceTests {
         #expect(firstSurface.window === firstWindow)
         #expect(secondSurface.window == nil)
         #expect(firstSurface.metalLayer === firstLayer)
+
         #expect(
             firstSurface.resizeDiagnosticSnapshot.surfaceGeneration
                 > firstGeneration
@@ -218,8 +236,9 @@ struct MPVPlayerSurfaceTests {
         async
     {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
         let firstSurface = firstRepresentable.makePlatformView()
@@ -237,8 +256,10 @@ struct MPVPlayerSurfaceTests {
         }
 
         let lifecycleBeforeAttachment = await player.lifecycleDiagnostics()
+
         attach(firstSurface, to: firstWindow)
         firstRepresentable.updatePlatformView(firstSurface)
+
         let firstAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= lifecycleBeforeAttachment.handlesCreated + 1
         }
@@ -249,6 +270,7 @@ struct MPVPlayerSurfaceTests {
 
         attach(secondSurface, to: secondWindow)
         secondRepresentable.updatePlatformView(secondSurface)
+
         let supersedingAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= firstAttachment.handlesCreated + 1
                 && $0.handlesDestroyed >= firstAttachment.handlesDestroyed + 1
@@ -256,6 +278,7 @@ struct MPVPlayerSurfaceTests {
 
         #expect(!firstSurface.isActiveRenderingSurface)
         #expect(secondSurface.isActiveRenderingSurface)
+
         #expect(
             supersedingAttachment.handlesCreated
                 == firstAttachment.handlesCreated + 1
@@ -280,6 +303,7 @@ struct MPVPlayerSurfaceTests {
         #expect(secondSurface.window == nil)
         #expect(firstSurface.metalLayer === firstLayer)
         #expect(secondSurface.metalLayer === secondLayer)
+
         #expect(
             restoredAttachment.handlesCreated
                 == supersedingAttachment.handlesCreated + 1
@@ -297,8 +321,9 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `zero-sized superseder retires old target before restoring resized surface`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
         let firstSurface = firstRepresentable.makePlatformView()
@@ -315,11 +340,14 @@ struct MPVPlayerSurfaceTests {
         }
 
         let lifecycleBeforeAttachment = await player.lifecycleDiagnostics()
+
         attach(firstSurface, to: firstWindow)
         firstRepresentable.updatePlatformView(firstSurface)
+
         let firstAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= lifecycleBeforeAttachment.handlesCreated + 1
         }
+
         let initiallyCommittedSize = firstSurface.resizeDiagnosticSnapshot
             .committedDrawableSize
 
@@ -337,6 +365,7 @@ struct MPVPlayerSurfaceTests {
         #expect(!firstSurface.isActiveRenderingSurface)
         #expect(secondSurface.isActiveRenderingSurface)
         #expect(secondSurface.resizeDiagnosticSnapshot.activeLayerAddress == nil)
+
         #expect(
             zeroSizedOwnership.handlesCreated
                 == firstAttachment.handlesCreated
@@ -351,7 +380,9 @@ struct MPVPlayerSurfaceTests {
 
         let restoredBoundsSize = CGSize(width: 480, height: 270)
         resizeSurface(firstSurface, to: restoredBoundsSize)
+
         let retainedInactiveDrawableSize = firstLayer.drawableSize
+
         let expectedRestoredDrawableSize =
             MPVRenderSurfaceConfiguration.drawableSize(
                 for: restoredBoundsSize,
@@ -362,6 +393,7 @@ struct MPVPlayerSurfaceTests {
         #expect(retainedInactiveDrawableSize == initiallyCommittedSize)
 
         removeSurfaceFromPlatformWindow(secondSurface, in: secondWindow)
+
         let restoredAttachment = await waitForLifecycle(player) {
             firstSurface.isActiveRenderingSurface
                 && $0.handlesCreated >= firstAttachment.handlesCreated + 1
@@ -371,6 +403,7 @@ struct MPVPlayerSurfaceTests {
         #expect(!secondSurface.isActiveRenderingSurface)
         #expect(firstSurface.metalLayer === firstLayer)
         #expect(firstLayer.drawableSize == expectedRestoredDrawableSize)
+
         #expect(
             firstSurface.resizeDiagnosticSnapshot.committedDrawableSize
                 == expectedRestoredDrawableSize
@@ -395,8 +428,9 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `window removal and readdition reactivate the same surface and layer once`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let representable = MPVPlayerSurface(player: player)
         let surface = representable.makePlatformView()
         let layer = surface.metalLayer
@@ -408,11 +442,14 @@ struct MPVPlayerSurfaceTests {
         }
 
         let lifecycleBeforeAttachment = await player.lifecycleDiagnostics()
+
         attach(surface, to: window)
         representable.updatePlatformView(surface)
+
         let firstAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= lifecycleBeforeAttachment.handlesCreated + 1
         }
+
         let firstGeneration = surface.resizeDiagnosticSnapshot.surfaceGeneration
 
         #expect(surface.isActiveRenderingSurface)
@@ -422,6 +459,7 @@ struct MPVPlayerSurfaceTests {
 
         removeSurfaceFromPlatformWindow(surface, in: window)
         await waitForNextMainQueueTurn()
+
         let detached = await waitForLifecycle(player) {
             !player.hasActiveRenderSurface
                 && $0.handlesDestroyed >= firstAttachment.handlesDestroyed + 1
@@ -435,6 +473,7 @@ struct MPVPlayerSurfaceTests {
 
         attach(surface, to: window)
         representable.updatePlatformView(surface)
+
         let reattachment = await waitForLifecycle(player) {
             surface.isActiveRenderingSurface
                 && $0.handlesCreated >= detached.handlesCreated + 1
@@ -443,6 +482,7 @@ struct MPVPlayerSurfaceTests {
         #expect(surface.isActiveRenderingSurface)
         #expect(surface.window === window)
         #expect(surface.metalLayer === layer)
+
         #expect(
             surface.resizeDiagnosticSnapshot.surfaceGeneration
                 > firstGeneration
@@ -457,8 +497,9 @@ struct MPVPlayerSurfaceTests {
     @Test
     func `dismantling inactive surface does not disturb current owner`() async {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let firstRepresentable = MPVPlayerSurface(player: player)
         let secondRepresentable = MPVPlayerSurface(player: player)
         let firstSurface = firstRepresentable.makePlatformView()
@@ -472,6 +513,7 @@ struct MPVPlayerSurfaceTests {
             if !firstWasDismantled {
                 dismantleRepresentableSurface(firstSurface)
             }
+
             detachPlatformWindow(firstWindow)
             dismantleRepresentableSurface(secondSurface)
             detachPlatformWindow(secondWindow)
@@ -479,12 +521,14 @@ struct MPVPlayerSurfaceTests {
 
         attach(firstSurface, to: firstWindow)
         firstRepresentable.updatePlatformView(firstSurface)
+
         let firstAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= 1
         }
 
         attach(secondSurface, to: secondWindow)
         secondRepresentable.updatePlatformView(secondSurface)
+
         let currentAttachment = await waitForLifecycle(player) {
             $0.handlesCreated >= firstAttachment.handlesCreated + 1
                 && $0.handlesDestroyed >= firstAttachment.handlesDestroyed + 1
@@ -507,6 +551,7 @@ struct MPVPlayerSurfaceTests {
         #expect(secondSurface.isActiveRenderingSurface)
         #expect(secondSurface.window === secondWindow)
         #expect(secondSurface.metalLayer === secondLayer)
+
         #expect(
             afterInactiveDismantle.handlesCreated
                 == currentAttachment.handlesCreated
@@ -536,9 +581,11 @@ struct MPVPlayerSurfaceTests {
     ) async -> MPVEngineLifecycleDiagnostics {
         for _ in 0 ..< 100 {
             let lifecycle = await player.lifecycleDiagnostics()
+
             if predicate(lifecycle) {
                 return lifecycle
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
 

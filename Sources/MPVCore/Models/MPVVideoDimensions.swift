@@ -28,6 +28,7 @@ public struct MPVVideoDimensions: Equatable, Hashable, Sendable {
     /// The presentation aspect ratio, or `nil` when it cannot be determined.
     public var aspectRatio: Double? {
         guard effectiveWidth > 0, effectiveHeight > 0 else { return nil }
+
         return Double(effectiveWidth) / Double(effectiveHeight)
     }
 

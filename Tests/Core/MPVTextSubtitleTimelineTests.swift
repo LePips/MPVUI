@@ -33,6 +33,7 @@ struct MPVTextSubtitleTimelineTests {
         ])))
 
         #expect(snapshots.map(\.snapshot.text) == ["bottom", "top\nbottom"])
+
         guard case .webVTT = snapshots.last?.snapshot.regions.first?.placement else {
             Issue.record("WebVTT placement was lost")
             return
@@ -56,6 +57,7 @@ struct MPVTextSubtitleTimelineTests {
     func `empty track is distinct from unavailable or malformed data`() {
         #expect(MPVTextSubtitleTimeline.snapshots(from: .array([])) == [])
         #expect(MPVTextSubtitleTimeline.snapshots(from: nil) == nil)
+
         for invalid in [
             cue(1, 1, "zero"),
             cue(2, 1, "reversed"),

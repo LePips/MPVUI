@@ -33,10 +33,14 @@ struct GeneratedCodecTests {
         #expect(session.property("video-out-params/h")?.integerValue == 180)
         #expect(abs((session.property("duration")?.doubleValue ?? 0) - clip.duration) < 0.1)
         #expect(abs((session.property("container-fps")?.doubleValue ?? 0) - clip.fps) < 0.01)
+
         let tracks = try #require(session.property("track-list")?.arrayValue).compactMap(\.mapValue)
         #expect(tracks.first { $0["type"]?.stringValue == "video" }?["codec"]?.stringValue == clip.codec)
+
         let previous = try #require(session.property("time-pos")?.doubleValue)
+
         try session.command(["frame-step"])
+
         try await eventually("next decoded frame from \(clip.name)") {
             (session.property("time-pos")?.doubleValue ?? previous) > previous
         }

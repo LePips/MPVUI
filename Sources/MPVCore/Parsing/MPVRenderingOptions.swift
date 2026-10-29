@@ -37,12 +37,14 @@ package enum MPVRenderingOptions {
         // decoder. Try the zero-copy Apple decoder before mpv's safe fallback
         // list, which otherwise probes Vulkan first and fails in FFmpeg.
         var options = ["hwdec": decoding == .automatic && backend == .metal ? "videotoolbox,auto-safe" : decoding.rawValue]
+
         if backend == .metal, decoding != .disabled {
             // Retain decode parallelism without four FFmpeg frame-thread
             // contexts and their extra VideoToolbox surfaces. Hosts can
             // override this through additionalOptions for heavier workloads.
             options["hwdec-threads"] = "2"
         }
+
         return options
     }
 
@@ -52,6 +54,7 @@ package enum MPVRenderingOptions {
         lowPowerMode: Bool
     ) -> Resolution {
         let preset = quality.preset == .automatic ? (lowPowerMode ? .battery : .balanced) : quality.preset
+
         guard backend == .metal || backend == .gpu else {
             return Resolution(
                 preset: preset,
@@ -64,11 +67,13 @@ package enum MPVRenderingOptions {
                 ]
             )
         }
+
         let scale: MPVRenderingQuality.Scaling
         let cscale: MPVRenderingQuality.Scaling
         let antiring: Double
         let deband: Bool
         let peak: MPVRenderingQuality.PeakDetection
+
         switch preset {
         case .battery:
             scale = .bilinear
@@ -76,12 +81,14 @@ package enum MPVRenderingOptions {
             antiring = 0
             deband = false
             peak = .disabled
+
         case .highQuality:
             scale = .ewaLanczosSharp
             cscale = .ewaLanczos
             antiring = 0.7
             deband = true
             peak = .enabled
+
         case .automatic, .balanced:
             scale = .bicubic
             cscale = .bilinear
@@ -89,6 +96,7 @@ package enum MPVRenderingOptions {
             deband = false
             peak = .automatic
         }
+
         var options = [
             // Waiting for presentation with depth 1 prevents timely rendering
             // of the next frame on iPhone. Keep two frames in flight.
@@ -97,24 +105,30 @@ package enum MPVRenderingOptions {
             "cscale": (quality.chromaScaling ?? cscale).rawValue,
             "scale-antiring": normalized(quality.antiringing, fallback: antiring),
             "cscale-antiring": normalized(quality.chromaAntiringing, fallback: antiring),
-            "deband": (quality.debanding ?? deband) ? "yes" : "no",
+            "deband": (quality.isDebandingEnabled ?? deband) ? "yes" : "no",
             "tone-mapping": (quality.toneMapping ?? .automatic).rawValue,
             "gamut-mapping-mode": (quality.gamutMapping ?? .automatic).rawValue,
             "hdr-compute-peak": (quality.peakDetection ?? peak).rawValue,
         ]
+
         switch quality.dithering ?? .automatic {
         case .automatic: options["dither"] = backend == .gpu && preset == .battery ? "no" : "fruit"
         case .disabled: options["dither"] = "no"
         case let value: options["dither"] = value.rawValue
         }
+
         var unsupported: [String] = []
+
         let shaders = quality.shaders.filter { url in
             let valid = url.isFileURL && FileManager.default.isReadableFile(atPath: url.path)
+
             if !valid {
                 unsupported.append("Unreadable local shader: \(url.lastPathComponent)")
             }
+
             return valid
         }
+
         if let lut = quality.lut {
             if lut.url.isFileURL, FileManager.default.isReadableFile(atPath: lut.url.path) {
                 options["lut"] = lut.url.path
@@ -123,21 +137,26 @@ package enum MPVRenderingOptions {
                 unsupported.append("Unreadable local LUT: \(lut.url.lastPathComponent)")
             }
         }
+
         return Resolution(preset: preset, options: options, unsupportedFeatures: unsupported, shaderPaths: shaders.map(\.path))
     }
 
     package static func deinterlaceOptions(_ policy: MPVDeinterlacePolicy) -> [String: String] {
         guard policy.mode != .disabled else { return ["deinterlace": "no"] }
-        if policy.algorithm == .automatic, !policy.analyzeFieldOrder {
+
+        if policy.algorithm == .automatic, !policy.analyzesFieldOrder {
             return [
                 "deinterlace": policy.mode == .automatic ? "auto" : "yes",
                 "deinterlace-field-parity": policy.fieldOrder.rawValue,
             ]
         }
+
         let algorithm = policy.algorithm == .automatic ? "bwdif" : policy.algorithm.rawValue
         let deint = policy.mode == .automatic ? "interlaced" : "all"
-        let graph = (policy.analyzeFieldOrder ? "idet," : "")
+
+        let graph = (policy.analyzesFieldOrder ? "idet," : "")
             + "\(algorithm)=mode=send_field:parity=\(policy.fieldOrder.rawValue):deint=\(deint)"
+
         // mpv's lavfi wrapper negotiates software input through its autoconverter.
         return ["deinterlace": "no", "vf": "lavfi=[\(graph)]"]
     }
@@ -150,19 +169,23 @@ package enum MPVRenderingOptions {
     ) -> MPVDeinterlaceStatus {
         var result = MPVDeinterlaceStatus()
         result.requested = policy
-        result.outputFrameIsInterlaced = interlaced
+        result.isOutputFrameInterlaced = interlaced
+
         guard policy.mode != .disabled else {
             result.requiresSoftwareFrames = false
             result.isActive = false
             return result
         }
-        if policy.algorithm == .automatic, !policy.analyzeFieldOrder {
+
+        if policy.algorithm == .automatic, !policy.analyzesFieldOrder {
             result.isActive = automaticFilterIsActive
+
             if automaticFilterIsActive == false {
                 result.requiresSoftwareFrames = false
             } else if automaticFilterIsActive == true {
                 result.effectiveFilter = "bwdif (one frame per field)"
                 result.requiresSoftwareFrames = true
+
                 result.reason = hardwareDecoder?.hasPrefix("videotoolbox") == true
                     ? "VideoToolbox frames are downloaded for the software bwdif filter."
                     : "bwdif runs on software-accessible frames."
@@ -172,11 +195,13 @@ package enum MPVRenderingOptions {
             result.requiresSoftwareFrames = true
             result.reason = "Explicit lavfi processing requires software-accessible frames, including progressive frames."
         }
+
         return result
     }
 
     private static func normalized(_ value: Double?, fallback: Double) -> String {
         guard let value, value.isFinite else { return String(fallback) }
+
         return String(min(1, max(0, value)))
     }
 }

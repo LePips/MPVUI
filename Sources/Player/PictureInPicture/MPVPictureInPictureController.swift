@@ -38,10 +38,11 @@ public final class MPVPictureInPictureController {
     /// The most recent picture-in-picture failure.
     public private(set) var lastError: MPVPlayerError?
 
-    /// Restore the player's interface before returning `true`.
+    /// An asynchronous handler that restores the player's inline interface.
+    /// Return `true` after restoration succeeds, or `false` if it cannot complete.
     /// By default, restoration succeeds only if the inline view is in a window.
     @ObservationIgnored
-    public var restoreUserInterface: (@MainActor () async -> Bool)?
+    public var userInterfaceRestorationHandler: (@MainActor () async -> Bool)?
 
     /// Whether iOS can start PiP when leaving the app, if system settings permit it.
     public var allowsAutomaticStartFromInline = false {
@@ -87,7 +88,7 @@ public final class MPVPictureInPictureController {
         isSupported = controller.isSupported
         controller.onStateChange = { [weak self] in self?.updateMacState() }
         controller.onFailure = { [weak self] error in self?.lastError = error }
-        controller.restoreUserInterface = { [weak self] in await self?.restoreInterface() ?? false }
+        controller.userInterfaceRestorationHandler = { [weak self] in await self?.restoreInterface() ?? false }
         #endif
     }
 
@@ -106,6 +107,7 @@ public final class MPVPictureInPictureController {
             lastError = .pictureInPictureUnsupported
             return
         }
+
         lastError = nil
         #if os(iOS) && !targetEnvironment(macCatalyst)
         sampleBufferController?.start()
@@ -200,8 +202,8 @@ public final class MPVPictureInPictureController {
     }
 
     private func restoreInterface() async -> Bool {
-        if let restoreUserInterface {
-            return await restoreUserInterface()
+        if let userInterfaceRestorationHandler {
+            return await userInterfaceRestorationHandler()
         }
         #if os(macOS)
         return macController?.hasInlineSource ?? false
@@ -213,11 +215,13 @@ public final class MPVPictureInPictureController {
     #if os(iOS) && !targetEnvironment(macCatalyst)
     private func configureSampleBufferController(for player: MPVPlayer) {
         guard player.videoOutput == .sampleBuffer else { return }
+
         let controller = MPVSampleBufferPictureInPictureController(
             player: player,
             displayLayer: player.sampleBufferDisplayLayer,
             onStateChange: { [weak self] state in
                 guard let self else { return }
+
                 self.isSupported = state.isSupported
                 self.isPossible = state.isPossible
                 self.isActive = state.isActive
@@ -226,7 +230,7 @@ public final class MPVPictureInPictureController {
                 self.lastError = state.lastError
                 self.updateRenderSize(state.renderSize)
             },
-            restoreUserInterface: { [weak self] in await self?.restoreInterface() ?? false },
+            userInterfaceRestorationHandler: { [weak self] in await self?.restoreInterface() ?? false },
             onRenderingModeChange: { [weak self] enabled in
                 self?.setNativeRendering(enabled)
             }
@@ -239,12 +243,15 @@ public final class MPVPictureInPictureController {
     func setNativeRendering(_ enabled: Bool) {
         if enabled, !isNativeRendering {
             overlaySurface = surface
+
             let measuredWidth = surface?.videoOverlayHost?.layoutSize.width ?? 0
             let width = measuredWidth > 0 ? measuredWidth : surface?.bounds.width ?? 0
             overlayLayoutWidth = width.isFinite && width > 0 ? width : nil
             overlayDisplayScale = surface?.window?.screen.scale ?? 2
         }
+
         isNativeRendering = enabled
+
         if enabled {
             updateNativeOverlay()
         } else {
@@ -264,6 +271,7 @@ public final class MPVPictureInPictureController {
             removeNativeOverlay()
             return
         }
+
         if let overlayRenderer {
             overlayRenderer.updateContent(overlay.content)
         } else {
@@ -274,33 +282,42 @@ public final class MPVPictureInPictureController {
                 },
                 availabilityChanged: { [weak self] accepted in
                     guard let self else { return }
+
                     self.isVideoOverlayActive = accepted
                     self.overlaySurface?.videoOverlayHost?.isHidden = accepted
                 }
             )
         }
+
         refreshNativeOverlayGeometry()
     }
 
     private func refreshNativeOverlayGeometry() {
         guard let overlayRenderer, let player else { return }
+
         let dimensions = player.mediaInformation.dimensions
         var width = CGFloat(dimensions?.effectiveWidth ?? 16)
         var height = CGFloat(dimensions?.effectiveHeight ?? 9)
+
         if abs(player.mediaInformation.rotation % 180) == 90 {
             swap(&width, &height)
         }
+
         guard width > 0, height > 0 else { return }
+
         // Preserve inline text wrapping, even if the source resizes or leaves
         // its window. PiP pixel dimensions affect resolution, never layout.
         let logicalWidth = overlayLayoutWidth ?? 320
+
         overlayRenderer.updateSize(
             CGSize(width: logicalWidth, height: logicalWidth * height / width),
             displayScale: overlayDisplayScale,
             rasterSize: renderSize
         )
+
         if overlayMediaInformation != player.mediaInformation {
             overlayMediaInformation = player.mediaInformation
+
             if let content = overlaySurface?.videoOverlay?.content {
                 overlayRenderer.updateContent(content)
             }
@@ -313,6 +330,7 @@ public final class MPVPictureInPictureController {
             overlayRenderer = nil
             player?.clearPictureInPictureOverlay()
         }
+
         overlaySurface?.videoOverlayHost?.isHidden = false
         overlayMediaInformation = nil
         isVideoOverlayActive = false
@@ -322,6 +340,7 @@ public final class MPVPictureInPictureController {
     #if os(macOS)
     private func updateMacState() {
         guard let macController else { return }
+
         isSupported = macController.isSupported
         isPossible = macController.isPossible
         isActive = macController.isActive

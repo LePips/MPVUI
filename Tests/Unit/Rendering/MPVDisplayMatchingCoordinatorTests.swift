@@ -34,6 +34,7 @@ struct MPVDisplayMatchingCoordinatorTests {
         for value: Double? in [nil, 0, -1, .nan, .infinity, 241] {
             #expect(MPVDisplayMatchingContent.refreshRate(for: value) == nil)
         }
+
         #expect(MPVDisplayMatchingContent.refreshRate(for: 27.5) == 27.5)
         #expect(MPVDisplayMatchingContent(media: .empty, outputUsesHDR: true) == nil)
     }
@@ -89,6 +90,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             )),
             outputUsesHDR: true
         ))
+
         var state = MPVDisplayMatchingState()
 
         #expect(update(&state, first) == .apply(first))
@@ -114,7 +116,9 @@ struct MPVDisplayMatchingCoordinatorTests {
         #expect(CMVideoFormatDescriptionGetDimensions(format).width == 3840)
         #expect(CMVideoFormatDescriptionGetDimensions(format).height == 2160)
         #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_HEVC)
+
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
+
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] as? String
             == kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
 
@@ -141,6 +145,7 @@ struct MPVDisplayMatchingCoordinatorTests {
 
         let format = try #require(content.makeFormatDescription())
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
+
         #expect(extensions[kCMFormatDescriptionExtension_TransferFunction as String] as? String
             == kCMFormatDescriptionTransferFunction_sRGB as String)
 
@@ -191,6 +196,7 @@ struct MPVDisplayMatchingCoordinatorTests {
         let format = try #require(content.makeFormatDescription())
         #expect(content.refreshRate == Float(24000.0 / 1001))
         #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_DolbyVisionHEVC)
+
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
         let atoms = try #require(extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms as String] as? [String: Data])
         let record = try #require(atoms[atom])
@@ -235,6 +241,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             dolbyVisionLevel: 6,
             dolbyVisionBaseLayerCompatibilityID: 1
         )
+
         for status: MPVDolbyVisionStatus in [
             .unknown,
             .init(sourceProfile: 8),
@@ -273,6 +280,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             dolbyVisionLevel: 6,
             dolbyVisionBaseLayerCompatibilityID: 1
         ))
+
         let validated = MPVDolbyVisionStatus(
             effectiveProfile: 8,
             effectiveBaseLayerCompatibilityID: 1,
@@ -305,6 +313,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             videoOutput: .sampleBuffer,
             dolbyVisionStatus: validated
         ))
+
         var state = MPVDisplayMatchingState()
 
         #expect(update(&state, pending) == .apply(pending))
@@ -314,6 +323,7 @@ struct MPVDisplayMatchingCoordinatorTests {
         #expect(metal.dolbyVision == nil)
         #expect(sdr.dolbyVision == nil)
         #expect(sdr.convertsHDRToSDR)
+
         let format = try #require(sdr.makeFormatDescription())
         let extensions = try #require(CMFormatDescriptionGetExtensions(format) as? [String: Any])
         #expect(extensions[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms as String] == nil)
@@ -371,6 +381,7 @@ struct MPVDisplayMatchingCoordinatorTests {
     @Test
     func `completion stop failure and inactive surfaces release criteria`() throws {
         let content = try #require(MPVDisplayMatchingContent(media: media(), outputUsesHDR: true))
+
         for playback: MPVPlaybackState in [
             .idle,
             .ended,
@@ -383,6 +394,7 @@ struct MPVDisplayMatchingCoordinatorTests {
             #expect(update(&state, content, playback: playback) == .clear)
             #expect(update(&state, content, playback: playback) == .keep)
         }
+
         var state = MPVDisplayMatchingState()
 
         #expect(update(&state, content) == .apply(content))

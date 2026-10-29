@@ -15,6 +15,7 @@ package struct MPVPlatformServices: Sendable {
     package var beginSourceAccess: @Sendable (URL) -> Bool = { _ in false }
     package var endSourceAccess: @Sendable (URL) -> Void = { _ in }
     package var codecSupportsHardware: @Sendable (String?) -> Bool? = { _ in nil }
+
     package init() {}
 }
 
@@ -22,7 +23,9 @@ package struct MPVPlatformServices: Sendable {
 package protocol MPVNativeSurfaceOwner: AnyObject {
 
     func beginNativeResizeTransaction()
+
     func endNativeResizeTransaction()
+
     func invalidateDrawablePoolAfterNativeTeardown() -> Bool
 }
 

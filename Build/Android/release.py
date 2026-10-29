@@ -106,6 +106,7 @@ def main():
             "Brewfile",
             "Android",
             "Build/Makefile",
+            "Build/commands.py",
             "Build/Android",
             "Build/native_inputs.py",
             "Build/Patches",

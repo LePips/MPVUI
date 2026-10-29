@@ -28,6 +28,7 @@ struct MPVTimelineModelTests {
         #expect(dimensions.aspectRatio == 1.5)
         #expect(dimensions.displayWidth == nil)
         #expect(dimensions.displayHeight == nil)
+
         let empty = MPVVideoDimensions(width: -1, height: 480)
 
         #expect(empty.isEmpty)

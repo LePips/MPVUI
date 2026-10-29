@@ -18,6 +18,7 @@ final class PlayerModel {
     var selectionError: String?
     var hasMedia = false
     var audioSessionError: String?
+
     @ObservationIgnored
     let media: [ExampleMedia]
     #if !os(Android)
@@ -49,16 +50,18 @@ final class PlayerModel {
 
     var showsVideoSurface: Bool {
         let tracks = player.mediaInformation.tracks
+
         // Keep the surface while a new item discovers its tracks. Removing it
         // here would start audio first and reattach video partway through startup.
         if tracks.isEmpty, player.state == .loading {
             return true
         }
+
         return tracks.contains { $0.type == .video }
     }
 
     var error: String? {
-        audioSessionError ?? player.lastError?.localizedDescription
+        audioSessionError ?? player.lastError?.message
     }
 
     var inPictureInPicture: Bool {
@@ -72,6 +75,7 @@ final class PlayerModel {
 
     var details: PlayerDetails {
         let information = player.mediaInformation
+
         return PlayerDetails(
             tracks: information.tracks,
             resolution: information.dimensions.map { "\($0.effectiveWidth) × \($0.effectiveHeight)" } ?? "—",
@@ -87,7 +91,7 @@ final class PlayerModel {
         #if !os(Android)
         // Enable interception before the initial load so native text subtitles never flash.
         player.setTextSubtitleInterceptionEnabled(true)
-        subtitleStream = player.textSubtitleStream()
+        subtitleStream = player.makeTextSubtitleStream()
         #endif
         #if os(iOS) || os(tvOS)
         // The host-managed session must be active before the first file opens.
@@ -115,6 +119,7 @@ final class PlayerModel {
             selectionError = "Enter an HTTP or HTTPS media URL."
             return
         }
+
         load(url)
     }
 
@@ -144,10 +149,12 @@ final class PlayerModel {
         switch phase {
         case .active:
             audioSessionError = ExampleAudioSession.activate()
+
             if audioSessionError == nil, resumesPlaybackAfterAudioSessionActivation {
                 resumesPlaybackAfterAudioSessionActivation = false
                 player.play()
             }
+
         case .background:
             #if os(iOS)
             if player.externalPlayback.isPrepared || player.externalPlayback.isPreparing {
@@ -157,24 +164,31 @@ final class PlayerModel {
             if player.pictureInPicture.isActive || player.pictureInPicture.isTransitioning {
                 return
             }
+
             let shouldResume: Bool = switch player.state {
             case .playing, .buffering: true
-            case .loading: player.configuration.autoPlay && !player.isPaused
+            case .loading: player.configuration.automaticallyPlays && !player.isPaused
             case .seeking: lastSettledPlaybackWasPlaying
             default: false
             }
+
             if shouldResume {
                 resumesPlaybackAfterAudioSessionActivation = true
                 player.pause()
                 guard await waitForPlaybackToPause() else { return }
             }
+
             guard !Task.isCancelled else { return }
+
             audioSessionError = ExampleAudioSession.deactivate()
+
         case .inactive:
             break
+
         @unknown default:
             break
         }
+
         // AndroidPlayback owns Activity lifecycle and resume intent. A second
         // scene-phase pause would erase that intent before onStop observes it.
         #endif
@@ -187,16 +201,19 @@ final class PlayerModel {
             case .idle, .ready, .paused, .ended, .stopped, .failed: true
             case .loading, .playing, .buffering, .seeking: false
             }
+
             do {
                 // Let libmpv's audio output observe the pause before deactivation.
                 try await Task.sleep(for: .milliseconds(25))
             } catch {
                 return false
             }
+
             if safelyPaused {
                 return !Task.isCancelled
             }
         }
+
         return false
     }
     #endif

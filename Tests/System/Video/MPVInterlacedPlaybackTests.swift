@@ -21,8 +21,10 @@ struct MPVInterlacedPlaybackTests {
             ("interlaced-1080i-top", 60000.0 / 1001, .init(mode: .automatic)),
             ("interlaced-576i-top", 50, .init(algorithm: .yadif, fieldOrder: .topFirst, mode: .forced)),
         ]
+
         for (name, expectedCadence, policy) in cases {
             let source = try TestPaths.testMedia(name + ".mkv")
+
             let player = MPVPlayer(configuration: .init(
                 // Short fixtures loop until the cadence estimate settles.
                 additionalOptions: ["ao": "null", "loop-file": "inf"],
@@ -31,7 +33,9 @@ struct MPVInterlacedPlaybackTests {
                 hdrPolicy: .disabled,
                 videoOutput: output
             ))
+
             let surface = MPVPlatformVideoPlayer(player: player)
+
             let window = NSWindow(
                 contentRect: CGRect(x: 0, y: 0, width: 640, height: 360),
                 styleMask: [.titled],
@@ -43,27 +47,33 @@ struct MPVInterlacedPlaybackTests {
             surface.activateRenderingSurface()
             player.setDiagnosticsEnabled(true)
             player.load(source)
+
             for _ in 0 ..< 120 {
                 if let fps = player.playbackDiagnostics.estimatedFilterFramesPerSecond,
                    abs(fps - expectedCadence) < 0.4
                 {
                     break
                 }
+
                 if player.lastError != nil {
                     break
                 }
+
                 try await Task.sleep(for: .milliseconds(50))
             }
 
             #expect(player.videoOutput == output)
+
             let status = player.playbackDiagnostics
 
             #expect(player.lastError == nil)
             #expect(abs((status.estimatedFilterFramesPerSecond ?? 0) - expectedCadence) < 0.4)
             #expect(status.deinterlace.requiresSoftwareFrames == true)
+
             if policy.algorithm == .automatic {
                 #expect(status.deinterlace.isActive == true)
             }
+
             #expect(status.estimatedDecodedFramesPerSecond == nil)
             player.stop()
             surface.detach()

@@ -6,8 +6,8 @@ public final class AndroidPlayerBridge {
     let core: AndroidPlayback
 
     public init(
-        autoPlay: Bool,
-        loop: Bool,
+        automaticallyPlays: Bool,
+        isLoopingEnabled: Bool,
         rate: Double,
         volume: Double,
         start: Double,
@@ -17,15 +17,26 @@ public final class AndroidPlayerBridge {
         optionNames: [String],
         optionValues: [String]
     ) {
-        core = AndroidPlayback(autoPlay, loop, rate, volume, start, hasStart, buffer, cache, optionNames, optionValues)
+        core = AndroidPlayback(
+            automaticallyPlays,
+            isLoopingEnabled,
+            rate,
+            volume,
+            start,
+            hasStart,
+            buffer,
+            cache,
+            optionNames,
+            optionValues
+        )
     }
 
     public func retainSession() -> Int64 {
         core.retainSession()
     }
 
-    public func prepareLoad(_ autoPlay: Bool) -> Bool {
-        core.prepareLoad(autoPlay)
+    public func prepareLoad(_ automaticallyPlays: Bool) -> Bool {
+        core.prepareLoad(automaticallyPlays)
     }
 
     public func requestAudioFocus() -> Bool {

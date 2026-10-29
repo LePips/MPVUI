@@ -23,6 +23,15 @@ FILM_RATE = "24000/1001"
 HDR10 = ("smpte2084", "hdr10=1:master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,50):max-cll=1000,400")
 HLG = ("arib-std-b67", "")
 IPT = (None, "")  # Profile 5 carries no base-layer color description.
+# Synthetic identity-mapped P7 MEL metadata, regenerated and checked by NativeHDR/dovi.c.
+# This exercises metadata conversion, not enhancement-layer image reconstruction.
+P7_RPU = bytes.fromhex(
+    "1908090840613650af003ff801ffc00ffc001fffa000001000000d0000030080000068000004000003000040000020000020"
+    "000003000400000302000003020000030000400000200000200000344acc00006bd44acdf3f9d6384acc8994000003020000"
+    "030010000003001000000300386c4486030c14bc611c0a28000003034c7cb5fffe0000030000030000030000c040fb9c02a2"
+    "80120c07d0006407d00320601000af05780180504300100100100100080002014000000300000300000a7fc0004603800800"
+    "80004120050b01100000f93f951a80"
+)
 
 
 def run(*command):
@@ -39,9 +48,9 @@ def mpeg2_crc(data):
     return crc
 
 
-def add_dovi_descriptor(path, profile, level, compatibility, compression):
+def add_dovi_descriptor(path, profile, level, compatibility, compression, enhancement=False):
     """Append registration and DOVI descriptors to every HEVC PMT entry."""
-    flags = (profile << 9) | (level << 3) | 0b101  # RPU and base layer, no enhancement layer
+    flags = (profile << 9) | (level << 3) | 0b101 | (int(enhancement) << 1)
     # Reserved trailing bits are set, as in broadcast-muxed streams.
     descriptors = b"\x05\x04DOVI" + bytes([0xB0, 5, 1, 0, flags >> 8, flags & 0xFF, compatibility << 4 | compression << 2 | 0b11])
     data = bytearray(path.read_bytes())
@@ -234,6 +243,32 @@ def first_rpu(work, name, output):
     output.write_bytes(rpu.replace(b"\x00\x00\x03", b"\x00\x00"))
 
 
+def untagged_mp4(source, output):
+    """Remux intact RPUs into fragmented MP4 without a Dolby Vision config box."""
+    run(
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0:v",
+        "-c",
+        "copy",
+        "-tag:v",
+        "hvc1",
+        "-strict",
+        "normal",
+        "-map_metadata",
+        "-1",
+        "-movflags",
+        "empty_moov+frag_keyframe",
+        str(output),
+    )
+
+
 def transport_stream(source, output, compression_filter, compatibility):
     stream = json.loads(
         subprocess.check_output(
@@ -287,6 +322,59 @@ def transport_stream(source, output, compression_filter, compatibility):
     add_dovi_descriptor(output, record["dv_profile"], record["dv_level"], compatibility, compression=3)
 
 
+def profile7_mp4(work):
+    """Pair synthetic P7 MEL RPUs with the generated HDR10 test pattern."""
+    name = "dolby-vision-p7"
+    rpu = work / f"{name}.rpu"
+    rpu.write_bytes((b"\x00\x00\x00\x01" + P7_RPU) * FRAMES)
+    hevc = work / f"{name}.hevc"
+    run("dovi_tool", "inject-rpu", "-i", str(work / "dolby-vision-p81.hevc"), "--rpu-in", str(rpu), "-o", str(hevc))
+    raw = work / f"{name}-raw.mp4"
+    run(
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-y",
+        "-fflags",
+        "+genpts",
+        "-f",
+        "hevc",
+        "-framerate",
+        RATE,
+        "-i",
+        str(hevc),
+        "-c",
+        "copy",
+        str(raw),
+    )
+    # FFmpeg's RPU encoder deliberately does not infer P7 configuration. Carry
+    # an explicit P7 descriptor through TS to write a truthful MP4 record.
+    transport = work / f"{name}.ts"
+    run("ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(raw), "-c", "copy", "-f", "mpegts", str(transport))
+    add_dovi_descriptor(transport, 7, 1, 6, compression=0, enhancement=True)
+    output = work / f"{name}.mp4"
+    run(
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(transport),
+        "-c",
+        "copy",
+        "-tag:v",
+        "dvh1",
+        "-strict",
+        "unofficial",
+        "-map_metadata",
+        "-1",
+        str(output),
+    )
+    return output
+
+
 def generate(output):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dolby-vision-fixtures-") as directory:
@@ -296,13 +384,41 @@ def generate(output):
         p84 = dolby_vision_mp4(work, "dolby-vision-p84", "8.4", HLG, FILM_RATE)
         p5_hls = dolby_vision_mp4(work, "dolby-vision-p5-hls", "5", IPT, FILM_RATE)
         p81_hls = dolby_vision_mp4(work, "dolby-vision-p81-hls", "8.1", HDR10, FILM_RATE)
+        p7 = profile7_mp4(work)
+        for source in (p5, p7, p81, p84):
+            untagged_mp4(source, output / f"{source.stem}-untagged.mp4")
+        # A P7 RPU cannot establish its required HDR10 base when the SPS says HLG.
+        run(
+            "ffmpeg",
+            "-v",
+            "error",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(output / "dolby-vision-p7-untagged.mp4"),
+            "-c",
+            "copy",
+            "-bsf:v",
+            "hevc_metadata=transfer_characteristics=18",
+            "-color_trc",
+            "arib-std-b67",
+            "-tag:v",
+            "hvc1",
+            "-strict",
+            "normal",
+            "-map_metadata",
+            "-1",
+            "-movflags",
+            "empty_moov+frag_keyframe",
+            str(output / "dolby-vision-p7-invalid-base.mp4"),
+        )
         declared = work / "dolby-vision-p81-declared-extended.ts"
         extended = work / "dolby-vision-p81-extended.ts"
         transport_stream(p81, declared, "none", compatibility=1)
         transport_stream(p81, extended, "extended", compatibility=1)
-        for path in (p5, p81, p84, p5_hls, p81_hls, declared, extended):
+        for path in (p5, p7, p81, p84, p5_hls, p81_hls, declared, extended):
             shutil.move(path, output / path.name)
-        for path in (p5, p81):
+        for path in (p5, p7, p81):
             first_rpu(work, path.stem, output / f"{path.stem}.rpu")
 
 

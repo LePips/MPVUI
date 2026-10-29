@@ -60,7 +60,9 @@ struct MPVPiPLifecycleTests {
 
         #expect(errors == [presenter.isSupported ? .pictureInPictureNotReady : .pictureInPictureUnsupported])
         presenter.invalidate()
+
         let before = stateChanges
+
         presenter.attach(to: MPVPlatformVideoPlayer(player: player))
         presenter.start()
         presenter.prepare()

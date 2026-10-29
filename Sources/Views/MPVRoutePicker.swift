@@ -72,6 +72,7 @@ extension RoutePicker: UIViewRepresentable {
         view.activeTintColor = .systemBlue
         view.delegate = context.coordinator
         player.externalPlayback.observeAirPlayRoutes()
+
         return view
     }
 

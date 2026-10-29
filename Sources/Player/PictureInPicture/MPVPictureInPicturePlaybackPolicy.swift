@@ -14,6 +14,7 @@ enum MPVPictureInPicturePlaybackPolicy {
         displayTime: CMTime
     ) -> CMTimeRange {
         guard hasMedia else { return .invalid }
+
         switch state {
         case .idle, .loading, .stopped, .failed:
             return .invalid
@@ -36,10 +37,12 @@ enum MPVPictureInPicturePlaybackPolicy {
         // negative initial PTS and small end-of-file clock overshoots. Ranges
         // are half-open, so the current time needs at least one extra tick.
         let start = CMTimeMinimum(.zero, displayTime)
+
         let end = CMTimeMaximum(
             mediaEnd,
             CMTimeAdd(displayTime, CMTime(value: 1, timescale: 600))
         )
+
         return CMTimeRange(start: start, end: end)
     }
 
@@ -50,11 +53,14 @@ enum MPVPictureInPicturePlaybackPolicy {
         isSeekable: Bool
     ) -> Duration? {
         guard isSeekable, interval.isNumeric, interval.seconds.isFinite else { return nil }
+
         // Saturate before converting to Duration, avoiding overflow for valid
         // CMTime values whose timescale is very small.
         let seconds = position.seconds + interval.seconds
         guard seconds.isFinite else { return nil }
+
         let upperBound = duration > .zero ? duration.seconds : Double(Int64.max / 2)
+
         return .seconds(min(max(seconds, 0), upperBound))
     }
 }

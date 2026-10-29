@@ -14,7 +14,7 @@ public struct TextSubtitleRegion: Sendable, Hashable {
     /// have no role because they do not select a track.
     public let role: MPVSubtitleRole?
 
-    /// Creates an immutable subtitle value.
+    /// Creates a text region with its placement and optional source track and subtitle role.
     public init(
         text: String,
         placement: TextSubtitlePlacement = .automatic,

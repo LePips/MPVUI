@@ -28,6 +28,7 @@ final class MPVVideoOverlayRenderer {
         self.content = content
         self.submit = submit
         self.availabilityChanged = availabilityChanged
+
         observation = renderer.objectWillChange.sink { [weak self] in
             Task { @MainActor [weak self] in self?.setNeedsRender() }
         }
@@ -45,10 +46,12 @@ final class MPVVideoOverlayRenderer {
         guard proposedSize.width.isFinite, proposedSize.height.isFinite,
               proposedSize.width > 0, proposedSize.height > 0,
               displayScale.isFinite, displayScale > 0 else { return }
+
         // Supersample the overlay for cleaner text after native composition and
         // PiP downscaling. Match the bitmap's 2048-pixel allocation limit.
         let supersampling: CGFloat = 2
         var scale = min(displayScale * supersampling, 2048 / max(proposedSize.width, proposedSize.height))
+
         if let rasterSize, rasterSize.width.isFinite, rasterSize.height.isFinite,
            rasterSize.width > 0, rasterSize.height > 0
         {
@@ -57,12 +60,15 @@ final class MPVVideoOverlayRenderer {
                 rasterSize.height / proposedSize.height
             ))
         }
+
         guard proposedSize != size || displayScale != renderer.scale || scale != rasterScale else { return }
+
         if proposedSize != size {
             size = proposedSize
             renderer.proposedSize = ProposedViewSize(proposedSize)
             updateRendererContent()
         }
+
         // Keep SwiftUI's layout pixel grid stable as PiP resolution changes.
         renderer.scale = displayScale
         rasterScale = scale
@@ -84,31 +90,41 @@ final class MPVVideoOverlayRenderer {
 
     private func setNeedsRender() {
         guard !isInvalidated, size.width > 0, size.height > 0 else { return }
+
         isDirty = true
         guard renderTask == nil else { return }
+
         renderTask = Task { @MainActor [weak self] in
             // Deferring lets SwiftUI settle the change that invalidated the image.
             await Task.yield()
+
             while let self, !self.isInvalidated, !Task.isCancelled, self
                 .isDirty
             {
                 self.isDirty = false
+
                 // Draw directly into CPU-owned storage. This does not depend
                 // on a visible UIKit view or a foreground window snapshot.
                 var bitmap: MPVVideoOverlayBitmap?
+
                 self.renderer
                     .render(rasterizationScale: self.rasterScale) { size, draw in
                         bitmap = MPVVideoOverlayBitmap(size: size, scale: self.rasterScale, draw: draw)
                     }
+
                 let accepted = await self
                     .submit(bitmap)
+
                 guard !self.isInvalidated, !Task.isCancelled else { return }
+
                 self
                     .availabilityChanged(bitmap != nil && accepted)
+
                 // Bound rapidly changing overlays to 30 updates/sec. Video is
                 // still scheduled independently at its original frame rate.
                 do { try await Task.sleep(for: .milliseconds(34)) } catch { return }
             }
+
             self?.renderTask = nil
         }
     }

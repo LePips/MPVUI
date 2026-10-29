@@ -37,7 +37,7 @@ struct mpvui_hls {
     Track video, audio;
     AVPacket *first;
     double requested_start, origin, input_start, playback;
-    int video_index, audio_index, header_written, prepared;
+    int video_index, audio_index, header_written, probed, prepared;
     pthread_mutex_t gate;
     pthread_cond_t condition;
     atomic_int cancelled;
@@ -58,20 +58,20 @@ static int interrupted(void *opaque) {
 }
 
 mpvui_hls *mpvui_hls_create(const char *source, const char *playlist, double start_time, int video, int audio) {
-    if (!source || !playlist || !isfinite(start_time) || start_time < 0)
+    if (!source || !isfinite(start_time) || start_time < 0)
         return NULL;
     mpvui_hls *s = av_mallocz(sizeof(*s));
     if (!s)
         return NULL;
     s->url = av_strdup(source);
-    s->playlist = av_strdup(playlist);
+    s->playlist = playlist ? av_strdup(playlist) : NULL;
     s->requested_start = s->playback = start_time;
     s->video_index = video;
     s->audio_index = audio;
     pthread_mutex_init(&s->gate, NULL);
     pthread_cond_init(&s->condition, NULL);
     atomic_init(&s->cancelled, 0);
-    if (!s->url || !s->playlist) {
+    if (!s->url || (playlist && !s->playlist)) {
         mpvui_hls_destroy(s);
         return NULL;
     }
@@ -148,8 +148,6 @@ static int create_track(mpvui_hls *s, Track *t) {
     int video = p->codec_type == AVMEDIA_TYPE_VIDEO;
     if (video && !t->input->avg_frame_rate.num)
         t->input->avg_frame_rate = t->input->r_frame_rate;
-    t->copy = video ? copy_video(t->input) : copy_audio(p);
-    t->hdr = video && (p->color_trc == AVCOL_TRC_SMPTE2084 || p->color_trc == AVCOL_TRC_ARIB_STD_B67 || dovi(p));
     t->output = avformat_new_stream(s->output, NULL);
     if (!t->output)
         return AVERROR(ENOMEM);
@@ -340,7 +338,9 @@ static void codec_strings(mpvui_hls *s, mpvui_hls_info *info) {
     }
 }
 
-int mpvui_hls_prepare(mpvui_hls *s, mpvui_hls_info *info) {
+static int probe_source(mpvui_hls *s) {
+    if (s->probed)
+        return 0;
     int ret;
     s->input = avformat_alloc_context();
     if (!s->input)
@@ -359,6 +359,35 @@ int mpvui_hls_prepare(mpvui_hls *s, mpvui_hls_info *info) {
     if ((ret = find_start(s)) < 0)
         return failure(s, ret, "Seek source");
     probe_video_signal(s);
+    if (s->video.input) {
+        AVCodecParameters *p = s->video.input->codecpar;
+        s->video.copy = copy_video(s->video.input);
+        s->video.hdr = p->color_trc == AVCOL_TRC_SMPTE2084 || p->color_trc == AVCOL_TRC_ARIB_STD_B67 || dovi(p);
+    }
+    if (s->audio.input)
+        s->audio.copy = copy_audio(s->audio.input->codecpar);
+    s->probed = 1;
+    return 0;
+}
+
+int mpvui_hls_probe(mpvui_hls *s, mpvui_hls_plan *plan) {
+    int ret = probe_source(s);
+    if (ret < 0)
+        return ret;
+    *plan = (mpvui_hls_plan){.has_video = !!s->video.input,
+                             .has_audio = !!s->audio.input,
+                             .video_copied = s->video.copy,
+                             .audio_copied = s->audio.copy,
+                             .requires_foreground = s->video.hdr && !s->video.copy};
+    return 0;
+}
+
+int mpvui_hls_prepare(mpvui_hls *s, mpvui_hls_info *info) {
+    if (!s->playlist)
+        return failure(s, AVERROR(EINVAL), "Missing HLS output path");
+    int ret = probe_source(s);
+    if (ret < 0)
+        return ret;
     if ((ret = avformat_alloc_output_context2(&s->output, NULL, "hls", s->playlist)) < 0)
         return failure(s, ret, "Create HLS output");
     s->output->interrupt_callback = (AVIOInterruptCB){interrupted, s};

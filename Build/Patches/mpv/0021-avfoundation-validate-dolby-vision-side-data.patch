@@ -1,0 +1,38 @@
+Subject: [PATCH] Validate native Dolby Vision frames independently of color mapping
+
+Residual-bearing Profile 7 does not map to libplacebo's Dolby Vision color
+representation. Require native validation whenever FFmpeg supplied Dolby
+Vision side data, including before the host consumes decoder rejection logs.
+Publish ordinary frame evidence to clear validation from the previous item.
+
+diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+--- a/video/out/vo_avfoundation.m
++++ b/video/out/vo_avfoundation.m
+@@ -2985,8 +2985,26 @@
+         report_unsupported_dovi(vo, "P7 conversion was not explicitly enabled for this output");
+         return false;
+     }
+-    if (mpi->params.repr.sys != PL_COLOR_SYSTEM_DOLBYVISION && !converted)
++    // P7 residual metadata is not represented by libplacebo's color mapping.
++    // It still requires native validation and must never pass as plain HDR.
++    bool has_dovi = mpi->params.repr.sys == PL_COLOR_SYSTEM_DOLBYVISION;
++    for (int i = 0; i < mpi->num_ff_side_data; i++) {
++        int type = mpi->ff_side_data[i].type;
++        if (type == AV_FRAME_DATA_DOVI_METADATA ||
++            type == AV_FRAME_DATA_DOVI_RPU_BUFFER) {
++            has_dovi = true;
++            break;
++        }
++    }
++    if (!has_dovi && !converted) {
++        // Reconfiguration can redraw the old item after the host starts a load.
++        // Publish actual non-DV frame evidence after any queued DV validation.
++        if (p->dovi_validated_state != -1) {
++            MP_INFO(vo, "MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame\n");
++            p->dovi_validated_state = -1;
++        }
+         return true;
++    }
+     if (mpi->imgfmt != IMGFMT_VIDEOTOOLBOX) {
+         report_unsupported_dovi(vo, "software Dolby Vision needs libplacebo reshaping");
+         return false;

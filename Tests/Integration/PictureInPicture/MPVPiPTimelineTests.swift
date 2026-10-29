@@ -14,11 +14,12 @@ struct MPVPiPTimelineTests {
     {
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null"],
-            autoPlay: false,
+            automaticallyPlays: false,
             videoOutput: backend
         ))
         defer { fixture.close() }
         try await fixture.loadPaused()
+
         let renderer = ImageRenderer(content: Color.red
             .frame(width: 4, height: 4))
 
@@ -39,6 +40,7 @@ struct MPVPiPTimelineTests {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
+
         let duration = fixture.player.duration
 
         #expect(duration > .zero)
@@ -46,9 +48,11 @@ struct MPVPiPTimelineTests {
         try await eventually("endpoint seek reaches the terminal timeline") { fixture.player.state == .ended }
 
         #expect(await fixture.player.seekForPictureInPicture(to: duration + .seconds(10)))
+
         let before = await fixture.player.lifecycleDiagnostics()
 
         #expect(await fixture.player.seekForPictureInPicture(to: .seconds(2)))
+
         try await eventually("backward PiP skip reopens paused media") {
             fixture.player.isPaused && abs(fixture.player.position.seconds - 2) < 0.2
         }

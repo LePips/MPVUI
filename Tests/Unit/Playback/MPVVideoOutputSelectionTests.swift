@@ -9,22 +9,26 @@ struct MPVVideoOutputSelectionTests {
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `raw properties and commands never change output across loads`(output: MPVPlayerConfiguration.VideoOutput) {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, videoOutput: output))
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, videoOutput: output))
+
         for property in ["video-zoom", "options/video-pan-x", "video-scale-y", "video-rotate", "brightness", "unknown-property"] {
             player.setProperty(property, to: "2")
 
             #expect(player.videoOutput == output)
         }
+
         player.setProperty("video-zoom", to: "0")
-        player.command("add", arguments: ["video-zoom", "0.25"])
-        player.command("expand-properties", arguments: ["set", "video-zoom", "0.25"])
+        player.executeCommand("add", arguments: ["video-zoom", "0.25"])
+        player.executeCommand("expand-properties", arguments: ["set", "video-zoom", "0.25"])
+
         for command in ["vf", "overlay-add", "unknown-command"] {
-            player.command(command)
+            player.executeCommand(command)
 
             #expect(player.videoOutput == output)
         }
+
         for _ in 0 ..< 2 {
-            player.load(TestPaths.baselineMedia, autoPlay: false)
+            player.load(TestPaths.baselineMedia, playAutomatically: false)
 
             #expect(player.videoOutput == output)
         }
@@ -32,7 +36,7 @@ struct MPVVideoOutputSelectionTests {
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
     func `feature requests report capabilities without selecting a renderer`(output: MPVPlayerConfiguration.VideoOutput) {
-        let player = MPVPlayer(configuration: .init(autoPlay: false, videoOutput: output))
+        let player = MPVPlayer(configuration: .init(automaticallyPlays: false, videoOutput: output))
         let features: Set<MPVVideoFeature> = [.nativeSubtitles, .bakedOverlays, .zoomAndPan]
 
         #expect(player.requestVideoFeatures(features).outcome == .awaitingVideoMetadata)
@@ -52,6 +56,7 @@ struct MPVVideoOutputSelectionTests {
     func `ordinary native video supports subtitles overlays and geometry`() {
         let player = MPVPlayer()
         player.applyTestEmission(.init(generation: nil, update: .media(.init(videoCodec: "h264"))))
+
         let result = player.requestVideoFeatures([.nativeSubtitles, .bakedOverlays, .zoomAndPan])
 
         #expect(result.outcome == .available)
@@ -62,7 +67,8 @@ struct MPVVideoOutputSelectionTests {
     @Test(arguments: ["vo", "options/vo", "file-local-options/vo", "gpu-api", "gpu-context", "wid"])
     func `raw commands cannot override renderer wiring`(property: String) async throws {
         let player = MPVPlayer()
-        player.command("expand-properties", arguments: ["set", property, "null"])
+        player.executeCommand("expand-properties", arguments: ["set", property, "null"])
+
         try await eventually("reserved renderer property") {
             player.lastError == .reservedProperty(name: property)
         }
@@ -73,6 +79,7 @@ struct MPVVideoOutputSelectionTests {
     @Test
     func `unsupported native HDR override leaves the renderer unchanged`() {
         let player = MPVPlayer(configuration: .init(hdrPolicy: .disabled))
+
         player.updateSampleBufferOutput(
             displayCapabilities: .unknown,
             configuredDynamicRange: .automatic,

@@ -33,7 +33,7 @@ final class MPVMacPictureInPictureController: NSObject {
     private(set) var isTransitioning = false
     var onStateChange: (@MainActor () -> Void)?
     var onFailure: (@MainActor (MPVPlayerError) -> Void)?
-    var restoreUserInterface: (@MainActor () async -> Bool)?
+    var userInterfaceRestorationHandler: (@MainActor () async -> Bool)?
 
     private weak var player: MPVPlayer?
     private let systemController: (any MPVMacPiPPresenting)?
@@ -56,6 +56,7 @@ final class MPVMacPictureInPictureController: NSObject {
         let replacement = replacementSurface.flatMap { $0.window != nil ? $0 : nil }
         let inlineView: NSView? = replacement ?? hosting?.placeholder ?? sourceSurface
         guard let window = inlineView?.window else { return false }
+
         return window.isVisible || window.isMiniaturized
     }
 
@@ -68,6 +69,7 @@ final class MPVMacPictureInPictureController: NSObject {
               let dimensions = player.mediaInformation.dimensions,
               !dimensions.isEmpty, player.mediaInformation.sourceURL != nil
         else { return false }
+
         switch player.state {
         case .ready, .playing, .paused, .buffering, .seeking: return true
         default: return false
@@ -76,6 +78,7 @@ final class MPVMacPictureInPictureController: NSObject {
 
     var renderSize: CGSize {
         guard let surface = hosting?.surface else { return .zero }
+
         return MPVRenderSurfaceConfiguration.drawableSize(
             for: surface.bounds.size,
             scale: surface.window?.backingScaleFactor ?? surface.metalLayer.contentsScale
@@ -103,11 +106,13 @@ final class MPVMacPictureInPictureController: NSObject {
         let width = max(dimensions?.effectiveWidth ?? 16, 1)
         let height = max(dimensions?.effectiveHeight ?? 9, 1)
         let swapsAxes = abs(rotation % 180) == 90
+
         return CGSize(width: swapsAxes ? height : width, height: swapsAxes ? width : height)
     }
 
     func attach(to surface: MPVPlatformVideoPlayer) {
         guard !isInvalidated, surface.player === player else { return }
+
         if let presented = hosting?.surface {
             if presented !== surface, surface.window != nil {
                 replacementSurface = surface
@@ -115,6 +120,7 @@ final class MPVMacPictureInPictureController: NSObject {
         } else {
             sourceSurface = surface
         }
+
         onStateChange?()
     }
 
@@ -122,10 +128,13 @@ final class MPVMacPictureInPictureController: NSObject {
         if replacementSurface === surface {
             replacementSurface = nil
         }
+
         guard hosting?.surface !== surface else { return }
+
         if sourceSurface === surface {
             sourceSurface = nil
         }
+
         onStateChange?()
     }
 
@@ -139,21 +148,28 @@ final class MPVMacPictureInPictureController: NSObject {
             reportFailure(isSupported
                 ? .pictureInPictureNotReady
                 : .pictureInPictureUnsupported)
+
             return
         }
 
         presentationGeneration &+= 1
+
         let generation = presentationGeneration
+
         isTransitioning = true
         surface.retainRenderingForPictureInPicture()
+
         let hosting = MPVMacPiPViewHosting(surface: surface)
         self.hosting = hosting
+
         let content = MPVMacPiPContentController()
         content.view = hosting.container
+
         content.onAppear = { [weak self] in
             guard let self, self.presentationGeneration == generation,
                   self.hosting != nil, !self.isStopping, !self.isInvalidated
             else { return }
+
             self.transitionTimeout?.cancel()
             self.transitionTimeout = nil
             self.isActive = true
@@ -162,6 +178,7 @@ final class MPVMacPictureInPictureController: NSObject {
             self.hosting?.surface.requestAuthoritativeFinalResize()
             self.onStateChange?()
         }
+
         content.onLayout = { [weak self] in self?.onStateChange?() }
         contentController = content
         synchronizePlaybackState()
@@ -170,13 +187,14 @@ final class MPVMacPictureInPictureController: NSObject {
 
         do {
             try systemController.present(content)
+
             // A successful private API call only accepts the request. The
             // content's appearance establishes that the system actually hosts it.
             if !isActive {
                 armTransitionTimeout(generation: generation, starting: true)
             }
         } catch {
-            let description = (error as? MPVPlayerError)?.localizedDescription ?? error.localizedDescription
+            let description = (error as? MPVPlayerError)?.message ?? error.localizedDescription
             reportFailure(.pictureInPictureFailed(operation: .start, message: description))
             finishPresentation()
         }
@@ -184,32 +202,41 @@ final class MPVMacPictureInPictureController: NSObject {
 
     func stop() {
         guard hosting != nil, !isStopping, !isInvalidated else { return }
+
         isStopping = true
         isTransitioning = true
         transitionTimeout?.cancel()
+
         let generation = presentationGeneration
+
         onStateChange?()
         armTransitionTimeout(generation: generation, starting: false, restoring: true)
-        let restore = restoreUserInterface
+
+        let restore = userInterfaceRestorationHandler
+
         restorationTask = Task { @MainActor [weak self] in
             // Application code can suspend indefinitely. Do not retain the
             // controller across it; the watchdog can dismiss and release PiP.
             let restored = await restore?() ?? true
+
             guard !Task.isCancelled, let self, self.presentationGeneration == generation,
                   let content = self.contentController
             else { return }
+
             if restored {
                 self.updateReplacementWindow(bringForward: true)
             } else {
                 self.systemController?.setReplacementWindow(nil, rect: .zero)
             }
+
             do {
                 try self.systemController?.dismiss(content)
+
                 if self.hosting != nil {
                     self.armTransitionTimeout(generation: generation, starting: false)
                 }
             } catch {
-                let description = (error as? MPVPlayerError)?.localizedDescription ?? error.localizedDescription
+                let description = (error as? MPVPlayerError)?.message ?? error.localizedDescription
                 self.reportFailure(.pictureInPictureFailed(operation: .stop, message: description))
                 self.finishPresentation()
             }
@@ -220,25 +247,29 @@ final class MPVMacPictureInPictureController: NSObject {
     /// No application restoration callback is needed during final invalidation.
     func invalidate() {
         guard !isInvalidated else { return }
+
         isInvalidated = true
         restorationTask?.cancel()
         transitionTimeout?.cancel()
         systemController?.delegate = nil
         contentController?.onAppear = nil
         contentController?.onLayout = nil
+
         if let contentController {
             try? systemController?.dismiss(contentController)
         }
+
         finishPresentation()
         sourceSurface = nil
         replacementSurface = nil
         onStateChange = nil
         onFailure = nil
-        restoreUserInterface = nil
+        userInterfaceRestorationHandler = nil
     }
 
     func synchronizePlaybackState() {
         guard !isInvalidated, let player else { return }
+
         systemController?.updatePlaying(
             !player.isPaused,
             aspectRatio: Self.presentationSize(
@@ -246,32 +277,39 @@ final class MPVMacPictureInPictureController: NSObject {
                 rotation: player.mediaInformation.rotation
             )
         )
+
         systemController?.updatePlaybackRate(
             player.isPaused ? 0 : player.playbackRate,
             elapsedTime: player.position.seconds,
             duration: player.duration.seconds
         )
+
         switch player.state {
         case .idle, .stopped, .failed:
             if hosting != nil {
                 stop()
             }
+
         default: break
         }
+
         onStateChange?()
     }
 
     private func updateReplacementWindow(bringForward: Bool) {
         let replacement = replacementSurface.flatMap { $0.window != nil ? $0 : nil }
         let inlineView: NSView? = replacement ?? hosting?.placeholder
+
         guard let inlineView, let window = inlineView.window else {
             systemController?.setReplacementWindow(nil, rect: .zero)
             return
         }
+
         systemController?.setReplacementWindow(
             window,
             rect: inlineView.convert(inlineView.bounds, to: nil)
         )
+
         if bringForward {
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
@@ -280,17 +318,23 @@ final class MPVMacPictureInPictureController: NSObject {
 
     private func armTransitionTimeout(generation: Int, starting: Bool, restoring: Bool = false) {
         transitionTimeout?.cancel()
+
         let delay: Duration = restoring ? restorationTimeoutDuration : .seconds(5)
+
         transitionTimeout = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: delay) } catch { return }
+
             guard let self, self.presentationGeneration == generation,
                   self.hosting != nil, self.isTransitioning else { return }
+
             self.reportFailure(.pictureInPictureTimedOut(
                 operation: restoring ? .restoreInterface : starting ? .start : .stop
             ))
+
             if let content = self.contentController {
                 try? self.systemController?.dismiss(content)
             }
+
             self.finishPresentation()
         }
     }
@@ -303,15 +347,20 @@ final class MPVMacPictureInPictureController: NSObject {
         restorationTask = nil
         contentController?.onAppear = nil
         contentController?.onLayout = nil
+
         let hosted = hosting
+
         hosting = nil
+
         let restored = hosted?.restore() ?? false
+
         contentController?.view = NSView()
         contentController = nil
         hosted?.surface.releaseRenderingFromPictureInPicture()
         isActive = false
         isTransitioning = false
         isStopping = false
+
         if let replacement = replacementSurface, replacement.window != nil {
             hosted?.surface.detach()
             sourceSurface = replacement
@@ -322,6 +371,7 @@ final class MPVMacPictureInPictureController: NSObject {
         } else if let player {
             MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
         }
+
         replacementSurface = nil
         onStateChange?()
     }
@@ -337,6 +387,7 @@ extension MPVMacPictureInPictureController: MPVMacPiPDelegate {
         if isStopping || isInvalidated {
             return true
         }
+
         // Restore the app before asking the framework to animate back to it.
         stop()
         return false
@@ -353,7 +404,9 @@ extension MPVMacPictureInPictureController: MPVMacPiPDelegate {
 
     func pictureInPictureSetPlaying(_ playing: Bool) {
         guard let player, !isInvalidated else { return }
+
         playing ? player.play() : player.pause()
+
         systemController?.updatePlaying(
             playing,
             aspectRatio: Self.presentationSize(
@@ -365,6 +418,7 @@ extension MPVMacPictureInPictureController: MPVMacPiPDelegate {
 
     func pictureInPictureSkip(by interval: TimeInterval) {
         guard let player, player.isSeekable, interval.isFinite, !isInvalidated else { return }
+
         player.seek(to: (player.position + .seconds(interval)).clampPositiveOrZero)
     }
 }
@@ -425,25 +479,32 @@ final class MPVMacPiPViewHosting {
         // Width/height constraints owned by the surface must move too, or they
         // force the system host to retain the old inline size.
         var ancestor: NSView? = surface
+
         while let owner = ancestor {
             originalConstraints.append(contentsOf: owner.constraints.filter {
                 guard $0.isActive,
                       ($0.firstItem as? NSView) === surface || ($0.secondItem as? NSView) === surface
                 else { return false }
+
                 // Constraints to an overlay/child travel with that child and
                 // the rendering surface; only inline layout moves to the stub.
                 let otherItem = ($0.firstItem as? NSView) === surface ? $0.secondItem : $0.firstItem
                 let otherView = (otherItem as? NSView) ?? (otherItem as? NSLayoutGuide)?.owningView
+
                 if let otherView, otherView !== surface, otherView.isDescendant(of: surface) {
                     return false
                 }
+
                 return true
             })
+
             if wasWindowContentView {
                 break
             }
+
             ancestor = owner.superview
         }
+
         placeholderConstraints = originalConstraints.compactMap { original in
             // SwiftUI also installs framework-owned size constraints whose
             // attributes cannot be passed to NSLayoutConstraint's public
@@ -455,6 +516,7 @@ final class MPVMacPiPViewHosting {
                   Self.isPublicLayoutAttribute(original.secondAttribute),
                   (original.secondItem == nil) == (original.secondAttribute == .notAnAttribute)
             else { return nil }
+
             let constraint = NSLayoutConstraint(
                 item: (firstItem as? NSView) === surface ? placeholder : firstItem,
                 attribute: original.firstAttribute,
@@ -466,9 +528,12 @@ final class MPVMacPiPViewHosting {
             )
             constraint.priority = original.priority
             constraint.identifier = original.identifier
+
             return constraint
         }
+
         NSLayoutConstraint.deactivate(originalConstraints)
+
         if wasWindowContentView {
             sourceWindow?.contentView = placeholder
             NSLayoutConstraint.activate(placeholderConstraints)
@@ -477,6 +542,7 @@ final class MPVMacPiPViewHosting {
             surface.removeFromSuperview()
             NSLayoutConstraint.activate(placeholderConstraints)
         }
+
         surface.removeFromSuperview()
         surface.translatesAutoresizingMaskIntoConstraints = true
         surface.autoresizingMask = [.width, .height]
@@ -489,16 +555,21 @@ final class MPVMacPiPViewHosting {
         func view(_ item: AnyObject?) -> NSView? {
             (item as? NSView) ?? (item as? NSLayoutGuide)?.owningView
         }
+
         guard let first = view(constraint.firstItem) else { return false }
         guard let secondItem = constraint.secondItem else { return true }
         guard let second = view(secondItem) else { return false }
+
         var ancestor: NSView? = first
+
         while let current = ancestor {
             if second === current || second.isDescendant(of: current) {
                 return true
             }
+
             ancestor = current.superview
         }
+
         return false
     }
 
@@ -515,6 +586,7 @@ final class MPVMacPiPViewHosting {
     @discardableResult
     func restore() -> Bool {
         guard !didRestore else { return surface.window != nil }
+
         didRestore = true
         surface.moveVideoOverlay(to: nil)
         NSLayoutConstraint.deactivate(placeholderConstraints)
@@ -522,21 +594,25 @@ final class MPVMacPiPViewHosting {
         surface.translatesAutoresizingMaskIntoConstraints = originalTranslatesAutoresizingMask
         surface.autoresizingMask = originalAutoresizingMask
         surface.frame = placeholder.frame.isEmpty ? originalFrame : placeholder.frame
+
         if wasWindowContentView, let sourceWindow, sourceWindow.contentView === placeholder {
             sourceWindow.contentView = surface
             NSLayoutConstraint.activate(originalConstraints.filter(Self.canActivate))
         } else if let superview = placeholder.superview, superview === sourceSuperview {
             superview.addSubview(surface, positioned: .above, relativeTo: placeholder)
             placeholder.removeFromSuperview()
+
             // A host may have removed its inline hierarchy during PiP. Restore
             // constraints only when both items still share an ancestor.
             NSLayoutConstraint.activate(originalConstraints.filter(Self.canActivate))
         } else {
             placeholder.removeFromSuperview()
         }
+
         originalConstraints = []
         placeholderConstraints = []
         surface.superview?.layoutSubtreeIfNeeded()
+
         return surface.window != nil
     }
 }

@@ -23,23 +23,29 @@ func hash(_ data: Data) -> String {
 func digest(_ file: URL) throws -> String {
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
+
     var sha = SHA256()
+
     // Foundation may autorelease read buffers. A long-lived CLI must release each chunk
     // immediately instead of retaining every archive read until its outer run loop drains.
     while try autoreleasepool(invoking: { () throws -> Bool in
         guard let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty else { return false }
+
         sha.update(data: chunk)
         return true
     }) {}
+
     return sha.finalize().map { String(format: "%02x", $0) }.joined()
 }
 
 func decode<T: Codable>(_ type: T.Type, from data: Data) throws -> T {
     let value = try JSONDecoder().decode(type, from: data)
+
     // Codable checks required fields and types; this second pass rejects ignored fields recursively.
     func check(_ original: Any, _ encoded: Any, _ path: String) throws {
         if let a = original as? [String: Any], let b = encoded as? [String: Any] {
             try require(Set(a.keys).isSubset(of: Set(b.keys)), "Unknown fields at \(path): \(Set(a.keys).subtracting(b.keys).sorted())")
+
             for (key, child) in a {
                 if let expected = b[key] {
                     try check(child, expected, path + "." + key)
@@ -51,7 +57,9 @@ func decode<T: Codable>(_ type: T.Type, from data: Data) throws -> T {
             }
         }
     }
+
     try check(JSONSerialization.jsonObject(with: data), JSONSerialization.jsonObject(with: canonical(value)), "root")
+
     return value
 }
 
@@ -98,8 +106,10 @@ func contained(_ root: URL, _ relative: String) throws -> URL {
         !relative.isEmpty && !relative.hasPrefix("/") && !relative.components(separatedBy: "/").contains(".."),
         "Unsafe relative path: \(relative)"
     )
+
     let path = root.appendingPathComponent(relative)
     try require(path.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/"), "Path escapes owner: \(relative)")
+
     return path
 }
 
@@ -107,43 +117,55 @@ func files(_ root: URL, pruning: Set<String> = []) throws -> [URL] {
     // Enumerate relative names: URL enumeration may canonicalize /var to /private/var only on returned children.
     // Joining relative names keeps the same root spelling on both sides of a relocatable digest.
     var result: [URL] = []
+
     func visit(_ directory: URL) throws {
         for name in try fm.contentsOfDirectory(atPath: directory.path).sorted() {
             if pruning.contains(name) {
                 continue
             }
+
             let child = directory.appendingPathComponent(name)
             result.append(child)
+
             let values = try child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+
             if values.isDirectory == true && values.isSymbolicLink != true {
                 try visit(child)
             }
         }
     }
+
     try visit(root)
+
     return result.sorted { $0.path < $1.path }
 }
 
 func tree(_ root: URL, excluding: Set<String> = [], pruning: Set<String> = []) throws -> [String: String] {
     let root = root.resolvingSymlinksInPath()
     var result: [String: String] = [:]
+
     for path in try files(root, pruning: pruning) {
         try autoreleasepool {
             let relative = String(path.path.dropFirst(root.path.count + 1))
+
             if excluding.contains(relative) {
                 return
             }
+
             let values = try path.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+
             if values.isSymbolicLink == true {
                 _ = try contained(root, relative)
                 result[relative] = try "link:" + (fm.destinationOfSymbolicLink(atPath: path.path))
             } else if values.isRegularFile == true {
                 let mode = try (fm.attributesOfItem(atPath: path.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0
+
                 // The executable attribute is semantic; group/other permission bits vary with umask.
                 result[relative] = try "\(mode & 0o111 == 0 ? 0 : 1):" + digest(path)
             }
         }
     }
+
     return result
 }
 
@@ -155,6 +177,7 @@ final class FileLock {
         try mkdir(file.deletingLastPathComponent())
         fd = open(file.path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         try require(fd >= 0, "Cannot open lock: \(file.path)")
+
         if flock(fd, shared ? LOCK_SH : LOCK_EX) != 0 {
             close(fd)
             throw BuildError("Cannot acquire lock \(file.path)")
@@ -183,6 +206,7 @@ struct StageRecord: Codable {
     ) throws -> Bool {
         guard complete, stage == expectedStage, input == key, dependencies == expectedDependencies,
               !products.isEmpty else { return false }
+
         return try products == tree(directory, excluding: ["record.json"])
     }
 }
@@ -197,15 +221,19 @@ struct ManagedStore {
         self.root = root.standardizedFileURL
         try require(root.path == root.standardizedFileURL.path, "Managed root must not contain parent aliases")
         try require(root.standardizedFileURL == root.resolvingSymlinksInPath(), "Managed root must not contain symlinks")
+
         let initialization = try FileLock(root.deletingLastPathComponent()
             .appendingPathComponent(".mpvbuild-init-\(hash(Data(root.lastPathComponent.utf8))).lock"))
         defer { withExtendedLifetime(initialization) {} }
         try mkdir(root)
+
         let marker = root.appendingPathComponent(".mpvbuild-owner")
+
         if !exists(marker) {
             try require(fm.contentsOfDirectory(atPath: root.path).isEmpty, "Refusing to adopt nonempty unmanaged directory")
             try put("MPVBuild native store v1\n", marker)
         }
+
         try require(String(contentsOf: marker, encoding: .utf8) == "MPVBuild native store v1\n", "Invalid managed directory owner")
     }
 
@@ -226,8 +254,10 @@ struct ManagedStore {
         let output = try path("\(stage)/\(name)/\(key)")
         let lock = try FileLock(path("locks/\(stage)-\(hash(Data(name.utf8)))-\(key).lock"))
         defer { withExtendedLifetime(lock) {} }
+
         // Only the owner of this node can reclaim its interrupted staging directories.
         let parent = output.deletingLastPathComponent()
+
         if exists(parent) {
             for name in try fm.contentsOfDirectory(atPath: parent.path)
                 where name.hasPrefix(".\(key).partial-") || name.hasPrefix(".\(key).replaced-")
@@ -235,9 +265,11 @@ struct ManagedStore {
                 try remove(parent.appendingPathComponent(name))
             }
         }
+
         if !fresh, exists(output.appendingPathComponent("record.json")) {
             do {
                 let record = try read(StageRecord.self, output.appendingPathComponent("record.json"))
+
                 if try record.verify(output, stage: stage, key: key, dependencies: dependencies) {
                     diagnostics?.record(
                         stage: stage,
@@ -247,22 +279,28 @@ struct ManagedStore {
                         reason: "inputs and product digests verified",
                         since: started
                     )
+
                     print("reuse \(stage)/\(name) \(key.prefix(12))")
                     return output
                 }
+
                 reason = "completion inputs or product digests differ"
                 print("invalidate \(stage)/\(name): completion inputs or product digests differ")
             } catch { reason = "invalid completion record: \(error)"
                 print("invalidate \(stage)/\(name): \(error)")
             }
         }
+
         print("build \(stage)/\(name) \(key.prefix(12))")
+
         let temporary = output.deletingLastPathComponent().appendingPathComponent(".\(key).partial-\(UUID().uuidString)")
         try mkdir(temporary)
         defer { try? remove(temporary) }
+
         let validations = try build(temporary)
         let products = try tree(temporary)
         try require(!products.isEmpty, "Node \(stage)/\(name) produced nothing")
+
         try write(
             StageRecord(
                 stage: stage,
@@ -274,23 +312,57 @@ struct ManagedStore {
             ),
             temporary.appendingPathComponent("record.json")
         )
+
         if exists(output) {
             let backup = output.deletingLastPathComponent().appendingPathComponent(".\(key).replaced-\(UUID().uuidString)")
             try fm.moveItem(at: output, to: backup)
+
             do { try fm.moveItem(at: temporary, to: output) } catch { try fm.moveItem(at: backup, to: output)
                 throw error
             }
+
             try remove(backup)
         } else {
             try fm.moveItem(at: temporary, to: output)
         }
+
         diagnostics?.record(stage: stage, name: name, key: key, action: "build", reason: reason, since: started)
+
         return output
+    }
+
+    /// Points `candidates/latest` at a packaged candidate so later commands can omit its path.
+    func recordLatestCandidate(_ candidate: URL) throws {
+        let candidates = try path("candidates")
+        try require(candidate.path.hasPrefix(candidates.path + "/"), "Candidate is outside the managed store: \(candidate.path)")
+
+        let staged = candidates.appendingPathComponent(".latest-\(UUID().uuidString)")
+        try fm.createSymbolicLink(atPath: staged.path, withDestinationPath: String(candidate.path.dropFirst(candidates.path.count + 1)))
+
+        // rename(2) replaces the previous link atomically for concurrent readers.
+        guard rename(staged.path, candidates.appendingPathComponent("latest").path) == 0 else {
+            let reason = String(cString: strerror(errno))
+
+            try? remove(staged)
+            throw BuildError("Cannot record the latest candidate: \(reason)")
+        }
+    }
+
+    /// Returns the most recently packaged candidate, resolved to its stable directory.
+    func latestCandidate() throws -> URL {
+        let link = try path("candidates/latest")
+
+        guard (try? fm.destinationOfSymbolicLink(atPath: link.path)) != nil, exists(link) else {
+            throw BuildError("No candidate has been built. Run make build, or pass the candidate path.")
+        }
+
+        return link.resolvingSymlinksInPath()
     }
 
     func clean(cache: Bool) throws {
         let marker = root.appendingPathComponent(".mpvbuild-owner")
         try require(root == root.resolvingSymlinksInPath() && exists(marker), "Unsafe clean owner")
+
         for name in [
             "work",
             "products",
@@ -301,7 +373,7 @@ struct ManagedStore {
             "test-results",
             "audits",
             "thin-products.json",
-            "coverage.json"
+            "audit.json"
         ] + (cache ? ["downloads", "extracted", "prepared", "git", "toolchains"] : []) {
             try remove(path(name))
         }

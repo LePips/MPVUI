@@ -53,7 +53,9 @@ struct PlayerInspector: View {
         if player.videoOutput == .sampleBuffer {
             return "Managed by AVFoundation"
         }
+
         guard !diagnostics.renderingQuality.effectiveOptions.isEmpty else { return "Unknown" }
+
         return readable(diagnostics.renderingQuality.resolvedPreset.rawValue)
     }
 
@@ -138,6 +140,7 @@ struct PlayerInspector: View {
     private var sourceSection: some View {
         Section("Media") {
             InspectorRow("Title", value: model.selectedName)
+
             if let sourceURL = player.mediaInformation.sourceURL {
                 InspectorRow("File", value: sourceURL.lastPathComponent, monospaced: true)
 
@@ -187,7 +190,7 @@ struct PlayerInspector: View {
             InspectorRow(
                 "Ahead",
                 value: ExampleDisplayFormat.decimal(
-                    player.bufferStatus.secondsBufferedAhead,
+                    player.bufferStatus.bufferedDurationAhead,
                     suffix: "s"
                 )
             )
@@ -233,10 +236,12 @@ struct PlayerInspector: View {
                 "Decoder",
                 value: model.details.decoder
             )
+
             InspectorRow(
                 "Video Output",
                 value: outputName
             )
+
             InspectorRow("Dimensions", value: model.details.resolution)
 
             InspectorRow(
@@ -278,6 +283,7 @@ struct PlayerInspector: View {
             InspectorRow("Configured Range", value: dynamicRangeName(hdr.presentation.configuredDynamicRange))
 
             InspectorRow("OS Presentation", value: dynamicRangeName(hdr.presentation.actualDynamicRange))
+
             InspectorDisclosureGroup("Display and color conversion") {
                 InspectorRow("HDR Support", value: readable(hdr.displayCapabilities.hdrSupport.rawValue))
 
@@ -296,6 +302,7 @@ struct PlayerInspector: View {
                 InspectorRow("Target Transfer", value: player.renderColorStatus.targetTransfer ?? "Unknown")
 
                 InspectorRow("Display Profile", value: player.renderColorStatus.displayProfileName ?? "Unknown")
+
                 if let url = player.renderColorStatus.calibratedProfileURL ?? player.renderColorStatus.calibratedLUTURL {
                     InspectorRow("Calibration File", value: url.lastPathComponent)
                 }
@@ -303,13 +310,16 @@ struct PlayerInspector: View {
                 InspectorRow("Reference White Model", value: number(player.renderColorStatus.referenceWhite, suffix: "nits"))
 
                 InspectorRow("SDR Viewing", value: player.renderColorStatus.sdrViewing.map { readable($0.rawValue) } ?? "Unknown")
+
                 if let fallback = player.renderColorStatus.fallbackReason {
                     InspectorRow("Color Fallback", value: colorFallbackName(fallback))
                 }
+
                 if let fallback = hdr.presentation.fallbackReason {
                     InspectorRow("Range Fallback", value: presentationFallbackName(fallback))
                 }
             }
+
             InspectorDisclosureGroup("Signal metadata") {
                 InspectorRow("Source", value: signalDescription(hdr.source))
 
@@ -351,6 +361,7 @@ struct PlayerInspector: View {
                 ForEach(qualitySettings, id: \.0) { title, key in
                     InspectorRow(title, value: diagnostics.renderingQuality.effectiveOptions[key] ?? "Unknown / not applied")
                 }
+
                 if !diagnostics.renderingQuality.unsupportedFeatures.isEmpty {
                     InspectorRow("Not Applied", value: diagnostics.renderingQuality.unsupportedFeatures.joined(separator: "; "))
                 }
@@ -359,6 +370,7 @@ struct PlayerInspector: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             InspectorDisclosureGroup("Deinterlacing") {
                 InspectorRow("Requested Mode", value: readable(player.configuration.deinterlace.mode.rawValue))
 
@@ -372,19 +384,23 @@ struct PlayerInspector: View {
 
                 InspectorRow("Software Frames", value: yesNo(diagnostics.deinterlace.requiresSoftwareFrames))
 
-                InspectorRow("Output Interlaced", value: yesNo(diagnostics.deinterlace.outputFrameIsInterlaced))
+                InspectorRow("Output Interlaced", value: yesNo(diagnostics.deinterlace.isOutputFrameInterlaced))
 
                 InspectorRow("Filter Output Rate", value: frameRate(diagnostics.estimatedFilterFramesPerSecond))
+
                 if let reason = diagnostics.deinterlace.reason {
                     InspectorRow("Details", value: reason)
                 }
             }
+
             InspectorDisclosureGroup("Features for this item") {
                 ForEach(MPVVideoFeature.allCases, id: \.self) { feature in
                     InspectorRow(featureName(feature), value: capabilityDescription(player.videoFeatureCapabilities[feature]))
                 }
+
                 if let request = player.videoFeatureRequestResult {
                     InspectorRow("Feature Request", value: readable(request.outcome.rawValue))
+
                     if let reason = request.reason {
                         InspectorRow("Details", value: reason)
                     }
@@ -419,12 +435,14 @@ struct PlayerInspector: View {
                     compatibility: player.dolbyVisionStatus.effectiveBaseLayerCompatibilityID
                 )
             )
+
             InspectorDisclosureGroup("Validation and conversion") {
                 InspectorRow("Native RPU Validation", value: readable(player.dolbyVisionStatus.nativeValidation.rawValue))
 
                 InspectorRow("Conversion", value: readable(player.dolbyVisionStatus.conversion.rawValue))
 
                 InspectorRow("Enhancement Layer", value: readable(player.dolbyVisionStatus.enhancementLayer.rawValue))
+
                 if let reason = player.dolbyVisionStatus.reason {
                     InspectorRow("Details", value: reason)
                 }
@@ -458,7 +476,7 @@ struct PlayerInspector: View {
 
                 InspectorRow("Surround Spatialization Allowed", value: yesNo(diagnostics.audio.allowsMultichannelSpatialization))
 
-                InspectorRow("Route Spatial Audio Enabled", value: yesNo(diagnostics.audio.routeSpatialAudioEnabled))
+                InspectorRow("Route Spatial Audio Enabled", value: yesNo(diagnostics.audio.isSpatialAudioEnabledForRoute))
 
                 Text(
                     """
@@ -470,6 +488,7 @@ struct PlayerInspector: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
             InspectorDisclosureGroup("Timing and frame delivery") {
                 InspectorRow("Decoder Drops", value: count(diagnostics.decoderDroppedFrames))
 
@@ -504,6 +523,7 @@ struct PlayerInspector: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
             InspectorDisclosureGroup("Decoder and render work") {
                 InspectorRow("Selected Decoder", value: diagnostics.decoder.selectedDecoder ?? "Unknown")
 
@@ -529,6 +549,7 @@ struct PlayerInspector: View {
                 ForEach(Array(slowestRenderPasses.enumerated()), id: \.offset) { _, pass in
                     InspectorRow("GPU · \(pass.name)", value: milliseconds(pass.averageNanoseconds.map { Double($0) / 1_000_000_000 }))
                 }
+
                 if slowestRenderPasses.isEmpty {
                     InspectorRow("GPU Pass Timings", value: "Unknown")
                 }
@@ -542,6 +563,7 @@ struct PlayerInspector: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
             if !diagnostics.fallbackReasons.isEmpty {
                 InspectorRow("Fallback Details", value: diagnostics.fallbackReasons.joined(separator: "; "))
             }
@@ -560,7 +582,7 @@ struct PlayerInspector: View {
     private var errorSection: some View {
         Section("Error") {
             if let error = player.lastError {
-                InspectorRow("Description", value: error.localizedDescription)
+                InspectorRow("Description", value: error.message)
 
                 Button("Clear Error") {
                     model.clearPlayerError()
@@ -614,6 +636,7 @@ struct PlayerInspector: View {
 
     private func signalDescription(_ signal: MPVVideoSignal) -> String {
         let depth = signal.bitDepth.map { "\($0)-bit" } ?? "Unknown depth"
+
         return [
             signal.primaries ?? "Unknown primaries",
             ExampleDisplayFormat.transferFunction(signal.transferFunction),
@@ -624,9 +647,11 @@ struct PlayerInspector: View {
 
     private func dolbyProfile(_ profile: Int?, compatibility: Int?) -> String {
         guard let profile else { return "Unknown / not reported" }
+
         if profile == 8, let compatibility {
             return [1, 4].contains(compatibility) ? "8.\(compatibility)" : "8 · compatibility ID \(compatibility)"
         }
+
         return String(profile) + (profile == 8 ? " · subtype unknown" : "")
     }
 
@@ -659,6 +684,7 @@ struct PlayerInspector: View {
 
     private func number(_ value: Double?, suffix: String = "") -> String {
         guard let value, value.isFinite else { return "Unknown" }
+
         return ExampleDisplayFormat.decimal(value, suffix: suffix)
     }
 
@@ -713,6 +739,7 @@ struct InspectorDisclosureGroup<Content: View>: View {
             }
         }
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+
         if isExpanded {
             content
         }

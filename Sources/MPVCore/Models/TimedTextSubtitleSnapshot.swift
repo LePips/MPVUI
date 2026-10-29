@@ -13,7 +13,7 @@ public struct TimedTextSubtitleSnapshot: Sendable, Hashable {
     /// All text regions presented during this interval.
     public let snapshot: TextSubtitleSnapshot
 
-    /// Whether the given source timestamp is inside this presentation.
+    /// Returns whether the source timestamp is in the half-open presentation interval.
     public func contains(_ timestamp: Duration) -> Bool {
         startTime <= timestamp && timestamp < endTime
     }

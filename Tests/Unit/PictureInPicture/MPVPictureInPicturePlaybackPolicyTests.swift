@@ -44,6 +44,7 @@ struct MPVPictureInPicturePlaybackPolicyTests {
     @Test(arguments: [-0.25, 20.0, 120.0, 120.25])
     func `finite range contains native presentation time including endpoint and preroll`(seconds: Double) {
         let displayTime = CMTime(seconds: seconds, preferredTimescale: 600)
+
         let range = MPVPictureInPicturePlaybackPolicy.playbackTimeRange(
             hasMedia: true,
             state: .ended,

@@ -22,7 +22,7 @@ def main():
         native = swift_core.ROOT / ".build/android/native"
         manifest = json.loads((native / f"assets/mpvui/build-{abi}.json").read_text())
         if manifest.get("swift", {}).get("sources") != swift_core.source_fingerprint():
-            raise ValueError(f"Rebuild {abi} with make build-android before building the example")
+            raise ValueError(f"Rebuild {abi} with make build PLATFORM=android before building the example")
         swift_core.validate_toolchain(abi)
         arguments += [
             "--swift-version",

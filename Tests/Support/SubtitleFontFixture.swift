@@ -30,6 +30,7 @@ struct SubtitleFontFixture {
         let source = try #require(CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
         let destination = directory.appendingPathComponent(name).appendingPathExtension(source.pathExtension)
         try FileManager.default.copyItem(at: source, to: destination)
+
         return Font(
             family: CTFontCopyFamilyName(font) as String,
             postScriptName: CTFontCopyPostScriptName(font) as String

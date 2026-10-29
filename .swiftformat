@@ -30,34 +30,36 @@
 --wrapparameters before-first
 --xcodeindentation enabled
 
---enable blankLinesAroundMark,   \
-    blankLinesAtStartOfScope, \
-    isEmpty,                \
-    leadingDelimiters,      \
-    organizeDeclarations,  \
-    redundantInit,          \
-    redundantLet,           \
-    spaceInsideBraces,      \
-    spaceInsideBrackets,    \
-    spaceInsideComments,    \
-    spaceInsideGenerics,    \
-    spaceInsideParens,      \
-    singlePropertyPerLine,  \
-    trailingSpace,          \
-    typeSugar,              \
-    void,                   \
-    wrapEnumCases,          \
+--enable blankLineAfterSwitchCase,   \
+    blankLinesAfterGuardStatements,  \
+    blankLinesAroundMark,            \
+    blankLinesAtStartOfScope,        \
+    isEmpty,                         \
+    leadingDelimiters,               \
+    organizeDeclarations,            \
+    redundantInit,                   \
+    redundantLet,                    \
+    spaceInsideBraces,               \
+    spaceInsideBrackets,             \
+    spaceInsideComments,             \
+    spaceInsideGenerics,             \
+    spaceInsideParens,               \
+    singlePropertyPerLine,           \
+    trailingSpace,                   \
+    typeSugar,                       \
+    void,                            \
+    wrapEnumCases,                   \
     wrapMultilineFunctionChains
 
---disable andOperator,       \
-    docComments,             \
-    redundantClosure,       \
-    redundantFileprivate,   \
-    redundantSelf,          \
-    redundantType,          \
-    redundantViewBuilder,   \
-    strongOutlets,          \
-    trailingCommas,         \
+--disable andOperator,     \
+    docComments,           \
+    redundantClosure,      \
+    redundantFileprivate,  \
+    redundantSelf,         \
+    redundantType,         \
+    redundantViewBuilder,  \
+    strongOutlets,         \
+    trailingCommas,        \
     yodaConditions
 
 --header ignore

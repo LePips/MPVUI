@@ -90,6 +90,7 @@ struct MPVRenderSurfaceConfigurationTests {
             scale: sdr.scale,
             usesExtendedDynamicRange: true
         )
+
         var decisions: [Bool] = []
         var normalizedHeadrooms: [Double] = []
 
@@ -101,9 +102,11 @@ struct MPVRenderSurfaceConfigurationTests {
                 scale: sdr.scale,
                 usesExtendedDynamicRange: true
             )
+
             decisions.append(
                 sampled.requiresRendererReconfiguration(comparedTo: previous)
             )
+
             normalizedHeadrooms.append(sampled.outputHeadroom)
             previous = sampled
         }

@@ -59,6 +59,7 @@ public enum MPVPlaybackState: Equatable, Sendable {
     /// The associated player error when the state is ``failed(_:)``.
     public var error: MPVPlayerError? {
         guard case let .failed(error) = self else { return nil }
+
         return error
     }
 }

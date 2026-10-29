@@ -31,16 +31,19 @@ struct MPVDisplayMatchingPlaybackTests {
         case nil:
             try TestPaths.testMedia("dolby-vision-p84.mp4")
         }
+
         let fixture = PlaybackFixture(configuration: .init(
             additionalOptions: ["ao": "null", "sid": "no"],
-            autoPlay: false,
+            automaticallyPlays: false,
             videoOutput: .sampleBuffer
         ))
         defer { fixture.close() }
         try await fixture.loadPaused(url)
-        try await eventually("native Dolby Vision validation; fallback=\(fixture.player.lastError?.localizedDescription ?? "none")") {
+
+        try await eventually("native Dolby Vision validation; fallback=\(fixture.player.lastError?.message ?? "none")") {
             fixture.player.dolbyVisionStatus.nativeValidation == .validated
         }
+
         let player = fixture.player
 
         let content = try #require(MPVDisplayMatchingContent(
@@ -55,6 +58,7 @@ struct MPVDisplayMatchingPlaybackTests {
         #expect(CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_DolbyVisionHEVC)
         #expect(content.refreshRate == Float(24000.0 / 1001))
         #expect(content.dolbyVision?.profile == player.dolbyVisionStatus.effectiveProfile)
+
         print(
             """
             DISPLAY_MATCHING_REFERENCE: fps=\(content.refreshRate) source=\(player.mediaInformation.hdr.source) \
@@ -63,24 +67,28 @@ struct MPVDisplayMatchingPlaybackTests {
         )
         #if os(tvOS)
         let manager = fixture.window.avDisplayManager
+
         print(
             """
             DISPLAY_MATCHING_TV: enabled=\(manager.isDisplayCriteriaMatchingEnabled) \
             switching=\(manager.isDisplayModeSwitchInProgress) criteria=\(String(describing: manager.preferredDisplayCriteria))
             """
         )
+
         if manager.isDisplayCriteriaMatchingEnabled {
             try await eventually("active surface submits native Dolby Vision TV criteria", timeout: .seconds(30)) {
                 fixture.surface.displayMatchingContent == content && !manager.isDisplayModeSwitchInProgress
             }
 
             #expect(manager.preferredDisplayCriteria != nil)
+
             print(
                 """
                 DISPLAY_MATCHING_TV_SETTLED: fps=\(content.refreshRate) \
                 DolbyVision=\(String(describing: fixture.surface.displayMatchingContent?.dolbyVision))
                 """
             )
+
             fixture.surface.detach()
 
             #expect(manager.preferredDisplayCriteria == nil)

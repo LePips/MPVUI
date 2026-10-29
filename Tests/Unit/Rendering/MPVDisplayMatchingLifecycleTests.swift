@@ -82,9 +82,11 @@ struct MPVDisplayMatchingLifecycleTests {
         let endpoint = Endpoint()
         let old = MPVDisplayMatchingCoordinator()
         let current = MPVDisplayMatchingCoordinator()
+
         defer { old.detach()
             current.detach()
         }
+
         update(old, endpoint: endpoint)
         update(current, endpoint: endpoint)
         old.detach()

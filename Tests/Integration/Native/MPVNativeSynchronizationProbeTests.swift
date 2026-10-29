@@ -69,6 +69,7 @@ struct MPVNativeSynchronizationProbeTests {
             func value(_ x: (some Any)?) -> Any {
                 x.map { $0 as Any } ?? NSNull()
             }
+
             return [
                 "phase": phase,
                 "requestElapsedSeconds": requested - origin,
@@ -126,6 +127,7 @@ struct MPVNativeSynchronizationProbeTests {
             previousKeyWindow = scene.windows.first { $0.isKeyWindow }
             window = UIWindow(windowScene: scene)
             window.frame = scene.coordinateSpace.bounds
+
             let host = UIViewController()
             host.view.backgroundColor = .black
             window.rootViewController = host
@@ -134,11 +136,13 @@ struct MPVNativeSynchronizationProbeTests {
             layer.frame = host.view.bounds
             host.view.layer.addSublayer(layer)
             recorder = EventRecorder()
+
             let recorder = recorder
+
             engine = MPVSession(configuration: .init(
                 additionalOptions: ["sub-auto": "no", "sub-visibility": "no", "osd-level": "0"],
                 audio: .init(audioSession: .hostManaged),
-                autoPlay: true,
+                automaticallyPlays: true,
                 hardwareDecoding: .videoToolbox,
                 logLevel: .warning,
                 videoOutput: .sampleBuffer
@@ -150,7 +154,9 @@ struct MPVNativeSynchronizationProbeTests {
                 default: break
                 }
             }
+
             let scale = scene.screen.scale
+
             engine.attach(to: MPVRenderTarget(
                 layerAddress: Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque())),
                 layerOwner: layer,
@@ -176,6 +182,7 @@ struct MPVNativeSynchronizationProbeTests {
 
         func snapshot() async -> NativeSample {
             let engine = engine
+
             return await withCheckedContinuation { continuation in
                 engine.queue.async {
                     let begin = ProcessInfo.processInfo.systemUptime
@@ -190,6 +197,7 @@ struct MPVNativeSynchronizationProbeTests {
                     let ao = engine.getString("current-ao")
                     let decoderDrops = engine.getInt64("decoder-frame-drop-count")
                     let outputDrops = engine.getInt64("frame-drop-count")
+
                     continuation.resume(returning: NativeSample(
                         begin: begin,
                         end: ProcessInfo.processInfo.systemUptime,
@@ -231,6 +239,7 @@ struct MPVNativeSynchronizationProbeTests {
                 logs.removeFirst()
                 logsDiscarded += 1
             }
+
             logs.append([
                 "deliverySystemUptimeSeconds": ProcessInfo.processInfo.systemUptime,
                 "prefix": value.prefix,
@@ -249,6 +258,7 @@ struct MPVNativeSynchronizationProbeTests {
     private static func processCPU() -> Double? {
         var usage = rusage()
         guard getrusage(RUSAGE_SELF, &usage) == 0 else { return nil }
+
         return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
             + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
     }
@@ -266,9 +276,11 @@ struct MPVNativeSynchronizationProbeTests {
         let config = try JSONDecoder().decode(Configuration.self, from: configurationData)
         try #require(config.directFilename == URL(fileURLWithPath: config.directFilename).lastPathComponent)
         try #require(config.hlsURL.scheme == "http" || config.hlsURL.scheme == "https")
+
         let source = workload == "direct" ? try TestPaths.testMedia(config.directFilename) : config.hlsURL
         let mediaSHA256 = workload == "direct" ? config.directMediaSHA256 : config.hlsMediaSHA256
         try #require(mediaSHA256.count == 64 && mediaSHA256.allSatisfy(\.isHexDigit))
+
         let origin = ProcessInfo.processInfo.systemUptime
         var samples: [[String: Any]] = []
         var phases: [[String: Any]] = []
@@ -282,8 +294,10 @@ struct MPVNativeSynchronizationProbeTests {
         let audio = AVAudioSession.sharedInstance()
         var audioObservation: [String: Any] = [:]
         var status = "failed"
+
         let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("native-sync-\(workload)-\(intervalMilliseconds)ms-\(UUID().uuidString).json")
+
         defer {
             let report: [String: Any] = [
                 "schemaVersion": 1,
@@ -332,6 +346,7 @@ struct MPVNativeSynchronizationProbeTests {
                     "avsync is mpv audio/video timing, not panel scanout or audible synchronization."
                 ]
             ]
+
             do {
                 try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: output)
                 print("Native synchronization report: \(output.lastPathComponent), status=\(status)")
@@ -340,12 +355,14 @@ struct MPVNativeSynchronizationProbeTests {
 
         func recordReadiness(_ boundary: String) {
             let application = UIApplication.shared
+
             let applicationState: String = switch application.applicationState {
             case .active: "active"
             case .inactive: "inactive"
             case .background: "background"
             @unknown default: "unknown"
             }
+
             let scenes = application.connectedScenes.map { scene -> [String: Any] in
                 let activation: String = switch scene.activationState {
                 case .foregroundActive: "foregroundActive"
@@ -354,7 +371,9 @@ struct MPVNativeSynchronizationProbeTests {
                 case .unattached: "unattached"
                 @unknown default: "unknown"
                 }
+
                 let windows = (scene as? UIWindowScene)?.windows ?? []
+
                 return [
                     "type": String(describing: type(of: scene)),
                     "activationState": activation,
@@ -363,6 +382,7 @@ struct MPVNativeSynchronizationProbeTests {
                     "keyWindowCount": windows.filter(\.isKeyWindow).count
                 ]
             }
+
             readinessObservations.append([
                 "boundary": boundary,
                 "elapsedSeconds": ProcessInfo.processInfo.systemUptime - origin,
@@ -372,25 +392,31 @@ struct MPVNativeSynchronizationProbeTests {
                 "scenes": scenes
             ])
         }
+
         func requireForeground(_ stage: String) async throws {
             setupStage = stage
             recordReadiness("\(stage):before")
+
             do {
                 try await eventually("the physical test host to enter a foreground-active scene during \(stage)", timeout: .seconds(10)) {
                     UIApplication.shared.connectedScenes.contains {
                         $0 is UIWindowScene && $0.activationState == .foregroundActive
                     }
                 }
+
                 recordReadiness("\(stage):ready")
             } catch {
                 recordReadiness("\(stage):failed")
+
                 let failure = error as NSError
+
                 setupFailure = [
                     "stage": stage,
                     "errorDomain": failure.domain,
                     "errorCode": failure.code,
                     "description": failure.localizedDescription
                 ]
+
                 throw error
             }
         }
@@ -401,13 +427,16 @@ struct MPVNativeSynchronizationProbeTests {
             try #require(observed == config.directFileSHA256, "Bundled direct media differs from the verified host fixture")
             directBytesVerified = true
         }
+
         // Install the report writer before this requirement: launch failures
         // must retain application/scene evidence even without a player or audio.
         try await requireForeground("beforeAudioAndRenderer")
         setupStage = "audioActivation"
+
         let priorCategory = audio.category
         let priorMode = audio.mode
         let priorOptions = audio.categoryOptions
+
         defer {
             audioObservation = [
                 "route": audio.currentRoute.outputs.map(\.portType.rawValue),
@@ -415,12 +444,15 @@ struct MPVNativeSynchronizationProbeTests {
                 "outputChannels": audio.outputNumberOfChannels,
                 "volume": audio.outputVolume
             ]
+
             try? audio.setActive(false, options: .notifyOthersOnDeactivation)
             try? audio.setCategory(priorCategory, mode: priorMode, options: priorOptions)
         }
+
         try audio.setCategory(.playback, mode: .moviePlayback)
         try audio.setActive(true)
         setupStage = "rendererCreation"
+
         let fixture = try ProbeFixture()
         createdFixture = fixture
         defer { fixture.close() }
@@ -429,8 +461,10 @@ struct MPVNativeSynchronizationProbeTests {
             let requested = ProcessInfo.processInfo.systemUptime
             let sample = await fixture.snapshot()
             samples.append(sample.json(phase: phase, origin: origin, requested: requested))
+
             return sample
         }
+
         func collect(
             _ name: String,
             duration: Double? = nil,
@@ -441,18 +475,24 @@ struct MPVNativeSynchronizationProbeTests {
             var count = 0
             var sample = await observe(name)
             count += 1
+
             let deadline = begin + (duration ?? 12)
+
             while duration != nil ? ProcessInfo.processInfo.systemUptime < deadline : predicate?(sample) != true {
                 if duration == nil {
                     try #require(ProcessInfo.processInfo.systemUptime < deadline, "Timed out during \(name)")
                 }
+
                 try #require(!sample.failed && !sample.fallback, "Native renderer failed during \(name)")
+
                 // Sleep after completion: no catch-up bursts if a query stalls.
                 try await Task.sleep(for: .milliseconds(intervalMilliseconds))
                 sample = await observe(name)
                 count += 1
             }
+
             try #require(!sample.failed && !sample.fallback, "Native renderer failed during \(name)")
+
             phases.append([
                 "name": name,
                 "beginElapsedSeconds": begin - origin,
@@ -460,6 +500,7 @@ struct MPVNativeSynchronizationProbeTests {
                 "processCPUSeconds": nullableDifference(processCPU(), cpuBegin),
                 "samples": count
             ])
+
             return sample
         }
 
@@ -473,9 +514,11 @@ struct MPVNativeSynchronizationProbeTests {
             let width = buffer.map(CVPixelBufferGetWidth)
             let height = buffer.map(CVPixelBufferGetHeight)
             let delay = value?.totalAccumulatedFrameDelay
+
             func nullable(_ value: (some Any)?) -> Any {
                 value.map { $0 as Any } ?? NSNull()
             }
+
             // Record unavailable evidence before requiring it, so a failed
             // probe retains nulls instead of silently substituting zero drops.
             frameworkSamples.append([
@@ -498,6 +541,7 @@ struct MPVNativeSynchronizationProbeTests {
             try #require(displayedWidth > 0 && displayedHeight > 0, "Displayed native buffer must have valid dimensions")
             try #require(metrics.totalNumberOfFrames > 0 && metrics.numberOfDroppedFrames >= 0 && metrics.numberOfCorruptedFrames >= 0)
             try #require(metrics.totalAccumulatedFrameDelay.isFinite && metrics.totalAccumulatedFrameDelay >= 0)
+
             return FrameworkSample(
                 frames: metrics.totalNumberOfFrames,
                 dropped: metrics.numberOfDroppedFrames,
@@ -513,6 +557,7 @@ struct MPVNativeSynchronizationProbeTests {
             // for an MPV scheduling failure. Wait before measuring playback,
             // independently verify the fetched manifest, and retain failures.
             setupStage = "networkPreflight"
+
             let begin = ProcessInfo.processInfo.systemUptime
             let settings = URLSessionConfiguration.ephemeral
             settings.waitsForConnectivity = true
@@ -520,15 +565,19 @@ struct MPVNativeSynchronizationProbeTests {
             settings.timeoutIntervalForResource = 30
             settings.urlCache = nil
             settings.requestCachePolicy = .reloadIgnoringLocalCacheData
+
             let session = URLSession(configuration: settings)
             defer { session.invalidateAndCancel() }
             networkPreflight["beginElapsedSeconds"] = begin - origin
             networkPreflight["waitsForConnectivity"] = true
             networkPreflight["timeoutSeconds"] = 30
+
             networkPreflight["localNetworkUsageDescriptionPresent"] = Bundle.main
                 .object(forInfoDictionaryKey: "NSLocalNetworkUsageDescription") is String
+
             networkPreflight["allowsLocalNetworking"] = (Bundle.main
                 .object(forInfoDictionaryKey: "NSAppTransportSecurity") as? [String: Any])?["NSAllowsLocalNetworking"] as? Bool ?? false
+
             do {
                 let (data, response) = try await session.data(from: source)
                 let observed = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -541,35 +590,42 @@ struct MPVNativeSynchronizationProbeTests {
                     config.hostVerification.hlsIdentity.files[source.lastPathComponent],
                     "The host-verified HLS manifest hash is required"
                 )
+
                 try #require((response as? HTTPURLResponse)?.statusCode == 200, "HLS preflight must return HTTP 200")
                 try #require(data.starts(with: Data("#EXTM3U".utf8)), "HLS preflight response must be a playlist")
                 try #require(observed == expected, "Fetched HLS manifest differs from the verified fixture")
                 networkPreflight["passed"] = true
             } catch {
                 let failure = error as NSError
+
                 networkPreflight["passed"] = false
                 networkPreflight["endElapsedSeconds"] = ProcessInfo.processInfo.systemUptime - origin
                 networkPreflight["errorDomain"] = failure.domain
                 networkPreflight["errorCode"] = failure.code
                 networkPreflight["errorDescription"] = failure.localizedDescription
                 networkPreflight["networkPath"] = failure.userInfo["_NSURLErrorNWPathKey"].map { String(describing: $0) } ?? NSNull()
+
                 if let underlying = failure.userInfo[NSUnderlyingErrorKey] as? NSError {
                     networkPreflight["underlyingErrorDomain"] = underlying.domain
                     networkPreflight["underlyingErrorCode"] = underlying.code
                     networkPreflight["underlyingErrorDescription"] = underlying.localizedDescription
                 }
+
                 throw error
             }
+
             try await requireForeground("afterNetworkPreflight")
         }
 
         setupStage = "playback"
         _ = await observe("beforeLoad")
         fixture.mark("loadRequested")
-        fixture.engine.load(source, autoPlay: true, startTime: .zero, generation: 1)
+        fixture.engine.load(source, playAutomatically: true, startTime: .zero, generation: 1)
+
         let started = try await collect("startup", until: { $0.playing && ($0.position ?? 0) > 0 })
         try #require((started.duration ?? 0) >= 40, "Synchronization fixtures must be seekable and at least 40 seconds")
         _ = try await collect("startupRecovery", duration: 2)
+
         // Expensive framework observations stay outside the 50/500 ms native
         // query loop and outside the settled phase CPU interval.
         let frameworkBefore = try await observeFramework("beforeSteady")
@@ -582,8 +638,10 @@ struct MPVNativeSynchronizationProbeTests {
         try #require(frameworkAfter.delay >= frameworkBefore.delay, "AVFoundation cumulative delay must not reset during steady playback")
         try #require(frameworkAfter.width == frameworkBefore.width && frameworkAfter.height == frameworkBefore.height)
         try #require(before.hardware == true && after.hardware == true)
+
         try #require(["videotoolbox", "videotoolbox-copy"].contains(before.hardwareDecoder ?? "")
             && ["videotoolbox", "videotoolbox-copy"].contains(after.hardwareDecoder ?? ""))
+
         try #require(before.audioOutput == "avfoundation" && after.audioOutput == "avfoundation")
         try #require(before.decoderDrops != nil && before.outputDrops != nil)
         try #require(before.decoderDrops == after.decoderDrops && before.outputDrops == after.outputDrops)
@@ -593,9 +651,11 @@ struct MPVNativeSynchronizationProbeTests {
         try #require((0.8 ... 1.2).contains((last - first) / (after.end - before.end)))
         fixture.mark("exactSeekRequested:20")
         fixture.engine.seek(to: .seconds(20))
+
         _ = try await collect("seek", until: {
             $0.playing && $0.seeking == false && ($0.position ?? -1) >= 19.9 && ($0.position ?? 100) < 22
         })
+
         let settled = try await collect("seekRecovery", duration: 2)
         try #require(settled.hardware == true && settled.audioOutput == "avfoundation")
         try #require(["videotoolbox", "videotoolbox-copy"].contains(settled.hardwareDecoder ?? ""))
@@ -610,6 +670,7 @@ struct MPVNativeSynchronizationProbeTests {
 
     private func nullableDifference(_ last: Double?, _ first: Double?) -> Any {
         guard let last, let first else { return NSNull() }
+
         return last - first
     }
 }

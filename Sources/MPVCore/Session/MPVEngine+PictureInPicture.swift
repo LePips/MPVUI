@@ -37,10 +37,12 @@ package extension MPVSession {
                     continuation.resume(returning: false)
                     return
                 }
+
                 // runCommand is synchronous. This buffer remains pinned until
                 // mpv copies every row; no pointer escapes withUnsafeBytes.
                 let status = bitmap.bytes.withUnsafeBytes { bytes -> Int32 in
                     guard let address = bytes.baseAddress else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+
                     return self.runCommand([
                         "overlay-add",
                         "63",
@@ -56,9 +58,11 @@ package extension MPVSession {
                         String(height),
                     ])
                 }
+
                 if status < 0 {
                     _ = self.runCommand(["overlay-remove", "63"])
                 }
+
                 continuation.resume(returning: status >= 0)
             }
         }
@@ -67,6 +71,7 @@ package extension MPVSession {
     func clearPictureInPictureOverlay() {
         queue.async { [weak self] in
             guard let self, self.handle != nil else { return }
+
             _ = self.runCommand(["overlay-remove", "63"])
         }
     }
@@ -78,21 +83,28 @@ package extension MPVSession {
                     continuation.resume(returning: false)
                     return
                 }
+
                 self.completePiPSeek(false)
+
                 // Deliver already queued restarts before registering a new seek.
                 self.drainEvents()
+
                 guard self.handle != nil, self.isFileLoaded || self.didReachEnd, self.lastSeekable else {
                     continuation.resume(returning: false)
                     return
                 }
+
                 let target = self.lastDuration > .zero
-                    ? clamp(time, to: .zero ... self.lastDuration) : time.clampPositiveOrZero
+                    ? clamped(time, to: .zero ... self.lastDuration) : time.clampPositiveOrZero
+
                 if self.didReachEnd, target >= self.lastDuration {
                     continuation.resume(returning: true)
                     return
                 }
+
                 let id = UUID()
                 self.pendingPiPSeek = PiPSeek(id: id, target: target, continuation: continuation)
+
                 if self.didReachEnd, let sourceURL = self.sourceURL {
                     // EOF retires the VO. Reopen the same source paused so a
                     // backward PiP skip supplies a new destination frame and
@@ -113,14 +125,17 @@ package extension MPVSession {
                     self.loadPendingSourceIfPossible()
                 } else {
                     let status = self.runCommand(["seek", Self.format(target), "absolute+exact"])
+
                     guard status >= 0 else {
                         self.publishCommandError(status, context: "Seek from picture in picture")
                         self.completePiPSeek(false)
                         return
                     }
                 }
+
                 self.queue.asyncAfter(deadline: .now() + 8) { [weak self] in
                     guard let self, self.pendingPiPSeek?.id == id else { return }
+
                     self.completePiPSeek(false)
                 }
             }
@@ -129,6 +144,7 @@ package extension MPVSession {
 
     func completePiPSeek(_ success: Bool) {
         let request = pendingPiPSeek
+
         pendingPiPSeek = nil
         request?.continuation.resume(returning: success)
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a command with readable output, retaining full logs and a JSON result.
 
-Use the public Make targets, such as `make test-unit`; Make invokes this runner.
+Use make commands, such as `make test SUITE=unit`. Build/commands.py invokes this runner.
 With --json, stdout is one RFC 8259 JSON document instead of live command output.
 result.schema.json defines the saved result and JSON output contract.
 Commands run without a shell. Full diagnostics stay in the run directory.

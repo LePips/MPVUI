@@ -18,23 +18,28 @@ struct MPVEngineSurfaceRetirementTests {
         let otherSize = CGSize(width: 800, height: 450)
         ownedLayer.drawableSize = ownedSize
         otherLayer.drawableSize = otherSize
+
         let ownedTarget = target(ownedLayer, size: ownedSize)
         let otherTarget = target(otherLayer, size: otherSize)
         let engine = MPVSession(configuration: .init(videoOutput: output)) { _ in }
+
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             engine.queue.async {
                 engine.renderTarget = ownedTarget
+
                 let owned = ownedTarget.layerOwner as! MPVMetalLayer
                 let other = otherTarget.layerOwner as! MPVMetalLayer
                 let sentinel = CGSize(width: 1, height: 1)
 
                 #expect(!owned.invalidateDrawablePoolAfterNativeTeardown())
+
                 let invalidated = engine.withNativeSurfaceRetirement {
                     owned.drawableSize = sentinel
                     other.drawableSize = sentinel
 
                     #expect(owned.drawableSize == (output == .metal ? sentinel : ownedSize))
                     #expect(other.drawableSize == otherSize)
+
                     // Scope cleanup must use the captured owner even if the
                     // engine subsequently points at another retained target.
                     engine.renderTarget = otherTarget

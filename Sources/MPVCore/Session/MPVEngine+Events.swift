@@ -52,6 +52,7 @@ package extension MPVSession {
 
     var isRequestedPlaylistEntryActive: Bool {
         guard playbackRequestIsActive else { return false }
+
         return Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID)
     }
 
@@ -83,12 +84,14 @@ package extension MPVSession {
             default:
                 MPV_FORMAT_NONE
             }
+
             let status = mpv_observe_property(
                 handle,
                 UInt64(index + 1),
                 property,
                 format
             )
+
             if status < 0 {
                 publishCommandError(status, context: "Observe \(property)")
             }
@@ -113,10 +116,13 @@ package extension MPVSession {
         coalescingPropertySnapshots {
             while let handle {
                 guard let eventPointer = mpv_wait_event(handle, 0) else { return }
+
                 let event = eventPointer.pointee
+
                 if event.event_id == MPV_EVENT_NONE {
                     return
                 }
+
                 handleEvent(event)
             }
         }
@@ -130,10 +136,12 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
         precondition(!isCoalescingPropertySnapshots)
         isCoalescingPropertySnapshots = true
+
         defer {
             flushPropertySnapshots()
             isCoalescingPropertySnapshots = false
         }
+
         body()
     }
 
@@ -141,27 +149,33 @@ package extension MPVSession {
     // boundary separate from polling also lets tests deliver rare/stale events.
     func handleEvent(_ event: mpv_event) {
         dispatchPrecondition(condition: .onQueue(queue))
+
         if event.event_id != MPV_EVENT_PROPERTY_CHANGE {
             flushPropertySnapshots()
         }
+
         if event.event_id != MPV_EVENT_NONE {
             lifecycleDiagnostics.engineActivity.nativeEvents &+= 1
         }
+
         switch event.event_id {
         case MPV_EVENT_HOOK:
             guard let handle, let data = event.data else { return }
+
             let hook = data.assumingMemoryBound(to: mpv_event_hook.self).pointee
-            // Report tracks before decoder selection can reject video-only media.
-            if isRequestedPlaylistEntryActive {
+
+            if isRequestedPlaylistEntryActive, getFlag("playback-abort") != true {
+                pendingPreloadHookID = hook.id
                 refreshMediaInformation()
-            }
-            let status = mpv_hook_continue(handle, hook.id)
-            if status < 0 {
-                publishCommandError(status, context: "Continue media loading")
+                continuePreloadIfPossible()
+            } else {
+                // A replacement or stop can overtake delivery of this hook.
+                continuePreload(hook.id, on: handle)
             }
 
         case MPV_EVENT_COMMAND_REPLY:
             guard let query = subtitleQueries.removeValue(forKey: event.reply_userdata) else { return }
+
             if query.cancellation.isCancelled {
                 query.continuation.resume(throwing: CancellationError())
             } else if event.error < 0 {
@@ -180,13 +194,20 @@ package extension MPVSession {
             lifecycleDiagnostics.startFileEvents &+= 1
             guard playbackRequestIsActive else { return }
             guard let data = event.data else { return }
+
             let startEvent = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee
             let entryID = startEvent.playlist_entry_id
+
             if let requestedPlaylistEntryID, entryID != requestedPlaylistEntryID {
                 return
             }
+
             cancelSubtitleQueries()
             resetMediaObservations()
+
+            // Native logs from the old item can arrive after load() resets the
+            // resolver. Clear them again at the accepted item boundary.
+            dolbyVisionResolver.reset()
             requestedPlaylistEntryID = entryID
             activePlaylistEntryID = entryID
             isLoading = true
@@ -202,6 +223,7 @@ package extension MPVSession {
 
         case MPV_EVENT_FILE_LOADED:
             guard isRequestedPlaylistEntryActive else { return }
+
             isLoading = false
             isFileLoaded = true
             isIdle = false
@@ -216,6 +238,7 @@ package extension MPVSession {
 
         case MPV_EVENT_SEEK:
             guard isRequestedPlaylistEntryActive else { return }
+
             clearTextSubtitleSnapshot()
             pendingPiPSeek?.sawSeek = true
             seekUptime = DispatchTime.now().uptimeNanoseconds
@@ -224,35 +247,43 @@ package extension MPVSession {
 
         case MPV_EVENT_PLAYBACK_RESTART:
             guard isRequestedPlaylistEntryActive else { return }
+
             let now = DispatchTime.now().uptimeNanoseconds
+
             if let requestedLoadUptime {
                 playbackDiagnostics.startLatencySeconds = Double(now - requestedLoadUptime) / 1_000_000_000
                 self.requestedLoadUptime = nil
             }
+
             if let seekUptime {
                 playbackDiagnostics.seekLatencySeconds = Double(now - seekUptime) / 1_000_000_000
                 self.seekUptime = nil
             }
+
             isLoading = false
             isSeeking = false
             isIdle = false
             hasPlaybackStarted = true
+
             if checkAndroidVideoPresentation() {
                 return
             }
-            publish(.videoFrame(true))
+
+            publish(.videoFrame(getInt64("current-tracks/video/id") != nil))
+
             if isDiagnosticsEnabled {
                 refreshPlaybackDiagnostics()
             } else {
                 publish(.diagnostics(playbackDiagnostics))
             }
+
             refreshTiming()
             refreshBuffer()
             refreshTextSubtitleSnapshot()
             refreshState()
+
             // FILE_LOADED can publish .paused before a frame exists. A restart
             // also occurs for paused playback after its first frame is ready.
-
             if let request = pendingPiPSeek, request.sawSeek,
                abs((lastPosition - request.target).seconds) < 1
             {
@@ -261,7 +292,9 @@ package extension MPVSession {
 
         case MPV_EVENT_VIDEO_RECONFIG, MPV_EVENT_AUDIO_RECONFIG:
             guard isRequestedPlaylistEntryActive else { return }
+
             refreshMediaInformation()
+
             if event.event_id == MPV_EVENT_AUDIO_RECONFIG {
                 refreshAudioDiagnostics()
             }
@@ -269,8 +302,10 @@ package extension MPVSession {
         case MPV_EVENT_PROPERTY_CHANGE:
             guard isRequestedPlaylistEntryActive else { return }
             guard let data = event.data else { return }
+
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
             let propertyName: String
+
             if event.reply_userdata > 0, event.reply_userdata <= UInt64(Self.observedProperties.count) {
                 propertyName = Self.observedProperties[Int(event.reply_userdata) - 1]
             } else if event.reply_userdata == Self.textSubtitleObservationID {
@@ -280,10 +315,13 @@ package extension MPVSession {
             } else {
                 return
             }
+
             lifecycleDiagnostics.engineActivity.propertyChangeEvents[propertyName, default: 0] &+= 1
+
             let needsValue = propertyName == "time-pos" || propertyName == "paused-for-cache" || propertyName == "sub-text-snapshot"
                 || propertyName == "hwdec-current"
                 || ["duration", "chapter", "estimated-vf-fps", "container-fps"].contains(propertyName)
+
             let copiedNode = needsValue ? MPVNodeValue(copying: property) : nil
             handlePropertyChange(propertyName, copiedNode: copiedNode)
 
@@ -295,12 +333,14 @@ package extension MPVSession {
 
         case MPV_EVENT_QUEUE_OVERFLOW:
             cancelSubtitleQueries()
+
             publish(
                 .error(
                     .eventQueueOverflow,
                     fatal: false
                 )
             )
+
             if playbackRequestIsActive {
                 refreshAll()
             }
@@ -342,11 +382,14 @@ package extension MPVSession {
     private func flushPropertySnapshots() {
         let buffer = pendingBufferSnapshot
         let media = pendingMediaSnapshot
+
         pendingBufferSnapshot = false
         pendingMediaSnapshot = false
+
         if buffer {
             refreshBuffer()
         }
+
         if media {
             refreshMediaInformation()
         }
@@ -362,6 +405,7 @@ package extension MPVSession {
         default:
             break
         }
+
         switch name {
         case "pause":
             isPaused = isDisplaySwitchInProgress ? !shouldAutoPlay : (getFlag(name) ?? isPaused)
@@ -378,6 +422,7 @@ package extension MPVSession {
         case "paused-for-cache":
             let pausedForCache = copiedNode?.boolValue ?? getFlag(name) ?? isPausedForCache
             guard pausedForCache != isPausedForCache else { return }
+
             flushPropertySnapshots()
             isPausedForCache = pausedForCache
             refreshBuffer()
@@ -390,6 +435,7 @@ package extension MPVSession {
         case "time-pos":
             lastPosition = (copiedNode?.doubleValue.flatMap(Duration.init(mpvSeconds:)) ?? lastPosition)
                 .clampPositiveOrZero
+
             publishTiming()
 
         case "seekable":
@@ -411,23 +457,28 @@ package extension MPVSession {
         case "estimated-vf-fps", "container-fps":
             let previous = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
             let fps = Self.normalizedFrameRate(copiedNode?.doubleValue)
+
             if name == "container-fps" {
                 lastContainerFramesPerSecond = fps
             } else {
                 lastEstimatedFramesPerSecond = fps
             }
+
             let current = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
+
             if current != previous {
                 publish(.frameRate(current))
             }
 
         case "hwdec-current":
             let selectedDecoder = copiedNode?.stringValue
+
             if selectedDecoder != playbackDiagnostics.decoder.selectedDecoder {
                 // A previous decoder session cannot establish a new selection.
                 // A log delivered first already published this same selection.
                 videoToolboxSessionUsesHardware = nil
             }
+
             refreshDecoderDiagnostics(hardwareDecoder: selectedDecoder)
             refreshPropertySnapshot(.media)
 
@@ -457,6 +508,7 @@ package extension MPVSession {
             completePiPSeek(false)
             playbackRequestIsActive = false
             publishState(.ended)
+
             return
         }
 
@@ -470,11 +522,13 @@ package extension MPVSession {
             if activePlaylistEntryID == entryID {
                 activePlaylistEntryID = nil
             }
+
             return
         }
 
         if endEvent.reason == MPV_END_FILE_REASON_REDIRECT {
             completePiPSeek(false)
+
             // A playlist-like source replaces itself with new entries. The
             // next START_FILE identifies the actual selected item.
             clearTextSubtitleSnapshot()
@@ -486,6 +540,7 @@ package extension MPVSession {
             isPausedForCache = false
             isIdle = false
             publishState(.loading)
+
             return
         }
 
@@ -496,35 +551,19 @@ package extension MPVSession {
             return
         }
 
-        if renderTarget == nil || sourceLoadWasHeadless, endEvent.reason == MPV_END_FILE_REASON_ERROR,
-           endEvent.error == MPV_ERROR_NOTHING_TO_PLAY.rawValue
-        {
-            // Keep video-only media pending until a view attaches.
-            requestedPlaylistEntryID = nil
-            activePlaylistEntryID = nil
-            isFileLoaded = false
-            isLoading = true
-            needsSourceLoad = true
-            pendingStartTime = pendingSeekAfterLoad ?? lastPosition
-            pendingSeekAfterLoad = nil
-            publishState(.loading)
-            // Retry if a view attached before this END_FILE event arrived.
-            if renderTarget != nil {
-                loadPendingSourceIfPossible()
-            }
-            return
-        }
-
         if endEvent.reason == MPV_END_FILE_REASON_ERROR, videoOutput == .nativeSurface {
             if fallbackFromAndroidNative(reason: "Native surface playback failed; reloaded through GPU output", decoderFailed: true) {
                 return
             }
+
             if usesAndroidOutput {
                 publishFatalError(.nativeVideoOutputUnavailable(mpvErrorMessage(endEvent.error)))
                 return
             }
         }
+
         let failedDuringLoad = !isFileLoaded
+
         playbackRequestIsActive = false
         clearTextSubtitleSnapshot()
         requestedPlaylistEntryID = nil
@@ -542,6 +581,7 @@ package extension MPVSession {
             lastPosition = lastDuration
             publishTiming()
             publishState(.ended)
+
             // An exact seek to the endpoint can retire the VO without a
             // playback-restart event. The terminal timeline is authoritative.
             let reachedRequestedEnd = pendingPiPSeek.map {
@@ -555,7 +595,9 @@ package extension MPVSession {
 
         case MPV_END_FILE_REASON_ERROR:
             completePiPSeek(false)
+
             let code = endEvent.error
+
             publishFatalError(
                 failedDuringLoad ? .loadFailed(code: code, message: mpvErrorMessage(code)) :
                     .playbackFailed(code: code, message: mpvErrorMessage(code))

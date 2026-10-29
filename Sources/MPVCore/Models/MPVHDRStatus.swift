@@ -38,7 +38,7 @@ public struct MPVHDRStatus: Equatable, Sendable {
     /// Maximum Frame-Average Light Level in nits, when reported.
     public let maxFrameAverageLightLevel: Double?
 
-    /// The signal peak reported or inferred by mpv, when available.
+    /// The signal peak relative to reference white, reported or inferred by mpv when available.
     public let signalPeak: Double?
 
     /// Whether the selected output display supports HDR presentation.
@@ -84,12 +84,15 @@ public struct MPVHDRStatus: Equatable, Sendable {
         self.decoded = decoded
         self.videoOutputInput = videoOutputInput
         self.output = output
+
         self.displayCapabilities = displayCapabilities ?? MPVDisplayCapabilities(
             hdrSupport: isDisplayHDRCapable ? .supported : .unknown
         )
+
         self.presentation = presentation ?? MPVPresentationStatus(
             actualDynamicRange: isHDRActive ? .hdr : .unknown
         )
+
         self.primaries = source.primaries
         self.transferFunction = source.transferFunction
         self.minimumLuminance = source.minimumLuminance
@@ -98,6 +101,7 @@ public struct MPVHDRStatus: Equatable, Sendable {
         self.maxFrameAverageLightLevel = source.maxFrameAverageLightLevel
         self.signalPeak = source.signalPeak
         self.isDisplayHDRCapable = self.displayCapabilities.hdrSupport == .supported
+
         self.isHDRActive = self.presentation.actualDynamicRange == .hdr
             || self.presentation.actualDynamicRange == .constrainedHDR
     }

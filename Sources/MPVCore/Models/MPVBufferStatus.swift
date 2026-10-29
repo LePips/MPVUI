@@ -11,7 +11,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
     public let progress: Double
 
     /// The amount of playable media buffered after the current position.
-    public let secondsBufferedAhead: Duration
+    public let bufferedDurationAhead: Duration
 
     /// The furthest buffered timeline position, when mpv reports one.
     public let bufferedEnd: Duration?
@@ -34,7 +34,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
     package init(
         isBuffering: Bool = false,
         progress: Double = 0,
-        secondsBufferedAhead: Duration = .zero,
+        bufferedDurationAhead: Duration = .zero,
         bufferedEnd: Duration? = nil,
         bytesAhead: Int64 = 0,
         totalBytes: Int64? = nil,
@@ -43,7 +43,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
     ) {
         self.isBuffering = isBuffering
         self.progress = Self.normalizedProgress(progress)
-        self.secondsBufferedAhead = secondsBufferedAhead.clampPositiveOrZero
+        self.bufferedDurationAhead = bufferedDurationAhead.clampPositiveOrZero
         self.bufferedEnd = bufferedEnd
         self.bytesAhead = max(0, bytesAhead)
         self.totalBytes = totalBytes.map { max(0, $0) }
@@ -53,6 +53,7 @@ public struct MPVBufferStatus: Equatable, Sendable {
 
     private static func normalizedProgress(_ value: Double) -> Double {
         guard value.isFinite else { return 0 }
-        return clamp(value, to: 0 ... 1)
+
+        return clamped(value, to: 0 ... 1)
     }
 }

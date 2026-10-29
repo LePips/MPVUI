@@ -147,6 +147,15 @@ def build_dovi(scripts, ndk, abi, lock, environment, jobs):
     if not any(line.startswith(rust + "-") for line in installed.splitlines()):
         run("rustup", "toolchain", "install", rust, "--profile", "minimal")
     arch, triple = ABI[abi]
+    prefix = scripts / "prefix" / arch
+    prefix.mkdir(parents=True, exist_ok=True)
+    # Initialize the upstream sysroot aliases before libdovi creates the prefix.
+    for name in ("usr", "local"):
+        alias = prefix / name
+        if not alias.exists() and not alias.is_symlink():
+            alias.symlink_to(".")
+        if not alias.is_symlink() or alias.readlink() != Path("."):
+            raise RuntimeError(f"Expected {alias} to be a symlink to '.'")
     run("rustup", "target", "add", "--toolchain", rust, triple)
     tools = WORK / "tools"
     cargo_c = tools / "bin/cargo-cinstall"
@@ -173,7 +182,7 @@ def build_dovi(scripts, ndk, abi, lock, environment, jobs):
         "--prefix",
         "/",
         "--destdir",
-        scripts / "prefix" / arch,
+        prefix,
         "--manifest-path",
         scripts / "deps/libdovi/dolby_vision/Cargo.toml",
         env=env,
@@ -289,7 +298,9 @@ def package(scripts, ndk, abi, lock, environment):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--abi", choices=ABI, action="append", help="Repeat to build both supported ABIs; default arm64-v8a")
+    parser.add_argument(
+        "--abi", choices=ABI, action="append", help="Build one ABI. Repeat for more. Defaults to every ABI, which packaging needs"
+    )
     parser.add_argument("--sdk", type=Path, default=os.environ.get("ANDROID_HOME", str(Path.home() / "Library/Android/sdk")))
     parser.add_argument("--ndk", type=Path, default=os.environ.get("ANDROID_NDK_HOME"))
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 4, 8))
@@ -307,7 +318,7 @@ def main():
         run(venv / "bin/pip", "install", "meson==1.12.0", "ninja==1.13.0")
     environment["PATH"] = str(venv / "bin") + os.pathsep + environment["PATH"]
     scripts = prepare(lock, args.sdk, ndk)
-    for abi in args.abi or ["arm64-v8a"]:
+    for abi in args.abi or list(ABI):
         if not args.package_only:
             build_dovi(scripts, ndk, abi, lock, environment, args.jobs)
             stamp = scripts / "prefix" / ABI[abi][0] / ".mpvui-inputs.sha256"

@@ -44,7 +44,7 @@ MPVUI bundles no fonts. Before creating the player, set these entries in `additi
 - `sub-fonts-dir`: a directory containing the app's `.ttf` or `.otf` files.
 - `sub-font`: the font's internal family name.
 
-Keep the directory available during playback. mpv uses this family for unstyled text and as a fallback for missing ASS fonts or glyphs. Apps rendering `textSubtitleStream()` snapshots choose fonts in their own UI.
+Keep the directory available during playback. mpv uses this family for unstyled text and as a fallback for missing ASS fonts or glyphs. Apps rendering `makeTextSubtitleStream()` snapshots choose fonts in their own UI.
 
 ## Android output
 

@@ -20,11 +20,11 @@ struct MPVMobilePlaybackLifecycleTests {
     {
         let player = MPVPlayer(
             configuration: .init(
-                autoPlay: false,
+                automaticallyPlays: false,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .disabled,
                 logLevel: .debug,
-                loop: true,
+                isLoopingEnabled: true,
                 playbackRate: 0.1,
                 // This scenario verifies 8-bit SDR resize behavior. Automatic
                 // SDR legitimately selects float16 on a wide-gamut display.
@@ -32,19 +32,26 @@ struct MPVMobilePlaybackLifecycleTests {
                 videoOutput: .metal
             )
         )
+
         let subtitleSnapshots = MobileSubtitleSnapshotRecorder()
         let nativeSurfaceFormats = MobileNativeSurfaceFormatRecorder()
+
         player.logHandler = { message in
             nativeSurfaceFormats.capture(message)
         }
+
         player.setTextSubtitleInterceptionEnabled(true)
-        let subtitleStream = player.textSubtitleStream()
+
+        let subtitleStream = player.makeTextSubtitleStream()
+
         let subtitleObservation = Task { @MainActor in
             for await snapshot in subtitleStream {
                 subtitleSnapshots.values.append(snapshot)
             }
         }
+
         try #require(await waitForInitialSubtitleSnapshot(in: subtitleSnapshots))
+
         let surface = MPVPlatformVideoPlayer(player: player)
         let rootViewController = UIViewController()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
@@ -56,6 +63,7 @@ struct MPVMobilePlaybackLifecycleTests {
         window.makeKeyAndVisible()
         surface.layoutIfNeeded()
         surface.updateRenderingConfiguration()
+
         defer {
             subtitleObservation.cancel()
             surface.detach()
@@ -71,17 +79,19 @@ struct MPVMobilePlaybackLifecycleTests {
             .temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
+
         let subtitleURL = FileManager.default
             .temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("srt")
+
         let expectedSubtitleText = "cross-platform resize cue"
+
         // A generated 12-second, 24-frame red stream keeps the native test
         // self-contained. Unlike the old one-frame fixture, it establishes a
         // real playback PTS for semantic subtitles and keeps the loop boundary
         // out of the resize-observation interval. Software decoding avoids the
         // simulator-only VideoToolbox -12906 failure seen with synthetic media.
-
         let video = try #require(
             Data(
                 base64Encoded:
@@ -114,6 +124,7 @@ struct MPVMobilePlaybackLifecycleTests {
             )
         )
         try video.write(to: mediaURL)
+
         try """
         1
         00:00:00,000 --> 00:01:00,000
@@ -125,27 +136,32 @@ struct MPVMobilePlaybackLifecycleTests {
             try? FileManager.default.removeItem(at: mediaURL)
         }
 
-        player.load(mediaURL, autoPlay: false)
+        player.load(mediaURL, playAutomatically: false)
+
         for _ in 0 ..< 100 {
             if player.lastError != nil || player.mediaInformation.dimensions != nil {
                 break
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
         #expect((player.lastError) == nil)
         #expect((player.mediaInformation.dimensions?.width) == 16)
         #expect((player.mediaInformation.dimensions?.height) == 16)
+
         let requiresNativeSurfaceConfiguration =
             ProcessInfo.processInfo.environment[
                 "MPVUI_REQUIRE_NATIVE_SURFACE_CONFIGURATION"
             ] == "1"
+
         let requiredNativeSurfaceConfiguration: String? =
             if requiresNativeSurfaceConfiguration {
                 await waitForNativeSurfaceConfiguration(in: nativeSurfaceFormats)
             } else {
                 nil
             }
+
         try #require(
             !requiresNativeSurfaceConfiguration
                 || requiredNativeSurfaceConfiguration != nil,
@@ -156,12 +172,14 @@ struct MPVMobilePlaybackLifecycleTests {
         // playlist entry ID keeps lifecycle events from displaced entries from
         // changing the state associated with the newest load.
         for _ in 0 ..< 8 {
-            player.load(mediaURL, autoPlay: false)
+            player.load(mediaURL, playAutomatically: false)
         }
+
         for _ in 0 ..< 100 {
             if player.lastError != nil || player.state == .ready || player.state == .paused {
                 break
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -172,6 +190,7 @@ struct MPVMobilePlaybackLifecycleTests {
         player.loadExternalTrack(subtitleURL, type: .subtitle, select: true)
 
         #expect(await waitForSelectedExternalSubtitle(in: player))
+
         let selectedSubtitle = try #require(
             player.subtitleTracks.first {
                 $0.isExternal && $0.isSelected
@@ -179,6 +198,7 @@ struct MPVMobilePlaybackLifecycleTests {
         )
 
         let portraitDrawableSize = surface.metalLayer.drawableSize
+
         let portraitOutputSize = MPVRenderOutputSize(
             width: Int(portraitDrawableSize.width),
             height: Int(portraitDrawableSize.height)
@@ -186,6 +206,7 @@ struct MPVMobilePlaybackLifecycleTests {
 
         #expect((portraitOutputSize.width) > 0)
         #expect((portraitOutputSize.height) > (portraitOutputSize.width))
+
         let initialRenderOutputSize = await waitForRenderOutputSize(
             portraitOutputSize,
             from: player
@@ -197,12 +218,14 @@ struct MPVMobilePlaybackLifecycleTests {
         )
 
         player.seek(to: .seconds(0.5))
+
         for _ in 0 ..< 40 {
             if approximatelyEqual(player.position, .seconds(0.5), tolerance: .milliseconds(10)),
                player.state == .paused
             {
                 break
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -211,6 +234,7 @@ struct MPVMobilePlaybackLifecycleTests {
         )
 
         #expect((player.state) == .paused)
+
         try #require(
             await waitForSubtitleText(
                 expectedSubtitleText,
@@ -220,15 +244,18 @@ struct MPVMobilePlaybackLifecycleTests {
         )
 
         player.play()
+
         for _ in 0 ..< 100 {
             if player.lastError != nil || player.state == .playing {
                 break
             }
+
             try await Task.sleep(nanoseconds: 20_000_000)
         }
 
         #expect((player.lastError) == nil)
         #expect((player.state) == .playing)
+
         let lifecycleBeforePlayingResize = await player.lifecycleDiagnostics()
 
         let playingResizeSizes = [
@@ -236,6 +263,7 @@ struct MPVMobilePlaybackLifecycleTests {
             CGSize(width: 280, height: 220),
             CGSize(width: 320, height: 180),
         ]
+
         for size in playingResizeSizes {
             surface.frame = CGRect(origin: .zero, size: size)
             surface.setNeedsLayout()
@@ -251,6 +279,7 @@ struct MPVMobilePlaybackLifecycleTests {
             for: surface.bounds.size,
             scale: surface.metalLayer.contentsScale
         )
+
         let landscapeOutputSize = MPVRenderOutputSize(
             width: Int(landscapeDrawableSize.width),
             height: Int(landscapeDrawableSize.height)
@@ -258,16 +287,20 @@ struct MPVMobilePlaybackLifecycleTests {
 
         #expect((landscapeOutputSize.width) > (landscapeOutputSize.height))
         #expect(landscapeOutputSize != portraitOutputSize)
+
         let settledRenderOutputSize = await waitForRenderOutputSize(
             landscapeOutputSize,
             from: player
         )
+
         try #require(
             settledRenderOutputSize == landscapeOutputSize,
             "mpv should resize its existing output at the settled landscape drawable size."
         )
+
         // Logical viewport changes precede the final drawable allocation.
         let playingResizeLatency = try await waitForResizeLatency(landscapeOutputSize, from: surface)
+
         try #require(
             (surface.metalLayer.drawableSize)
                 == CGSize(
@@ -280,77 +313,96 @@ struct MPVMobilePlaybackLifecycleTests {
             if player.lastError != nil || player.state == .playing {
                 break
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
+
         try #require((player.lastError) == nil)
         try #require((player.state) == .playing)
         try #require(surface.isActiveRenderingSurface)
         try #require((player.mediaInformation.sourceURL) == mediaURL)
         try #require(!(player.bufferStatus.isBuffering))
+
         let subtitleSelectedDuringPlayingResize =
             player.subtitleTracks
                 .first(where: { $0.id == selectedSubtitle.id })?
                 .isSelected == true
+
         try #require(
             subtitleSelectedDuringPlayingResize,
             "The external subtitle selection must survive a playing resize."
         )
+
         let subtitleObservedDuringPlayingResize = await waitForSubtitleText(
             expectedSubtitleText,
             in: subtitleSnapshots
         )
+
         try #require(
             subtitleObservedDuringPlayingResize,
             "The semantic subtitle stream must survive a playing resize."
         )
 
         let lifecycleAfterPlayingResize = await player.lifecycleDiagnostics()
+
         try #require(
             lifecycleAfterPlayingResize.handlesCreated
                 == lifecycleBeforePlayingResize.handlesCreated
         )
+
         try #require(
             lifecycleAfterPlayingResize.handlesDestroyed
                 == lifecycleBeforePlayingResize.handlesDestroyed
         )
+
         try #require(
             lifecycleAfterPlayingResize.loadCommands
                 == lifecycleBeforePlayingResize.loadCommands
         )
+
         try #require(
             lifecycleAfterPlayingResize.startFileEvents
                 == lifecycleBeforePlayingResize.startFileEvents
         )
+
         try #require(
             lifecycleAfterPlayingResize.seekCommands
                 == lifecycleBeforePlayingResize.seekCommands
         )
+
         try #require(
             lifecycleAfterPlayingResize.loadingStateTransitions
                 == lifecycleBeforePlayingResize.loadingStateTransitions
         )
+
         try #require(
             lifecycleAfterPlayingResize.bufferingStateTransitions
                 == lifecycleBeforePlayingResize.bufferingStateTransitions
         )
+
         try #require(
             lifecycleAfterPlayingResize.seekingStateTransitions
                 == lifecycleBeforePlayingResize.seekingStateTransitions
         )
+
         let playingResizeCommandCount =
             lifecycleAfterPlayingResize.surfaceResizeCommands
                 - lifecycleBeforePlayingResize.surfaceResizeCommands
         try #require(playingResizeCommandCount > 0)
+
         // The coordinator may accept each distinct changed size plus one
         // authoritative trailing final. In-flight sizes can still coalesce, so
         // this is a hard upper bound rather than an exact command count.
         try #require(
             playingResizeCommandCount <= UInt64(playingResizeSizes.count + 1)
         )
+
         try #require(surface.metalLayer.pixelFormat == .bgra8Unorm)
+
         let capturedNativeSurfaceConfiguration =
             requiredNativeSurfaceConfiguration
                 ?? nativeSurfaceFormats.latestConfiguration
+
         let nativeSurfaceConfiguration =
             capturedNativeSurfaceConfiguration ?? "NOT_CAPTURED"
         #if os(iOS)
@@ -369,70 +421,91 @@ struct MPVMobilePlaybackLifecycleTests {
         )
 
         player.pause()
+
         for _ in 0 ..< 100 {
             if player.lastError != nil || player.state == .paused {
                 break
             }
+
             try await Task.sleep(nanoseconds: 20_000_000)
         }
+
         try #require((player.lastError) == nil)
         try #require((player.state) == .paused)
+
         let positionBeforePausedFinal = player.position
         let lifecycleBeforePausedFinal = await player.lifecycleDiagnostics()
 
         try #require(surface.requestAuthoritativeFinalResize())
+
         var lifecycleAfterForcedFinal = lifecycleBeforePausedFinal
+
         for _ in 0 ..< 100 {
             lifecycleAfterForcedFinal = await player.lifecycleDiagnostics()
+
             if lifecycleAfterForcedFinal.surfaceResizeCommands
                 == lifecycleBeforePausedFinal.surfaceResizeCommands + 1
             {
                 break
             }
+
             try await Task.sleep(nanoseconds: 20_000_000)
         }
+
         try #require(
             lifecycleAfterForcedFinal.surfaceResizeCommands
                 == lifecycleBeforePausedFinal.surfaceResizeCommands + 1
         )
+
         try #require(
             lifecycleAfterForcedFinal.handlesCreated
                 == lifecycleBeforePausedFinal.handlesCreated
         )
+
         try #require(
             lifecycleAfterForcedFinal.handlesDestroyed
                 == lifecycleBeforePausedFinal.handlesDestroyed
         )
+
         try #require(
             lifecycleAfterForcedFinal.loadCommands
                 == lifecycleBeforePausedFinal.loadCommands
         )
+
         try #require(
             lifecycleAfterForcedFinal.startFileEvents
                 == lifecycleBeforePausedFinal.startFileEvents
         )
+
         try #require(
             lifecycleAfterForcedFinal.seekCommands
                 == lifecycleBeforePausedFinal.seekCommands
         )
+
         try #require(
             lifecycleAfterForcedFinal.loadingStateTransitions
                 == lifecycleBeforePausedFinal.loadingStateTransitions
         )
+
         try #require(
             lifecycleAfterForcedFinal.bufferingStateTransitions
                 == lifecycleBeforePausedFinal.bufferingStateTransitions
         )
+
         try #require(
             lifecycleAfterForcedFinal.seekingStateTransitions
                 == lifecycleBeforePausedFinal.seekingStateTransitions
         )
+
         try #require(
             await waitForRenderOutputSize(landscapeOutputSize, from: player)
                 == landscapeOutputSize
         )
+
         let resizeLatency = try await waitForResizeLatency(landscapeOutputSize, from: surface)
+
         try #require((player.state) == .paused)
+
         try #require(
             approximatelyEqual(
                 player.position,
@@ -440,23 +513,29 @@ struct MPVMobilePlaybackLifecycleTests {
                 tolerance: .milliseconds(100)
             )
         )
+
         let subtitleSelectedAfterPausedFinal =
             player.subtitleTracks
                 .first(where: { $0.id == selectedSubtitle.id })?
                 .isSelected == true
+
         try #require(
             subtitleSelectedAfterPausedFinal,
             "The external subtitle selection must survive a paused forced final."
         )
+
         let subtitleObservedAfterPausedFinal = await waitForSubtitleText(
             expectedSubtitleText,
             in: subtitleSnapshots
         )
+
         try #require(
             subtitleObservedAfterPausedFinal,
             "The semantic subtitle stream must survive a paused forced final."
         )
+
         try #require(surface.metalLayer.pixelFormat == .bgra8Unorm)
+
         try #require(
             surface.metalLayer.drawableSize
                 == CGSize(
@@ -464,6 +543,7 @@ struct MPVMobilePlaybackLifecycleTests {
                     height: CGFloat(landscapeOutputSize.height)
                 )
         )
+
         print(
             "MPVUI_RESIZE_EVIDENCE scenario=\(resizePlatform)-sdr-paused-forced-final commands="
                 + "\(lifecycleAfterForcedFinal.surfaceResizeCommands - lifecycleBeforePausedFinal.surfaceResizeCommands) "
@@ -486,6 +566,7 @@ struct MPVMobilePlaybackLifecycleTests {
                     height: CGFloat(landscapeOutputSize.height)
                 )
         )
+
         surface.frame = .zero
         surface.setNeedsLayout()
         surface.layoutIfNeeded()
@@ -497,6 +578,7 @@ struct MPVMobilePlaybackLifecycleTests {
                     height: CGFloat(landscapeOutputSize.height)
                 )
         )
+
         surface.frame = CGRect(x: 0, y: 0, width: 320, height: 180)
         surface.setNeedsLayout()
         surface.layoutIfNeeded()
@@ -504,9 +586,9 @@ struct MPVMobilePlaybackLifecycleTests {
 
         let lifecycleAfterTransientResize = await player.lifecycleDiagnostics()
         let renderOutputAfterTransientResize = await player.renderOutputSize()
+
         // Diagnostics polling may continue while paused; a transient size
         // must leave every renderer and playback lifecycle counter unchanged.
-
         #expect(lifecycleAfterTransientResize.handlesCreated == lifecycleAfterForcedFinal.handlesCreated)
         #expect(lifecycleAfterTransientResize.handlesDestroyed == lifecycleAfterForcedFinal.handlesDestroyed)
         #expect(lifecycleAfterTransientResize.loadCommands == lifecycleAfterForcedFinal.loadCommands)
@@ -519,6 +601,7 @@ struct MPVMobilePlaybackLifecycleTests {
         #expect(lifecycleAfterTransientResize.seekingStateTransitions == lifecycleAfterForcedFinal.seekingStateTransitions)
         #expect(renderOutputAfterTransientResize == landscapeOutputSize)
         #expect((player.state) == .paused)
+
         #expect(
             approximatelyEqual(
                 player.position,
@@ -531,9 +614,11 @@ struct MPVMobilePlaybackLifecycleTests {
         // immediately requested explicit stop must still be attributed to the
         // replacement rather than consumed by that stale event.
         for _ in 0 ..< 8 {
-            player.load(mediaURL, autoPlay: false)
+            player.load(mediaURL, playAutomatically: false)
         }
+
         player.stop()
+
         // Let every queued START/END pair settle; observing an intermediate
         // STOP from a displaced entry is not sufficient.
         try await Task.sleep(nanoseconds: 1_000_000_000)
@@ -541,10 +626,12 @@ struct MPVMobilePlaybackLifecycleTests {
         #expect((player.state) == .stopped)
 
         player.seek(to: .seconds(0.5))
+
         for _ in 0 ..< 40 {
             if approximatelyEqual(player.position, .seconds(0.5), tolerance: .milliseconds(10)) {
                 break
             }
+
             try await Task.sleep(nanoseconds: 50_000_000)
         }
 
@@ -567,11 +654,14 @@ struct MPVMobilePlaybackLifecycleTests {
     ) async -> MPVRenderOutputSize? {
         for _ in 0 ..< 100 {
             let size = await player.renderOutputSize()
+
             if size == expectedSize {
                 return size
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return await player.renderOutputSize()
     }
 
@@ -583,13 +673,16 @@ struct MPVMobilePlaybackLifecycleTests {
         // Native output dimensions can change before the coordinator receives
         // the final acknowledgement and records its latency.
         let size = CGSize(width: CGFloat(expected.width), height: CGFloat(expected.height))
+
         try await eventually("final resize is acknowledged") {
             let snapshot = surface.resizeDiagnosticSnapshot
+
             return snapshot.committedDrawableSize == size
                 && snapshot.inFlight == nil && snapshot.pendingDrawableSize == nil
                 && !snapshot.hasScheduledCommit && !snapshot.finalCommitRequired
                 && snapshot.resizeLatencyNanoseconds != nil
         }
+
         return try #require(surface.resizeDiagnosticSnapshot.resizeLatencyNanoseconds)
     }
 
@@ -601,8 +694,10 @@ struct MPVMobilePlaybackLifecycleTests {
             }) {
                 return true
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return player.subtitleTracks.contains(where: {
             $0.isExternal && $0.isSelected
         })
@@ -616,8 +711,10 @@ struct MPVMobilePlaybackLifecycleTests {
             if recorder.values.first?.isEmpty == true {
                 return true
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return recorder.values.first?.isEmpty == true
     }
 
@@ -630,8 +727,10 @@ struct MPVMobilePlaybackLifecycleTests {
             if recorder.values.last?.text == expected {
                 return true
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return recorder.values.last?.text == expected
     }
 
@@ -643,8 +742,10 @@ struct MPVMobilePlaybackLifecycleTests {
             if let configuration = recorder.latestConfiguration {
                 return configuration
             }
+
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+
         return recorder.latestConfiguration
     }
 
@@ -673,6 +774,7 @@ private final class MobileNativeSurfaceFormatRecorder {
 
     func capture(_ message: MPVLogMessage) {
         guard message.message.contains("Picked surface configuration") else { return }
+
         latestConfiguration = message.message
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")

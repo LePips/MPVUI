@@ -24,6 +24,7 @@ struct NativeArchitectureTests {
         slices[index]["architectures"] = architectures
         apple["slices"] = slices
         object["apple"] = apple
+
         let lock = try JSONDecoder().decode(NativeLock.self, from: JSONSerialization.data(withJSONObject: object))
 
         do {
@@ -38,6 +39,7 @@ struct NativeArchitectureTests {
     func `binary inventory rejects an undeclared arm64e slice`() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+
         let binary = directory.appendingPathComponent("Libmpv")
         let tvos = try slice("tvos")
         try universal([("arm64", 3), ("arm64e", 3)]).write(to: binary)
@@ -54,6 +56,7 @@ struct NativeArchitectureTests {
     func `binary inventory requires every declared architecture and its platform`() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+
         let binary = directory.appendingPathComponent("Libmpv")
         let simulator = try slice("tvsimulator")
 
@@ -71,15 +74,20 @@ struct NativeArchitectureTests {
     func `consumer archives validate the embedded framework bytes`(platform: String) throws {
         let archive = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: archive) }
+
         let native = try slice(platform)
+
         let info: [String: Any] = [
             "ApplicationProperties": ["ApplicationPath": "Applications/Consumer.app", "Architectures": native.architectures]
         ]
+
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
             .write(to: archive.appendingPathComponent("Info.plist"))
+
         let frameworks = platform == "macos" ? "Contents/Frameworks" : "Frameworks"
         let framework = archive.appendingPathComponent("Products/Applications/Consumer.app/\(frameworks)/Libmpv.framework")
         try FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
+
         let binary = framework.appendingPathComponent("Libmpv")
         let architectures = native.architectures.map { ($0, native.machOPlatform) }
 
@@ -124,10 +132,13 @@ struct NativeArchitectureTests {
         if architectures.count == 1 {
             return thin(architectures[0].0, platform: architectures[0].1)
         }
+
         var header: [UInt32] = [0xCAFE_BABE, UInt32(architectures.count)]
         var bodies = Data()
+
         for (architecture, platform) in architectures {
             let binary = thin(architecture, platform: platform)
+
             header += [
                 architecture == "x86_64" ? 0x0100_0007 : 0x0100_000C,
                 architecture == "arm64e" ? 0x8000_0002 : architecture == "x86_64" ? 3 : 0,
@@ -135,8 +146,10 @@ struct NativeArchitectureTests {
                 UInt32(binary.count),
                 0,
             ]
+
             bodies.append(binary)
         }
+
         return words(header, bigEndian: true) + bodies
     }
 

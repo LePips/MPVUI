@@ -3,7 +3,7 @@ import MPVCore
 
 /// Mirrors window lifecycle changes for SwiftUI-created playback surfaces.
 @MainActor
-final class MPVPlayerSurfaceLifecycleObserver: PlatformView {
+final class MPVPlayerSurfaceLifecycleObserver: MPVPlatformView {
 
     private weak var surface: MPVPlatformVideoPlayer?
     private weak var player: MPVPlayer?
@@ -54,12 +54,14 @@ final class MPVPlayerSurfaceLifecycleObserver: PlatformView {
 
     private func platformDidMoveToWindow() {
         guard let surface, let player else { return }
+
         MPVPlayerSurfaceRegistry.shared.surfaceDidMoveToWindow(
             surface,
             player: player,
             isInWindow: window != nil,
             shouldRestorePreviousSurface: shouldRestorePreviousSurface
         )
+
         if window == nil {
             shouldRestorePreviousSurface = false
         }

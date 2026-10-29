@@ -7,6 +7,7 @@ package enum MPVVideoSignalParser {
         let track = track?.mapValue ?? [:]
         let pixelFormat = string(values["hw-pixelformat"]) ?? string(values["pixelformat"])
         let format = pixelFormatDescription(pixelFormat)
+
         let masteringKeys = [
             "prim-red-x",
             "prim-red-y",
@@ -17,9 +18,11 @@ package enum MPVVideoSignalParser {
             "prim-white-x",
             "prim-white-y",
         ]
+
         let sceneKeys = ["scene-max-r", "scene-max-g", "scene-max-b", "scene-avg"]
         let mastering = numericValues(values, keys: masteringKeys)
         let scene = numericValues(values, keys: sceneKeys)
+
         return MPVVideoSignal(
             primaries: string(values["primaries"]),
             transferFunction: MPVTransferFunction(mpvValue: string(values["gamma"])),
@@ -51,6 +54,7 @@ package enum MPVVideoSignalParser {
     /// Recognize only unambiguous formats. Hardware handles alone stay unknown.
     package static func pixelFormatDescription(_ format: String?) -> (depth: Int?, chroma: String?) {
         guard let format = format?.lowercased() else { return (nil, nil) }
+
         switch format {
         case "nv12", "nv21": return (8, "4:2:0")
         case "p010", "p010le", "p010be": return (10, "4:2:0")
@@ -60,16 +64,19 @@ package enum MPVVideoSignalParser {
             return (8, "4:4:4")
         default: break
         }
+
         guard let match = format.range(
             of: "^(?:yuvj?|yuva)(420|422|444|440|411|410)p([0-9]+)?(?:le|be)?$",
             options: .regularExpression
         ), match == format.startIndex ..< format.endIndex else {
             return (nil, nil)
         }
+
         let digits = format.filter(\.isNumber)
         let subsampling = String(digits.prefix(3))
         let depth = digits.count > 3 ? Int(digits.dropFirst(3)) : 8
         let chroma = subsampling.map(String.init).joined(separator: ":")
+
         return (depth, chroma)
     }
 
@@ -77,6 +84,7 @@ package enum MPVVideoSignalParser {
         guard let text = node?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty, !["auto", "unknown", "unspecified"].contains(text.lowercased())
         else { return nil }
+
         return text
     }
 
@@ -88,6 +96,7 @@ package enum MPVVideoSignalParser {
     private static func integer(_ node: MPVNodeValue?) -> Int? {
         guard let value = number(node), value.rounded(.towardZero) == value,
               value < Double(Int.max) else { return nil }
+
         return Int(value)
     }
 

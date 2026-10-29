@@ -156,6 +156,7 @@ class GeneratedMediaContractTests(unittest.TestCase):
         rpu_bytes = {}
         for name, profile, compatibility, compression, transfer, rate in [
             ("dolby-vision-p5.mp4", 5, 0, "none", None, "120/1"),
+            ("dolby-vision-p7.mp4", 7, 6, "none", "smpte2084", "120/1"),
             ("dolby-vision-p81.mp4", 8, 1, "none", "smpte2084", "120/1"),
             ("dolby-vision-p84.mp4", 8, 4, "none", "arib-std-b67", "24000/1001"),
             ("dolby-vision-p81-declared-extended.ts", 8, 1, "extended", "smpte2084", "120/1"),
@@ -226,11 +227,52 @@ class GeneratedMediaContractTests(unittest.TestCase):
             self.assertEqual((audio["codec_name"], audio["channels"]), ("aac", 1))
 
     def test_dolby_vision_parser_rpus_are_unescaped_payloads(self):
-        for name in ("dolby-vision-p5.rpu", "dolby-vision-p81.rpu"):
+        for name in ("dolby-vision-p5.rpu", "dolby-vision-p7.rpu", "dolby-vision-p81.rpu"):
             with self.subTest(name=name):
                 data = (self.output / name).read_bytes()
                 self.assertEqual(data[0], 0x19)
                 self.assertNotIn(b"\x00\x00\x00\x01", data)
+
+    def test_profile7_invalid_base_has_inband_metadata_without_container_configuration(self):
+        name = "dolby-vision-p7-invalid-base.mp4"
+        video = self.probe(name)["streams"][0]
+        self.assertEqual(video["color_transfer"], "arib-std-b67")
+        self.assertFalse(any("dv_profile" in entry for entry in video.get("side_data_list", [])))
+        self.assertTrue(any(entry["side_data_type"] == "Dolby Vision Metadata" for entry in self.first_frame(name)["side_data_list"]))
+
+    def test_untagged_remux_preserves_video_packets_without_container_dolby_vision(self):
+        for profile in ("p5", "p7", "p81", "p84"):
+            name = f"dolby-vision-{profile}-untagged.mp4"
+            with self.subTest(name=name):
+                video = self.probe(name)["streams"][0]
+                self.assertEqual(video["codec_tag_string"], "hvc1")
+                self.assertFalse(any("dv_profile" in entry for entry in video.get("side_data_list", [])))
+                metadata = self.first_frame(name)["side_data_list"]
+                self.assertTrue(any(entry["side_data_type"] == "Dolby Vision Metadata" for entry in metadata))
+                hashes = []
+                for filename in (f"dolby-vision-{profile}.mp4", name):
+                    packets = json.loads(
+                        subprocess.check_output(
+                            [
+                                "ffprobe",
+                                "-v",
+                                "error",
+                                "-select_streams",
+                                "v:0",
+                                "-show_packets",
+                                "-show_entries",
+                                "packet=data_hash",
+                                "-show_data_hash",
+                                "sha256",
+                                "-of",
+                                "json",
+                                str(self.output / filename),
+                            ]
+                        )
+                    )["packets"]
+                    hashes.append([packet["data_hash"] for packet in packets])
+                self.assertEqual(len(hashes[0]), 240)
+                self.assertEqual(hashes[0], hashes[1])
 
     def test_interlaced_field_order_and_frame_rate(self):
         for name, top_first, rate in [

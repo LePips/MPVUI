@@ -11,7 +11,7 @@ struct MPVDeferredPlaybackTests {
     func `convenience initializer starts loading with configured start position`() {
         let player = MPVPlayer(url: TestPaths.baselineMedia, configuration: .init(
             additionalOptions: ["ao": "null"],
-            autoPlay: false,
+            automaticallyPlays: false,
             startTime: .seconds(2)
         ))
 

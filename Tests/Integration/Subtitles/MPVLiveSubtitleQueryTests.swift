@@ -11,10 +11,13 @@ struct MPVLiveSubtitleQueryTests {
     func `unselected external subtitle queries include future cues and respect interval boundaries`() async throws {
         let fixture = PlaybackFixture()
         let files = try TemporaryTestDirectory()
+
         defer { fixture.close()
             files.remove()
         }
+
         try await fixture.loadPaused()
+
         let source = try files.write("queried.srt", contents: """
         1
         00:00:00,000 --> 00:00:04,000
@@ -32,6 +35,7 @@ struct MPVLiveSubtitleQueryTests {
         let previous = Set(fixture.player.subtitleTracks.map(\.id))
         let selected = fixture.player.selectedSubtitle()?.id
         fixture.player.loadExternalSubtitle(source, selecting: nil)
+
         try await eventually("unselected external subtitle is discovered") {
             fixture.player.subtitleTracks.contains { !previous.contains($0.id) }
         }
@@ -51,12 +55,17 @@ struct MPVLiveSubtitleQueryTests {
     func `subtitle roles keep independent delays and visibility and moving a track clears its old role`() async throws {
         let fixture = PlaybackFixture()
         let files = try TemporaryTestDirectory()
+
         defer { fixture.close()
             files.remove()
         }
+
         var latest = TextSubtitleSnapshot()
+
         fixture.player.setTextSubtitleInterceptionEnabled(true)
-        let stream = fixture.player.textSubtitleStream()
+
+        let stream = fixture.player.makeTextSubtitleStream()
+
         let observation = Task { @MainActor in
             for await snapshot in stream {
                 latest = snapshot
@@ -64,10 +73,12 @@ struct MPVLiveSubtitleQueryTests {
         }
         defer { observation.cancel() }
         try await fixture.loadPaused()
+
         let primary = try files.write("primary.srt", contents: "1\n00:00:00,000 --> 00:00:10,000\nPrimary\n")
         let secondary = try files.write("secondary.srt", contents: "1\n00:00:00,000 --> 00:00:10,000\nSecondary\n")
         fixture.player.loadExternalSubtitle(primary, selecting: .primary)
         fixture.player.loadExternalSubtitle(secondary, selecting: .secondary)
+
         try await eventually("both subtitle roles display independently") {
             Set(latest.regions.map(\.text)) == ["Primary", "Secondary"]
         }
@@ -83,6 +94,7 @@ struct MPVLiveSubtitleQueryTests {
 
         let secondaryID = try #require(fixture.player.selectedSubtitle(for: .secondary)?.id)
         fixture.player.selectSubtitle(secondaryID, for: .primary)
+
         try await eventually("moving a subtitle clears its former role") {
             fixture.player.selectedSubtitle(for: .primary)?.id == secondaryID
                 && fixture.player.selectedSubtitle(for: .secondary) == nil && latest.text == "Secondary"
@@ -97,9 +109,11 @@ struct MPVLiveSubtitleQueryTests {
         defer { fixture.close() }
         try await fixture.loadPaused()
         fixture.player.setTextSubtitleInterceptionEnabled(true)
-        var subtitles = fixture.player.textSubtitleStream().makeAsyncIterator()
+
+        var subtitles = fixture.player.makeTextSubtitleStream().makeAsyncIterator()
 
         #expect(await subtitles.next() == TextSubtitleSnapshot())
+
         try await eventually("live native interception becomes enabled") {
             await fixture.player.textSubtitleInterceptionForTesting() == true
         }

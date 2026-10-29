@@ -13,7 +13,7 @@ struct MPVPlayerErrorTests {
         (.commandFailed(context: "Seek", code: -12, message: "Command failed"), "Seek: Command failed"),
         (.loadFailed(code: -13, message: "File not found"), "Load media: File not found"),
         (.playbackFailed(code: -14, message: "Decoder failed"), "Playback failed: Decoder failed"),
-        (.eventQueueOverflow, "The mpv event queue overflowed; player state was refreshed."),
+        (.eventQueueOverflow, "The mpv event queue overflowed. Player state was refreshed."),
         (.pictureInPictureNotReady, "Picture in Picture is not ready for the current video."),
         (.pictureInPictureFailed(operation: .start, message: "Host rejected presentation"), "Host rejected presentation"),
         (.invalidSubtitleTrack(.init(type: .subtitle, mpvID: 99)), "Choose a subtitle track from the currently loaded media."),
@@ -24,7 +24,10 @@ struct MPVPlayerErrorTests {
     ])
 
     func `failures retain actionable context for the caller`(error: MPVPlayerError, expected: String) {
-        #expect(error.localizedDescription == expected)
+        let erased: any Error = error
+
+        #expect(error.message == expected)
+        #expect((erased as? MPVPlayerError)?.message == expected)
     }
 
     @Test(arguments: [
@@ -35,6 +38,6 @@ struct MPVPlayerErrorTests {
     ])
 
     func `PiP timeout tells the caller which operation stalled`(operation: MPVPlayerError.PictureInPictureOperation, expected: String) {
-        #expect(MPVPlayerError.pictureInPictureTimedOut(operation: operation).localizedDescription == expected)
+        #expect(MPVPlayerError.pictureInPictureTimedOut(operation: operation).message == expected)
     }
 }

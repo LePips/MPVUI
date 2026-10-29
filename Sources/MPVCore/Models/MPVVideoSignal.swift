@@ -89,9 +89,11 @@ public struct MPVVideoSignal: Equatable, Sendable {
         self.maxContentLightLevel = maxContentLightLevel?.positiveOrZero
         self.maxFrameAverageLightLevel = maxFrameAverageLightLevel?.positiveOrZero
         self.signalPeak = signalPeak?.positiveOrZero
+
         self.masteringDisplayPrimaries = masteringDisplayPrimaries.filter {
             $0.value.isFinite && (0 ... 1).contains($0.value)
         }
+
         self.hdr10PlusMetadata = hdr10PlusMetadata.filter { $0.value.positiveOrZero != nil }
         self.hasHDR10PlusMetadata = hasHDR10PlusMetadata
         self.dolbyVisionProfile = dolbyVisionProfile.flatMap { (0 ... 10).contains($0) ? $0 : nil }

@@ -1,15 +1,11 @@
 import Dispatch
 import Foundation
 
-/// Owns the libmpv handle and confines all client API access to one queue.
+/// A playback session that serializes commands and native events on one queue.
 ///
-/// The wakeup callback only schedules a drain, as required by libmpv. Event
-/// values are copied into Swift models before the next call to
-/// `mpv_wait_event` invalidates them.
-///
-/// Responsibilities live in the `MPVSession+…` extensions. Shared implementation
-/// members are internal for cross-file access. Mutable state remains isolated
-/// to `queue` across all of those files.
+/// Send typed commands with ``send(_:)`` and observe copied state through
+/// ``snapshot`` or ``makeEventStream()``. Call ``close()`` to release resources
+/// permanently. Closed sessions reject further commands.
 public final class MPVSession: @unchecked Sendable {
 
     package typealias Sink = @Sendable (MPVEngineEmission) async -> Void
@@ -55,7 +51,10 @@ public final class MPVSession: @unchecked Sendable {
     package var pendingStartTime: Duration?
     package var pendingSeekAfterLoad: Duration?
     package var needsSourceLoad = false
-    package var sourceLoadWasHeadless = false
+
+    // Held after demuxing, before track selection or decoder creation.
+    package var pendingPreloadHookID: UInt64?
+
     // A stopped player keeps its source and surface for replay without keeping
     // native decoder/renderer allocations alive. Geometry updates cannot restart it.
     package var isStoppedForResourceRelease = false
@@ -129,34 +128,43 @@ public final class MPVSession: @unchecked Sendable {
         eventDrainSource = DispatchSource.makeUserDataAddSource(queue: queue)
         dolbyVisionResolver = MPVDolbyVisionStatusResolver(policy: configuration.dolbyVisionPolicy)
         videoOutput = configuration.videoOutput == .automaticAndroid ? .gpu : configuration.videoOutput
+
         // This unified stream carries state and errors as well as diagnostics;
         // it must remain lossless. If logging needs backpressure in the future,
         // move logs to a separately bounded channel with explicit drop reporting.
         let (updates, continuation) = AsyncStream<MPVEngineEmission>.makeStream()
         updateContinuation = continuation
+
         updateDeliveryTask = Task {
             for await update in updates {
                 await sink(update)
             }
         }
-        shouldAutoPlay = configuration.autoPlay
+
+        shouldAutoPlay = configuration.automaticallyPlays
         pendingStartTime = configuration.startTime
+
         desiredProperties = [
             "volume": Self.format(configuration.volume),
             "mute": "no",
             "speed": Self.format(configuration.playbackRate),
         ]
+
         queue.setSpecific(key: queueKey, value: queueValue)
+
         eventDrainSource.setEventHandler { [weak self] in
             guard let self else { return }
+
             self.lifecycleDiagnostics.engineActivity.nativeWakeups &+= Int64(truncatingIfNeeded: self.eventDrainSource.data)
             self.drainEvents()
         }
+
         eventDrainSource.activate()
     }
 
     deinit {
         eventDrainSource.cancel()
+
         if DispatchQueue.getSpecific(key: queueKey) == queueValue {
             destroyHandle(preservePlayback: false)
         } else {
@@ -164,9 +172,11 @@ public final class MPVSession: @unchecked Sendable {
                 destroyHandle(preservePlayback: false)
             }
         }
+
         for observer in observers.values {
             observer.finish()
         }
+
         updateContinuation.finish()
         updateDeliveryTask.cancel()
     }

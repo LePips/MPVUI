@@ -14,12 +14,13 @@ struct MPVPlatformVideoPlayerUIKitTests {
     func `transition completion submits latest final once and cancels fallback`() async throws {
         let player = MPVPlayer(
             configuration: .init(
-                autoPlay: false,
+                automaticallyPlays: false,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .disabled,
                 videoOutput: .metal
             )
         )
+
         let surface = MPVPlatformVideoPlayer(player: player)
         let viewController = TransitionHostingViewController()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
@@ -31,45 +32,56 @@ struct MPVPlatformVideoPlayerUIKitTests {
         }
 
         #expect(attachedLifecycle.handlesCreated == 1)
+
         let committedBeforeTransition = try #require(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
         )
+
         let observedBeforeTransition = surface.metalLayer.drawableSize
+
         let initialOutputSize = MPVRenderOutputSize(
             width: Int(committedBeforeTransition.width),
             height: Int(committedBeforeTransition.height)
         )
+
         let mediaURL = TestPaths.baselineMedia
         try #require(FileManager.default.fileExists(atPath: mediaURL.path))
 
-        player.load(mediaURL, autoPlay: false)
+        player.load(mediaURL, playAutomatically: false)
+
         try #require(
             await waitForPlayer(player) {
                 $0.mediaInformation.dimensions != nil
                     && ($0.state == .ready || $0.state == .paused)
             }
         )
+
         try #require(player.lastError == nil)
+
         try #require(
             await waitForRenderOutputSize(initialOutputSize, from: player)
                 == initialOutputSize
         )
+
         try #require(
             await waitForDrawableSize(
                 committedBeforeTransition,
                 in: surface.metalLayer
             ) == committedBeforeTransition
         )
+
         // Loading can briefly report ready/paused before buffering and its
         // rendering-state observations arrive. Require stable paused playback
         // and an idle resize coordinator before measuring the transition.
         try #require(await waitForPausedSurfaceToSettle(player, surface: surface))
+
         let layerBeforeTransition = surface.metalLayer
         let surfaceBeforeTransition = surface.resizeDiagnosticSnapshot
 
         let layerAddressBeforeTransition = try #require(
             surfaceBeforeTransition.activeLayerAddress
         )
+
         let generationBeforeTransition = surfaceBeforeTransition.surfaceGeneration
         let stateBeforeTransition = player.state
         let lifecycleBeforeTransition = await player.lifecycleDiagnostics()
@@ -80,6 +92,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         viewController.suppliedTransitionCoordinator = transitionCoordinator
 
         resize(surface, to: CGSize(width: 360, height: 240))
+
         let firstExpectedSize = drawableSize(of: surface)
         let firstSnapshot = surface.resizeDiagnosticSnapshot
 
@@ -93,6 +106,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         #expect(transitionCoordinator.animationRegistrationCount == 1)
 
         resize(surface, to: CGSize(width: 480, height: 270))
+
         let latestExpectedSize = drawableSize(of: surface)
         let latestSnapshot = surface.resizeDiagnosticSnapshot
 
@@ -110,6 +124,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         surface.layoutIfNeeded()
 
         #expect(transitionCoordinator.animationRegistrationCount == 1)
+
         #expect(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
                 == committedBeforeTransition
@@ -134,18 +149,22 @@ struct MPVPlatformVideoPlayerUIKitTests {
             lifecycleAfterCompletion.surfaceResizeCommands
                 == lifecycleBeforeTransition.surfaceResizeCommands + 1
         )
+
         let completedSnapshot = await waitForResizeDiagnostic(surface) {
             $0.committedDrawableSize == latestExpectedSize
                 && $0.inFlight == nil
         }
+
         let expectedOutputSize = MPVRenderOutputSize(
             width: Int(latestExpectedSize.width),
             height: Int(latestExpectedSize.height)
         )
+
         let finalOutputSize = await waitForRenderOutputSize(
             expectedOutputSize,
             from: player
         )
+
         let finalLayerSize = await waitForDrawableSize(
             latestExpectedSize,
             in: surface.metalLayer
@@ -160,6 +179,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         #expect(surface.metalLayer === layerBeforeTransition)
         #expect(completedSnapshot.activeLayerAddress == layerAddressBeforeTransition)
         #expect(completedSnapshot.surfaceGeneration == generationBeforeTransition)
+
         #expect(
             lifecycleAfterCompletion.handlesCreated
                 == lifecycleBeforeTransition.handlesCreated
@@ -219,8 +239,9 @@ struct MPVPlatformVideoPlayerUIKitTests {
     @Test
     func `failed transition registration falls back to one latest final`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .disabled, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .disabled, videoOutput: .metal)
         )
+
         let surface = MPVPlatformVideoPlayer(player: player)
         let viewController = TransitionHostingViewController()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
@@ -232,11 +253,13 @@ struct MPVPlatformVideoPlayerUIKitTests {
         }
 
         #expect(attachedLifecycle.handlesCreated == 1)
+
         let lifecycleBeforeTransition = await player.lifecycleDiagnostics()
 
         let committedBeforeTransition = try #require(
             surface.resizeDiagnosticSnapshot.committedDrawableSize
         )
+
         let observedBeforeTransition = surface.metalLayer.drawableSize
 
         let transitionCoordinator = TestTransitionCoordinator(
@@ -245,6 +268,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         viewController.suppliedTransitionCoordinator = transitionCoordinator
 
         resize(surface, to: CGSize(width: 480, height: 270))
+
         let expectedSize = drawableSize(of: surface)
         let transitionSnapshot = surface.resizeDiagnosticSnapshot
 
@@ -274,6 +298,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
             lifecycleAfterFallback.surfaceResizeCommands
                 == lifecycleBeforeTransition.surfaceResizeCommands + 1
         )
+
         let completedSnapshot = await waitForResizeDiagnostic(surface) {
             $0.committedDrawableSize == expectedSize
                 && $0.inFlight == nil
@@ -285,6 +310,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         #expect(!completedSnapshot.finalCommitRequired)
         #expect(!completedSnapshot.hasAnimatedFallback)
         #expect(transitionCoordinator.completionInvocationCount == 0)
+
         #expect(
             lifecycleAfterFallback.handlesCreated
                 == lifecycleBeforeTransition.handlesCreated
@@ -315,19 +341,22 @@ struct MPVPlatformVideoPlayerUIKitTests {
     func `simulated HDR host contract resizes in place on the same layer`() async throws {
         let player = MPVPlayer(
             configuration: .init(
-                autoPlay: true,
+                automaticallyPlays: true,
                 hardwareDecoding: .disabled,
                 hdrPolicy: .always,
                 videoOutput: .metal
             )
         )
+
         let surface = MPVPlatformVideoPlayer(player: player)
+
         // This override exercises only MPVUI's deterministic host contract. It
         // does not claim that the simulator presents real HDR output.
         surface.displayEnvironmentOverrideForTesting = (
             scale: 2,
             potentialEDRHeadroom: 4
         )
+
         let viewController = TransitionHostingViewController()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
         attach(surface, to: viewController, in: window)
@@ -338,12 +367,14 @@ struct MPVPlatformVideoPlayerUIKitTests {
         }
 
         #expect(attachedLifecycle.handlesCreated == 1)
+
         let layer = surface.metalLayer
         let attachedSnapshot = surface.resizeDiagnosticSnapshot
 
         let attachedLayerAddress = try #require(
             attachedSnapshot.activeLayerAddress
         )
+
         let attachedGeneration = attachedSnapshot.surfaceGeneration
 
         #expect(layer.pixelFormat == .rgba16Float)
@@ -351,7 +382,8 @@ struct MPVPlatformVideoPlayerUIKitTests {
 
         let mediaURL = TestPaths.baselineMedia
         try #require(FileManager.default.fileExists(atPath: mediaURL.path))
-        player.load(mediaURL, autoPlay: true)
+        player.load(mediaURL, playAutomatically: true)
+
         let didLoadMedia = await waitForPlayer(player) {
             $0.mediaInformation.dimensions != nil
                 && $0.state == .playing
@@ -362,14 +394,17 @@ struct MPVPlatformVideoPlayerUIKitTests {
         let initialDrawableSize = try #require(
             attachedSnapshot.committedDrawableSize
         )
+
         let initialOutputSize = MPVRenderOutputSize(
             width: Int(initialDrawableSize.width),
             height: Int(initialDrawableSize.height)
         )
+
         try #require(
             await waitForRenderOutputSize(initialOutputSize, from: player)
                 == initialOutputSize
         )
+
         try #require(
             await waitForDrawableSize(initialDrawableSize, in: layer)
                 == initialDrawableSize
@@ -389,8 +424,10 @@ struct MPVPlatformVideoPlayerUIKitTests {
             CGSize(width: 512, height: 288),
             CGSize(width: 400, height: 300),
         ]
+
         for (index, frameSize) in resizeFrames.enumerated() {
             let commandsBeforeTransition = latestLifecycle.surfaceResizeCommands
+
             let transitionCoordinator = TestTransitionCoordinator(
                 acceptsAnimationRegistration: true
             )
@@ -398,6 +435,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
             resize(surface, to: frameSize)
 
             latestExpectedSize = drawableSize(of: surface)
+
             let transitionSnapshot = surface.resizeDiagnosticSnapshot
 
             #expect(transitionCoordinator.animationRegistrationCount == 1)
@@ -405,6 +443,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
             #expect(transitionSnapshot.pendingDrawableSize == latestExpectedSize)
             #expect(transitionSnapshot.inFlight == nil)
             #expect(transitionSnapshot.hasAnimatedFallback)
+
             #expect(
                 await player.lifecycleDiagnostics().surfaceResizeCommands
                     == commandsBeforeTransition
@@ -416,18 +455,22 @@ struct MPVPlatformVideoPlayerUIKitTests {
             latestLifecycle = await waitForLifecycle(player) {
                 $0.surfaceResizeCommands == commandsBeforeTransition + 1
             }
+
             let resizedSnapshot = await waitForResizeDiagnostic(surface) {
                 $0.committedDrawableSize == latestExpectedSize
                     && $0.inFlight == nil
             }
+
             let expectedOutputSize = MPVRenderOutputSize(
                 width: Int(latestExpectedSize.width),
                 height: Int(latestExpectedSize.height)
             )
+
             let resizedOutputSize = await waitForRenderOutputSize(
                 expectedOutputSize,
                 from: player
             )
+
             let resizedLayerSize = await waitForDrawableSize(
                 latestExpectedSize,
                 in: layer
@@ -454,6 +497,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
 
         #expect(surface.metalLayer === layer)
         #expect(layer.pixelFormat == .rgba16Float)
+
         #expect(
             layer.drawableSize == latestExpectedSize
         )
@@ -474,12 +518,14 @@ struct MPVPlatformVideoPlayerUIKitTests {
         )
 
         #expect(latestLifecycle.loadCommands == lifecycleBeforeResize.loadCommands)
+
         #expect(
             latestLifecycle.startFileEvents
                 == lifecycleBeforeResize.startFileEvents
         )
 
         #expect(latestLifecycle.seekCommands == lifecycleBeforeResize.seekCommands)
+
         #expect(
             latestLifecycle.loadingStateTransitions
                 == lifecycleBeforeResize.loadingStateTransitions
@@ -512,13 +558,16 @@ struct MPVPlatformVideoPlayerUIKitTests {
     @Test
     func `display HDR loss invalidates stale transition work before reconfiguration`() async throws {
         let player = MPVPlayer(
-            configuration: .init(autoPlay: false, hdrPolicy: .always, sdrOutput: .compatibility8Bit, videoOutput: .metal)
+            configuration: .init(automaticallyPlays: false, hdrPolicy: .always, sdrOutput: .compatibility8Bit, videoOutput: .metal)
         )
+
         let surface = MPVPlatformVideoPlayer(player: player)
+
         surface.displayEnvironmentOverrideForTesting = (
             scale: 2,
             potentialEDRHeadroom: 4
         )
+
         let viewController = TransitionHostingViewController()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
         attach(surface, to: viewController, in: window)
@@ -529,6 +578,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         }
 
         #expect(attachedLifecycle.handlesCreated == 1)
+
         let layer = surface.metalLayer
         let attachedSnapshot = surface.resizeDiagnosticSnapshot
         let initialGeneration = attachedSnapshot.surfaceGeneration
@@ -558,6 +608,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
             scale: 2,
             potentialEDRHeadroom: 1
         )
+
         NotificationCenter.default.post(
             name: UIScreen.referenceDisplayModeStatusDidChangeNotification,
             object: nil
@@ -568,6 +619,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
                 && surface.metalLayer.pixelFormat == .bgra8Unorm
                 && surface.resizeDiagnosticSnapshot.surfaceGeneration > initialGeneration
         }
+
         let reconfiguredSnapshot = surface.resizeDiagnosticSnapshot
         let reconfiguredGeneration = reconfiguredSnapshot.surfaceGeneration
         let expectedSize = CGSize(width: 960, height: 540)
@@ -583,6 +635,7 @@ struct MPVPlatformVideoPlayerUIKitTests {
         #expect(reconfiguredSnapshot.inFlight == nil)
         #expect(!reconfiguredSnapshot.hasAnimatedFallback)
         #expect(!reconfiguredSnapshot.finalCommitRequired)
+
         #expect(
             reconfiguredLifecycle.handlesCreated
                 == attachedLifecycle.handlesCreated
@@ -614,12 +667,14 @@ struct MPVPlatformVideoPlayerUIKitTests {
 
         #expect(transitionCoordinator.completionInvocationCount == 1)
         #expect(transitionCoordinator.storedCompletionCount == 0)
+
         #expect(
             afterStaleCompletion.surfaceResizeCommands
                 == reconfiguredLifecycle.surfaceResizeCommands
         )
 
         #expect(afterStaleCompletion.handlesCreated == reconfiguredLifecycle.handlesCreated)
+
         #expect(
             afterStaleCompletion.handlesDestroyed
                 == reconfiguredLifecycle.handlesDestroyed
@@ -679,9 +734,11 @@ struct MPVPlatformVideoPlayerUIKitTests {
     ) async -> MPVEngineLifecycleDiagnostics {
         for _ in 0 ..< 150 {
             let lifecycle = await player.lifecycleDiagnostics()
+
             if predicate(lifecycle) {
                 return lifecycle
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
 
@@ -694,21 +751,26 @@ struct MPVPlatformVideoPlayerUIKitTests {
     ) async -> Bool {
         var previousLifecycle: MPVEngineLifecycleDiagnostics?
         var stableSamples = 0
+
         for _ in 0 ..< 150 {
             let lifecycle = await player.lifecycleDiagnostics()
             let snapshot = surface.resizeDiagnosticSnapshot
+
             let isSettled = player.state == .paused && !player.bufferStatus.isBuffering
                 && snapshot.inFlight == nil && snapshot.pendingDrawableSize == nil
                 && !snapshot.hasScheduledCommit && !snapshot.hasAnimatedFallback
                 && !snapshot.hasContinuousFinalFallback && !snapshot.finalCommitRequired
             stableSamples = isSettled && lifecycle == previousLifecycle ? stableSamples + 1 : 0
+
             // Span the 120 ms trailing-resize window and queued observation work.
             if stableSamples >= 10 {
                 return true
             }
+
             previousLifecycle = lifecycle
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+
         return false
     }
 
@@ -720,9 +782,11 @@ struct MPVPlatformVideoPlayerUIKitTests {
     ) async -> MPVRenderSurfaceResizeCoordinator.DiagnosticSnapshot {
         for _ in 0 ..< 150 {
             let snapshot = surface.resizeDiagnosticSnapshot
+
             if predicate(snapshot) {
                 return snapshot
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
 
@@ -737,8 +801,10 @@ struct MPVPlatformVideoPlayerUIKitTests {
             if predicate(player) {
                 return true
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+
         return predicate(player)
     }
 
@@ -748,11 +814,14 @@ struct MPVPlatformVideoPlayerUIKitTests {
     ) async -> MPVRenderOutputSize? {
         for _ in 0 ..< 150 {
             let outputSize = await player.renderOutputSize()
+
             if outputSize == expected {
                 return outputSize
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+
         return await player.renderOutputSize()
     }
 
@@ -764,8 +833,10 @@ struct MPVPlatformVideoPlayerUIKitTests {
             if layer.drawableSize == expected {
                 return layer.drawableSize
             }
+
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+
         return layer.drawableSize
     }
 }
@@ -806,6 +877,7 @@ private final class TestTransitionCoordinator: NSObject {
 
     func completeTransition() {
         guard let completion = storedCompletion else { return }
+
         storedCompletion = nil
         completionInvocationCount += 1
         completion(self)
@@ -874,8 +946,10 @@ extension TestTransitionCoordinator: UIViewControllerTransitionCoordinator {
     ) -> Bool {
         animationRegistrationCount += 1
         guard acceptsAnimationRegistration else { return false }
+
         animation?(self)
         storedCompletion = completion
+
         return true
     }
 
