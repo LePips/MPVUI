@@ -22,15 +22,17 @@ struct MPVMetadataObservationActivityTests {
             engine.playbackRequestIsActive = true
             engine.lastContainerFramesPerSecond = 24
 
-            for fps in [23.976, 24, 48, 60] {
+            for fps in [23.976, 23.97601, 23.97602, 48, 60] {
                 sendScalar("estimated-vf-fps", value: fps, to: engine)
             }
 
             #expect(engine.lifecycleDiagnostics.engineActivity.mediaSnapshots == 0)
             #expect(engine.lastContainerFramesPerSecond == 24)
+            sendScalar("container-fps", value: 25, to: engine)
+            sendScalar("estimated-vf-fps", value: nil, to: engine)
             sendScalar("container-fps", value: nil, to: engine)
 
-            for fps in [23.976, 23.97601, 23.97602, 48, 60] {
+            for fps in [Double.nan, .infinity, 0, -1, 50] {
                 sendScalar("estimated-vf-fps", value: fps, to: engine)
             }
 
@@ -38,8 +40,8 @@ struct MPVMetadataObservationActivityTests {
             #expect(engine.lifecycleDiagnostics.engineActivity.propertyReads == 0)
         }
 
-        try await eventually("cadence changes delivered") { rates.count == 4 }
-        #expect(rates == [60, 23.976, 48, 60])
+        try await eventually("cadence changes delivered") { rates.count == 6 }
+        #expect(rates == [23.976, 48, 60, 25, nil, 50])
     }
 
     @Test

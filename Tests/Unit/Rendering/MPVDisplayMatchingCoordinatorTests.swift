@@ -39,6 +39,34 @@ struct MPVDisplayMatchingCoordinatorTests {
         #expect(MPVDisplayMatchingContent(media: .empty, outputUsesHDR: true) == nil)
     }
 
+    @Test(arguments: [(Double, Double, Double)]([
+        (24, 1.5, 36),
+        (25, 2, 50),
+        (50, 0.5, 25),
+        (23.976, 2, 48000.0 / 1001),
+        (23.976, 1.001, 24),
+        (23.976, 1.5, 36000.0 / 1001),
+    ]))
+    func `display cadence includes playback speed`(fps: Double, speed: Double, expected: Double) throws {
+        let content = try #require(MPVDisplayMatchingContent(
+            media: media(fps: fps),
+            playbackRate: speed,
+            outputUsesHDR: true
+        ))
+
+        #expect(content.refreshRate == Float(expected))
+    }
+
+    @Test
+    func `invalid speed and unsupported effective cadence cannot request a mode`() {
+        for speed in [0.0, -1, .nan, .infinity, Double.greatestFiniteMagnitude] {
+            #expect(MPVDisplayMatchingContent.refreshRate(for: 24, playbackRate: speed) == nil)
+        }
+
+        #expect(MPVDisplayMatchingContent.refreshRate(for: 120, playbackRate: 2) == 240)
+        #expect(MPVDisplayMatchingContent.refreshRate(for: 120, playbackRate: 3) == nil)
+    }
+
     @Test
     func `selected track codec identifies content when display codec is a human label`() throws {
         let information = MPVMediaInformation(

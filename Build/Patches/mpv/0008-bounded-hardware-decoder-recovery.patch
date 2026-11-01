@@ -7,7 +7,8 @@ Source headers/LGPL licenses retained.
 
 Default fallback: auto. Keep three-error threshold except previously working,
 non-copying VideoToolbox HEVC on AVFoundation VO: allow two keyframe attempts
-or 240 consecutive decode errors. Ceiling counts errors, not elapsed time.
+or 240 consecutive decode errors, with a two-second elapsed allowance checked
+at decoding opportunities. Paused or input-starved decoders are not woken.
 Startup/seek/reinit need fresh successful frame before recovery. Explicit
 yes/no/N keeps requested threshold, including N=3. Other codecs/backends and
 Metal keep three-error default. Surface-copy errors fail over immediately;
@@ -15,10 +16,10 @@ existing selector still rejects software when fallback=no.
 
 diff --git a/video/decode/hwdec_recovery.h b/video/decode/hwdec_recovery.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..d24b40c5d22de7baee17f81920d676ef644d9456
+index 0000000000000000000000000000000000000000..f9d249371f6303b49483e991e4d4ee7a028d4ef3
 --- /dev/null
 +++ b/video/decode/hwdec_recovery.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,99 @@
 +/*
 + * This file is part of mpv.
 + *
@@ -41,18 +42,21 @@ index 0000000000000000000000000000000000000000..d24b40c5d22de7baee17f81920d676ef
 +
 +#include <stdbool.h>
 +#include <limits.h>
++#include <stdint.h>
 +
-+// Previously working native HEVC gets two keyframe recovery attempts. Ceiling
-+// counts decode errors, not frames/time; also bounds keyframe-free streams.
++// Previously working native HEVC gets two keyframe recovery attempts, bounded
++// by consecutive errors and elapsed time at the next decoding opportunity.
 +// Explicit software-fallback=yes/no/N bypasses grace.
 +#define MP_HWDEC_RECOVERY_KEYFRAMES 2
 +#define MP_HWDEC_RECOVERY_MAX_ERRORS 240
++#define MP_HWDEC_RECOVERY_MAX_NS INT64_C(2000000000)
 +#define MP_HWDEC_FALLBACK_DEFAULT 3
 +
 +struct mp_hwdec_recovery {
 +    int errors;
 +    int keyframes;
 +    bool had_frame;
++    int64_t first_error_ns;
 +};
 +
 +static inline int mp_hwdec_fallback_threshold(int option)
@@ -80,9 +84,25 @@ index 0000000000000000000000000000000000000000..d24b40c5d22de7baee17f81920d676ef
 +        state->keyframes++;
 +}
 +
-+static inline bool mp_hwdec_recovery_error(struct mp_hwdec_recovery *state,
-+                                           int option, bool eligible)
++// No independent timer runs while paused or waiting for input. Check after a
++// decode attempt too, since accepted packets can yield no frame and no error.
++static inline bool mp_hwdec_recovery_expired(const struct mp_hwdec_recovery *state,
++                                            int option, bool eligible,
++                                            int64_t now_ns)
 +{
++    return option == -1 && eligible && state->had_frame &&
++           state->errors >= MP_HWDEC_FALLBACK_DEFAULT &&
++           now_ns >= state->first_error_ns &&
++           (uint64_t)now_ns - (uint64_t)state->first_error_ns >=
++               MP_HWDEC_RECOVERY_MAX_NS;
++}
++
++static inline bool mp_hwdec_recovery_error(struct mp_hwdec_recovery *state,
++                                          int option, bool eligible,
++                                          int64_t now_ns)
++{
++    if (state->errors == 0)
++        state->first_error_ns = now_ns;
 +    // Saturate counters; disabled fallback supports unbounded playback.
 +    if (state->errors < INT_MAX)
 +        state->errors++;
@@ -94,23 +114,25 @@ index 0000000000000000000000000000000000000000..d24b40c5d22de7baee17f81920d676ef
 +        return true;
 +
 +    return state->keyframes >= MP_HWDEC_RECOVERY_KEYFRAMES ||
-+           state->errors >= MP_HWDEC_RECOVERY_MAX_ERRORS;
++           state->errors >= MP_HWDEC_RECOVERY_MAX_ERRORS ||
++           mp_hwdec_recovery_expired(state, option, eligible, now_ns);
 +}
 +
 +#endif
 diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
-index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074acb38324 100644
+index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..942ba2452fa00f4ee9b41fd5ed81f86c4ae74c00 100644
 --- a/video/decode/vd_lavc.c
 +++ b/video/decode/vd_lavc.c
-@@ -55,6 +55,7 @@
+@@ -55,6 +55,8 @@
  #include "video/out/vo.h"
  
  #include "options/m_option.h"
++#include "osdep/timer.h"
 +#include "hwdec_recovery.h"
  
  static void init_avctx(struct mp_filter *vd);
  static void uninit_avctx(struct mp_filter *vd);
-@@ -155,7 +156,7 @@ const struct m_sub_options hwdec_conf = {
+@@ -155,7 +157,7 @@ const struct m_sub_options hwdec_conf = {
          {"hwdec-image-format", OPT_IMAGEFORMAT(hwdec_image_format),
              .flags = UPDATE_VO},
          {"hwdec-software-fallback", OPT_CHOICE(software_fallback,
@@ -119,7 +141,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
              .flags = UPDATE_HWDEC},
          {"hwdec-threads", OPT_INT(hwdec_threads), M_RANGE(0, DBL_MAX)},
          {"vd-lavc-software-fallback", OPT_REPLACED("hwdec-software-fallback")},
-@@ -163,7 +164,7 @@ const struct m_sub_options hwdec_conf = {
+@@ -163,7 +165,7 @@ const struct m_sub_options hwdec_conf = {
      },
      .size = sizeof(struct hwdec_opts),
      .defaults = &(const struct hwdec_opts){
@@ -128,7 +150,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
          .hwdec_api = (char *[]){"no", NULL,},
          .hwdec_codecs = "h264,vc1,hevc,vp8,vp9,av1,prores,prores_raw,ffv1,dpx",
          // Maximum number of surfaces the player wants to buffer. This number
-@@ -236,7 +237,7 @@ typedef struct lavc_ctx {
+@@ -236,7 +238,7 @@ typedef struct lavc_ctx {
      AVBufferRef *hwdec_dev;
  
      bool hwdec_request_reinit;
@@ -137,7 +159,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
  
      struct mp_image_pool *hwdec_swpool;
  
-@@ -882,6 +883,7 @@ static void reset_avctx(struct mp_filter *vd)
+@@ -882,6 +884,7 @@ static void reset_avctx(struct mp_filter *vd)
          avcodec_flush_buffers(ctx->avctx);
      ctx->flushing = false;
      ctx->hwdec_request_reinit = false;
@@ -145,7 +167,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
  }
  
  static void flush_all(struct mp_filter *vd)
-@@ -917,7 +919,6 @@ static void uninit_avctx(struct mp_filter *vd)
+@@ -917,7 +920,6 @@ static void uninit_avctx(struct mp_filter *vd)
      av_buffer_unref(&ctx->hwdec_dev);
  
      ctx->hwdec_failed = false;
@@ -153,7 +175,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
      ctx->max_delay_queue = 0;
      ctx->hw_probing = false;
      ctx->hwdec = (struct hwdec_info){0};
-@@ -1149,6 +1150,18 @@ static void prepare_decoding(struct mp_filter *vd)
+@@ -1149,6 +1151,18 @@ static void prepare_decoding(struct mp_filter *vd)
          reset_avctx(vd);
  }
  
@@ -172,7 +194,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
  static void handle_err(struct mp_filter *vd)
  {
      vd_ffmpeg_ctx *ctx = vd->priv;
-@@ -1158,9 +1171,9 @@ static void handle_err(struct mp_filter *vd)
+@@ -1158,9 +1172,9 @@ static void handle_err(struct mp_filter *vd)
              ctx->use_hwdec ? " (hardware decoding)" : "");
  
      if (ctx->use_hwdec) {
@@ -181,11 +203,11 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
 -            ctx->hwdec_failed = true;
 +        ctx->hwdec_failed |= mp_hwdec_recovery_error(&ctx->hwdec_recovery,
 +                                hwdec_opts->software_fallback,
-+                                can_recover_hwdec(vd));
++                                can_recover_hwdec(vd), mp_time_ns());
      }
  }
  
-@@ -1189,8 +1202,13 @@ static int send_packet(struct mp_filter *vd, struct demux_packet *pkt)
+@@ -1189,8 +1203,13 @@ static int send_packet(struct mp_filter *vd, struct demux_packet *pkt)
      if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
          return ret;
  
@@ -200,7 +222,7 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
      {
          pkt = pkt ? demux_copy_packet(vd->packet_pool, pkt) : NULL;
          MP_TARRAY_APPEND(ctx, ctx->sent_packets, ctx->num_sent_packets, pkt);
-@@ -1264,7 +1282,13 @@ static int decode_frame(struct mp_filter *vd)
+@@ -1264,7 +1283,13 @@ static int decode_frame(struct mp_filter *vd)
          return AVERROR_BUG;
      }
  
@@ -215,7 +237,22 @@ index 399e1d51fc6ff2ca350daabb5f6d37a3982c66fd..81f20941244777282f04b38b99551074
  
      mpi->pts = mp_pts_from_av(ctx->pic->pts, &ctx->codec_timebase);
      mpi->dts = mp_pts_from_av(ctx->pic->pkt_dts, &ctx->codec_timebase);
-@@ -1331,8 +1355,9 @@ static int receive_frame(struct mp_filter *vd, struct mp_frame *out_frame)
+@@ -1282,6 +1307,14 @@ static int receive_frame(struct mp_filter *vd, struct mp_frame *out_frame)
+ 
+     int ret = decode_frame(vd);
+ 
++    // Successful output clears recovery debt in decode_frame(). Check stalls
++    // here as well as errors, without waking a paused or input-starved decoder.
++    if (ctx->use_hwdec && ctx->hwdec_opts->software_fallback == -1 &&
++        ctx->hwdec_recovery.errors >= MP_HWDEC_FALLBACK_DEFAULT)
++        ctx->hwdec_failed |= mp_hwdec_recovery_expired(&ctx->hwdec_recovery,
++                                ctx->hwdec_opts->software_fallback,
++                                can_recover_hwdec(vd), mp_time_ns());
++
+     if (ctx->hwdec_failed) {
+         // Failed hardware decoding? Try the next one, and eventually software.
+         struct demux_packet **pkts = ctx->sent_packets;
+@@ -1331,8 +1364,9 @@ static int receive_frame(struct mp_filter *vd, struct mp_frame *out_frame)
          res = sw;
          if (!res) {
              MP_ERR(vd, "Could not copy back hardware decoded frame.\n");

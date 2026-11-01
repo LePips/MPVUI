@@ -134,7 +134,7 @@ struct MPVEngineEventTests {
 
     @Test(arguments: [("yes", true as Bool?), ("no", false as Bool?), ("unknown", nil as Bool?)])
     func `decoder session evidence only updates the matching active media`(hardware: String, expected: Bool?) {
-        let engine = MPVSession(configuration: .init()) { _ in }
+        let engine = MPVSession(configuration: .init(logLevel: .none)) { _ in }
 
         engine.queue.sync {
             engine.playbackRequestIsActive = true
@@ -173,7 +173,11 @@ struct MPVEngineEventTests {
     func `native output rejection reports one fatal error without requesting a replacement`() async throws {
         var rejected: [String] = []
 
-        let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null"], videoOutput: .sampleBuffer)) { emission in
+        let engine = MPVSession(configuration: .init(
+            additionalOptions: ["ao": "null"],
+            logLevel: .none,
+            videoOutput: .sampleBuffer
+        )) { emission in
             if case let .error(.nativeVideoOutputUnavailable(reason), fatal: true) = emission.update {
                 rejected.append(reason)
             }
@@ -224,6 +228,34 @@ struct MPVEngineEventTests {
             #expect(engine.videoOutput == .sampleBuffer)
             #expect(!engine.needsSourceLoad && engine.handle != nil)
             #expect(engine.lifecycleDiagnostics.loadCommands == 1)
+        }
+    }
+
+    @Test
+    func `ordinary log forwarding respects every severity threshold`() {
+        let levels: [MPVSessionConfiguration.LogLevel] = [.none, .fatal, .error, .warning, .info, .status, .verbose, .debug, .trace]
+        for (expectedCount, threshold) in levels.enumerated() {
+            let engine = MPVSession(configuration: .init(logLevel: threshold)) { _ in }
+            engine.queue.sync {
+                "demuxer".withCString { prefix in
+                    "A regular message".withCString { text in
+                        for level in levels {
+                            level.rawValue.withCString { levelPointer in
+                                var message = mpv_event_log_message()
+                                message.prefix = prefix
+                                message.level = levelPointer
+                                message.text = text
+                                withUnsafeMutablePointer(to: &message) { pointer in
+                                    var event = mpv_event()
+                                    event.data = UnsafeMutableRawPointer(pointer)
+                                    engine.handleLogMessage(event)
+                                }
+                            }
+                        }
+                    }
+                }
+                #expect(engine.lifecycleDiagnostics.engineActivity.publishedUpdates == Int64(expectedCount))
+            }
         }
     }
 

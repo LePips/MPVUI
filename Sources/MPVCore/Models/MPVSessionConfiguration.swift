@@ -21,6 +21,8 @@ public struct MPVSessionConfiguration: Equatable, Sendable {
     public static let `default` = Self()
     /// The default initial buffer duration, one second.
     public static let defaultInitialBufferDuration: Duration = .seconds(1)
+    /// The default buffer duration after underruns and seeks, one second.
+    public static let defaultRebufferDuration: Duration = .seconds(1)
     /// The default network cache duration, ten seconds.
     public static let defaultNetworkCacheDuration: Duration = .seconds(10)
     /// The default playback rate, normal speed.
@@ -52,9 +54,14 @@ public struct MPVSessionConfiguration: Equatable, Sendable {
 
     // MARK: - Timing options
 
-    /// The buffered duration required before initial playback, clamped to zero or greater.
+    /// Buffered duration requested before first playback of each source, clamped to zero or greater.
+    /// Zero skips initial buffering without changing ``rebufferDuration``.
     public let initialBufferDuration: Duration
+    /// Buffered duration requested after cache underruns and seeks, clamped to zero or greater.
+    /// Zero removes the recovery cushion. Cache capacity and end of input can shorten either wait.
+    public let rebufferDuration: Duration
     /// The desired network cache duration, clamped to zero or greater.
+    /// The byte limits in ``cache`` can cap the buffered duration below this target.
     public let networkCacheDuration: Duration
     /// The initial playback position, or `nil` for the default. Negative values become zero.
     public let startTime: Duration?
@@ -108,6 +115,7 @@ public struct MPVSessionConfiguration: Equatable, Sendable {
         networkCacheDuration: Duration = defaultNetworkCacheDuration,
         nativeVideoFeaturePolicy: MPVNativeVideoFeaturePolicy = .preserveDolbyVision,
         playbackRate: Double = 1,
+        rebufferDuration: Duration = defaultRebufferDuration,
         renderingQuality: MPVRenderingQuality = .init(),
         startTime: Duration? = nil,
         subtitleLuminance: Double = 203,
@@ -128,6 +136,7 @@ public struct MPVSessionConfiguration: Equatable, Sendable {
         self.networkCacheDuration = networkCacheDuration.clampPositiveOrZero
         self.nativeVideoFeaturePolicy = nativeVideoFeaturePolicy
         self.playbackRate = Self.normalizedPlaybackRate(playbackRate)
+        self.rebufferDuration = rebufferDuration.clampPositiveOrZero
         self.renderingQuality = renderingQuality
         self.startTime = startTime?.clampPositiveOrZero
         self.subtitleLuminance = Self.normalizedSubtitleLuminance(subtitleLuminance)

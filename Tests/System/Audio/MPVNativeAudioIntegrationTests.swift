@@ -14,176 +14,7 @@ import Testing
 @MainActor
 struct MPVNativeAudioIntegrationTests {
 
-    @MainActor
-    private final class Session {
-
-        var eof = false
-        var logs = ""
-        private var handle: OpaquePointer?
-
-        var nativeClockStarts: Int {
-            logs.components(separatedBy: "native compressed clock started at").count - 1
-        }
-
-        init(options: [String: String] = [:]) throws {
-            let h = try #require(mpv_create())
-            handle = h
-
-            do {
-                var defaults = [
-                    "vo": "null",
-                    "ao": "avfoundation",
-                    "idle": "yes",
-                    "keep-open": "no",
-                    "volume": "0",
-                    "cache": "no",
-                    "audio-display": "no",
-                    "vid": "no",
-                    "terminal": "no",
-                    "pause": "yes"
-                ]
-                defaults.merge(MPVAudioConfiguration().mpvOptions) { _, new in new }
-                defaults.merge(options) { _, new in new }
-
-                for (name, value) in defaults {
-                    try #require(mpv_set_option_string(h, name, value) >= 0, "\(name)=\(value)")
-                }
-
-                try #require(mpv_request_log_messages(h, "v") >= 0)
-                try #require(mpv_initialize(h) >= 0)
-            } catch {
-                mpv_destroy(h)
-                handle = nil
-                throw error
-            }
-        }
-
-        func close() {
-            guard let h = handle else { return }
-
-            handle = nil
-            mpv_terminate_destroy(h)
-        }
-
-        func set(_ name: String, _ value: String) throws {
-            try #require(mpv_set_property_string(handle, name, value) >= 0)
-        }
-
-        func command(_ arguments: [String]) throws {
-            let strings = arguments.map { strdup($0) }
-            defer { strings.forEach { free($0) } }
-
-            var pointers = strings.map { UnsafePointer<CChar>($0) } + [nil]
-            let result = pointers.withUnsafeMutableBufferPointer { mpv_command(handle, $0.baseAddress) }
-            try #require(result >= 0)
-        }
-
-        func load(_ url: URL, resume: Bool = true) async throws {
-            eof = false
-            try command(["loadfile", url.path])
-
-            try await wait("paused audio output initialization") {
-                !self.string("current-ao").isEmpty
-            }
-
-            // Software volume cannot be assumed to mute an IEC 61937 stream.
-            // Mute the real sink before allowing it to start playback.
-            try set("ao-mute", "yes")
-
-            #expect(string("ao-mute") == "yes")
-
-            if resume {
-                try set("pause", "no")
-            }
-        }
-
-        func string(_ name: String) -> String {
-            guard let p = mpv_get_property_string(handle, name) else { return "" }
-
-            defer { mpv_free(p) }
-            return String(cString: p)
-        }
-
-        func number(_ name: String) -> Double {
-            var value = Double.nan
-            guard mpv_get_property(handle, name, MPV_FORMAT_DOUBLE, &value) >= 0 else { return .nan }
-
-            return value
-        }
-
-        func node(_ name: String) -> MPVNodeValue? {
-            var value = mpv_node()
-            guard mpv_get_property(handle, name, MPV_FORMAT_NODE, &value) >= 0 else { return nil }
-
-            defer { mpv_free_node_contents(&value) }
-
-            return MPVNodeValue(copying: value)
-        }
-
-        func drainEvents() {
-            while let event = mpv_wait_event(handle, 0), event.pointee.event_id != MPV_EVENT_NONE {
-                if event.pointee.event_id == MPV_EVENT_LOG_MESSAGE, let data = event.pointee.data {
-                    let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
-                    logs += String(cString: message.text)
-                }
-
-                if event.pointee.event_id == MPV_EVENT_END_FILE, let data = event.pointee.data {
-                    let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
-                    eof = end.reason == MPV_END_FILE_REASON_EOF
-
-                    #expect(end.reason != MPV_END_FILE_REASON_ERROR, "Native audio failed: \(logs)")
-                }
-            }
-        }
-
-        func wait(_ context: String, timeout: Double = 15, until predicate: () -> Bool) async throws {
-            for _ in 0 ..< Int(timeout * 50) {
-                drainEvents()
-
-                if predicate() {
-                    return
-                }
-
-                try await Task.sleep(for: .milliseconds(20))
-            }
-
-            try #require(predicate(), "Timed out: \(context)\n\(logs)")
-        }
-
-        func pauseAndSeek(to destination: Double) async throws {
-            try set("pause", "yes")
-
-            // A property write acknowledges the request before the sink's last
-            // clock update has reached time-pos. Wait for a paused core and a
-            // stable timeline; a fixed 100 ms delay races that final update.
-            let clock = ContinuousClock()
-            var lastPosition = number("time-pos")
-            var stableSince = clock.now
-
-            try await wait("paused output clock settles", timeout: 3) {
-                let position = self.number("time-pos")
-
-                if !position.isFinite || abs(position - lastPosition) > 0.01 {
-                    lastPosition = position
-                    stableSince = clock.now
-                    return false
-                }
-
-                return self.string("pause") == "yes" && self.string("core-idle") == "yes"
-                    && stableSince.duration(to: clock.now) >= .milliseconds(300)
-            }
-
-            let paused = number("time-pos")
-
-            try await Task.sleep(for: .milliseconds(150))
-
-            #expect(abs(number("time-pos") - paused) < 0.1)
-            try command(["seek", String(destination), "absolute+exact"])
-            try await wait("paused seek") { abs(self.number("time-pos") - destination) < 0.15 }
-
-            #expect(string("pause") == "yes")
-        }
-    }
+    private typealias Session = NativeAudioSession
 
     @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
     func `public audio configuration reaches Apple without a video view`(
@@ -360,7 +191,7 @@ struct MPVNativeAudioIntegrationTests {
     @Test(arguments: ["speed", "pitch", "volume", "af"], [false, true])
     func `Dolby recovers to PCM for audio processing`(option: String, duringPlayback: Bool) async throws {
         let value = option == "volume" ? "150" : option == "af" ? "lavfi=[volume=0.5]" : "1.25"
-        var options = ["audio-spdif": "ac3,eac3"]
+        var options = ["audio-spdif": "ac3,eac3", "ao": "avfoundation,"]
 
         if !duringPlayback {
             options[option] = value
@@ -389,12 +220,50 @@ struct MPVNativeAudioIntegrationTests {
 
         #expect(audio.node("avfoundation-audio-spatialization")?.mapValue?["allows-stereo"] == .bool(true))
 
+        if !duringPlayback {
+            audio.drainEvents()
+            #expect(audio.logs.contains("native audio processing starts with decoded PCM"))
+            #expect(!audio.logs.contains("native Dolby processing requires decoded PCM"))
+            #expect(audio.logs.components(separatedBy: "Trying audio driver 'avfoundation'").count - 1 == 1)
+        }
+
         if let previousPosition {
             #expect(
                 abs(audio.number("time-pos") - previousPosition) < 2,
                 "PCM recovery must resume near the audible position, not the buffered read head"
             )
         }
+    }
+
+    @Test
+    func `processing transition preserves a pending paused user seek`() async throws {
+        let audio = try Session(options: ["audio-spdif": "ac3,eac3", "mute": "yes"])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-eac3-stereo.mka"))
+        try await audio.wait("compressed output starts") { audio.nativeClockStarts > 0 }
+        try await audio.pauseAndSeek(to: 1)
+        try audio.set("speed", "1.25")
+        try audio.command(["seek", "3", "absolute+exact"])
+        try await audio.wait("PCM honors the paused user destination") {
+            audio.string("current-ao") == "avfoundation"
+                && !audio.string("audio-out-params/format").contains("spdif")
+                && audio.string("pause") == "yes"
+                && abs(audio.number("time-pos") - 3) < 0.15
+        }
+        #expect(audio.string("pause") == "yes")
+    }
+
+    @Test(arguments: ["avfoundation", "avfoundation,"])
+    func `initial processing avoids compressed output initialization`(output: String) async throws {
+        let audio = try Session(options: ["ao": output, "audio-spdif": "ac3,eac3", "speed": "1.25", "mute": "yes"])
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-eac3-stereo.mka"), resume: false)
+        audio.drainEvents()
+        #expect(!audio.string("audio-out-params/format").contains("spdif"))
+        #expect(audio.node("avfoundation-audio-spatialization")?.mapValue?["path"] == .string("sample-buffer"))
+        #expect(audio.logs.contains("native audio processing starts with decoded PCM"))
+        #expect(audio.logs.components(separatedBy: "Trying audio driver 'avfoundation'").count - 1 == 1)
+        #expect(audio.string("pause") == "yes")
     }
 
     @Test

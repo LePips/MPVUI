@@ -42,6 +42,7 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
             (
                 "sdr-adjust-gamma",
                 status.sdrViewing == .legacyDisplay && status.precision == .unorm8
+                    && status.targetPrimaries == "bt.709"
                     && !calibrated ? "no" : "yes"
             ),
             ("treat-srgb-as-power22", "no"),
@@ -155,11 +156,14 @@ struct MPVRenderColorConfiguration: @unchecked Sendable {
         }
 
         let wide = usesExtendedDynamicRange || (supportsWideGamut && configuration.sdrOutput != .compatibility8Bit)
-        let float = usesExtendedDynamicRange || wide || configuration.sdrOutput == .highPrecision
+        // The explicit battery preset uses encoded SDR components to halve
+        // surface storage while retaining the display's supported gamut.
+        let batterySDR = configuration.renderingQuality.preset == .battery && configuration.sdrOutput == .automatic
+        let float = usesExtendedDynamicRange || (wide && !batterySDR) || configuration.sdrOutput == .highPrecision
         let primaries = wide ? "display-p3" : "bt.709"
         let transfer = float ? "linear" : "srgb"
 
-        let spaceName = wide ? CGColorSpace.extendedLinearDisplayP3
+        let spaceName = wide ? (float ? CGColorSpace.extendedLinearDisplayP3 : CGColorSpace.displayP3)
             : (float ? CGColorSpace.extendedLinearSRGB : CGColorSpace.sRGB)
 
         return Self(

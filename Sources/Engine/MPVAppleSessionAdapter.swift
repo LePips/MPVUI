@@ -44,10 +44,21 @@ extension MPVSession {
         ) }
 
         if configuration.videoOutput == .sampleBuffer {
+            #if os(tvOS)
+            // Follow mpv's audio-slaved host deadlines without media-clock drift.
+            let presentationMode = "host"
+            #else
+            // Picture in picture uses media timestamps and a pausable timebase.
+            let presentationMode = "media"
+            #endif
+
             options += [
-                ("avfoundation-presentation", "media"),
+                ("avfoundation-presentation", presentationMode),
                 ("avfoundation-native-dovi-profile7", configuration.dolbyVisionPolicy == .strict ? "no" : "p8.1"),
-                ("avfoundation-pip-composite-osd", "yes")
+                ("avfoundation-pip-composite-osd", "yes"),
+                ("avfoundation-osd-layer", String(target?.osdLayerAddress ?? 0)),
+                ("avfoundation-osd-display-width", String(target?.drawableWidth ?? 0)),
+                ("avfoundation-osd-display-height", String(target?.drawableHeight ?? 0))
             ]
         } else {
             options += [("gpu-api", "vulkan"), ("gpu-context", "moltenvk"), ("target-colorspace-hint", "no")]

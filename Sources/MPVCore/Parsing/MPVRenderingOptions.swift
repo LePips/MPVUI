@@ -112,7 +112,7 @@ package enum MPVRenderingOptions {
         ]
 
         switch quality.dithering ?? .automatic {
-        case .automatic: options["dither"] = backend == .gpu && preset == .battery ? "no" : "fruit"
+        case .automatic: options["dither"] = preset == .battery ? "no" : "fruit"
         case .disabled: options["dither"] = "no"
         case let value: options["dither"] = value.rawValue
         }
@@ -144,7 +144,7 @@ package enum MPVRenderingOptions {
     package static func deinterlaceOptions(_ policy: MPVDeinterlacePolicy) -> [String: String] {
         guard policy.mode != .disabled else { return ["deinterlace": "no"] }
 
-        if policy.algorithm == .automatic, !policy.analyzesFieldOrder {
+        if policy.algorithm == .automatic, !policy.analyzesFieldOrder, policy.outputCadence == .field {
             return [
                 "deinterlace": policy.mode == .automatic ? "auto" : "yes",
                 "deinterlace-field-parity": policy.fieldOrder.rawValue,
@@ -155,7 +155,7 @@ package enum MPVRenderingOptions {
         let deint = policy.mode == .automatic ? "interlaced" : "all"
 
         let graph = (policy.analyzesFieldOrder ? "idet," : "")
-            + "\(algorithm)=mode=send_field:parity=\(policy.fieldOrder.rawValue):deint=\(deint)"
+            + "\(algorithm)=mode=\(policy.outputCadence.rawValue):parity=\(policy.fieldOrder.rawValue):deint=\(deint)"
 
         // mpv's lavfi wrapper negotiates software input through its autoconverter.
         return ["deinterlace": "no", "vf": "lavfi=[\(graph)]"]
@@ -177,7 +177,7 @@ package enum MPVRenderingOptions {
             return result
         }
 
-        if policy.algorithm == .automatic, !policy.analyzesFieldOrder {
+        if policy.algorithm == .automatic, !policy.analyzesFieldOrder, policy.outputCadence == .field {
             result.isActive = automaticFilterIsActive
 
             if automaticFilterIsActive == false {

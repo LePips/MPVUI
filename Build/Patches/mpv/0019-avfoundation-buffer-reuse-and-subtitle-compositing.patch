@@ -11,10 +11,23 @@ color conversions. Avoid unnecessary bitmap contexts, attachment copies, and
 row-by-row copies when strides match. Track pixel transformations explicitly
 so in-place overlays invalidate dynamic HDR metadata correctly.
 
+diff --git a/player/command.c b/player/command.c
+index d3ee9f245fc96827c0e8b36927685f2161ff6471..a1e52dce9457549545a827de410ce5987de6a9fa 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -452,6 +452,7 @@ static int mp_property_native_video_statistics(void *ctx, struct m_property *pro
+             VOCTRL_GET_NATIVE_VIDEO_STATISTICS, &stats) <= 0)
+         return M_PROPERTY_UNAVAILABLE;
+     struct m_sub_property props[] = {
++        {"osd-mode", SUB_PROP_INT(stats.osd_mode)},
+         {"pixel-buffer-copies", SUB_PROP_INT64(stats.pixel_buffer_copies)},
+         {"sample-build-count", SUB_PROP_INT64(stats.sample_build_count)},
+         {"last-sample-build-ns", SUB_PROP_INT64(stats.last_sample_build_ns)},
 diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
+index 4264b58aa099377344e9d3ac1b77bc13b128795b..8beb2427b4d047b6c748873072a65d940890efa4 100644
 --- a/video/out/avfoundation_color.h
 +++ b/video/out/avfoundation_color.h
-@@ -149,18 +149,6 @@
+@@ -149,18 +149,6 @@ static inline void avf_tag_geometry(CVPixelBufferRef buffer, int pw, int ph,
      avf_set_attachment(buffer, kCVImageBufferCleanApertureKey, (__bridge CFDictionaryRef)aperture);
      CVBufferRemoveAttachment(buffer, kCVImageBufferPreferredCleanApertureKey);
  }
@@ -33,7 +46,7 @@ diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
  static inline void copy_pixel_buffer_metadata(CVPixelBufferRef src, CVPixelBufferRef dst,
                                         OSType dst_format)
  {
-@@ -176,26 +164,6 @@
+@@ -176,26 +164,6 @@ static inline void copy_pixel_buffer_metadata(CVPixelBufferRef src, CVPixelBuffe
          if (dict) CVBufferSetAttachments(dst, dict, mode);
      }
  
@@ -60,7 +73,7 @@ diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
      if (!biplanar) {
          CVBufferRemoveAttachment(dst, kCVImageBufferYCbCrMatrixKey);
          CVBufferRemoveAttachment(dst, kCVImageBufferChromaLocationTopFieldKey);
-@@ -215,6 +183,30 @@
+@@ -215,6 +183,30 @@ static inline void copy_pixel_buffer_metadata(CVPixelBufferRef src, CVPixelBuffe
          set_colorspace_from_attachments(dst);
  }
  
@@ -91,16 +104,16 @@ diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
  static inline CIImage *avf_subtitle_image(CVPixelBufferRef sub, CGColorSpaceRef cs,
                                           const struct avf_overlay_color *color)
  {
-@@ -222,29 +214,44 @@
+@@ -222,29 +214,44 @@ static inline CIImage *avf_subtitle_image(CVPixelBufferRef sub, CGColorSpaceRef
      size_t width = CVPixelBufferGetWidth(sub), height = CVPixelBufferGetHeight(sub);
      size_t stride = CVPixelBufferGetBytesPerRow(sub);
      const uint8_t *base = CVPixelBufferGetBaseAddress(sub);
 -    NSMutableData *pixels = [NSMutableData dataWithLength:width * height * 4 * sizeof(float)];
 -    if (!base || !pixels) {
 +    if (!base) {
-         CVPixelBufferUnlockBaseAddress(sub, kCVPixelBufferLock_ReadOnly);
-         return nil;
-     }
++        CVPixelBufferUnlockBaseAddress(sub, kCVPixelBufferLock_ReadOnly);
++        return nil;
++    }
 +    struct avf_subtitle_bounds bounds = avf_find_subtitle_bounds(base, width, height, stride);
 +    size_t crop_w = bounds.x1 - bounds.x0, crop_h = bounds.y1 - bounds.y0;
 +    CIImage *canvas = [[CIImage imageWithColor:[CIColor colorWithRed:0 green:0 blue:0 alpha:0]]
@@ -111,9 +124,9 @@ diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
 +    }
 +    NSMutableData *pixels = [NSMutableData dataWithLength:crop_w * crop_h * 4 * sizeof(float)];
 +    if (!pixels) {
-+        CVPixelBufferUnlockBaseAddress(sub, kCVPixelBufferLock_ReadOnly);
-+        return nil;
-+    }
+         CVPixelBufferUnlockBaseAddress(sub, kCVPixelBufferLock_ReadOnly);
+         return nil;
+     }
      float *dst = pixels.mutableBytes;
 -    for (size_t y = 0; y < height; y++) {
 -        for (size_t x = 0; x < width; x++) {
@@ -145,9 +158,10 @@ diff --git a/video/out/avfoundation_color.h b/video/out/avfoundation_color.h
  
  // Owned by the VO thread. The caller keeps the source bitmap immutable until
 diff --git a/video/out/avfoundation_color_math.h b/video/out/avfoundation_color_math.h
+index 8702b3b61006a3143081e33ee6a551e40f7298e9..9e2d09fa447fef983c613ee415fa4f9312368815 100644
 --- a/video/out/avfoundation_color_math.h
 +++ b/video/out/avfoundation_color_math.h
-@@ -91,8 +91,15 @@
+@@ -91,8 +91,15 @@ static inline void avf_subtitle_nits(const struct avf_overlay_color *color,
      double a = bgra[3] / 255.0;
      double sub[3] = {0};
      if (a > 0) {
@@ -165,7 +179,7 @@ diff --git a/video/out/avfoundation_color_math.h b/video/out/avfoundation_color_
      }
      double white = color->transfer == AVF_PQ || color->transfer == AVF_HLG ? color->white_nits : 100;
      for (int c = 0; c < 3; c++) {
-@@ -110,15 +117,19 @@
+@@ -110,15 +117,19 @@ static inline void avf_blend_pixel(const struct avf_overlay_color *color,
      double a = bgra[3] / 255.0;
      if (a == 0) return; // preserve even out-of-range original values exactly
      double kr = color->kr, kb = color->kb, kg = 1 - kr - kb;
@@ -194,10 +208,44 @@ diff --git a/video/out/avfoundation_color_math.h b/video/out/avfoundation_color_
      avf_from_nits(color->transfer, rgb, kr, kb);
      yuv[0] = kr * rgb[0] + kg * rgb[1] + kb * rgb[2];
      yuv[1] = (rgb[2] - yuv[0]) / (2 * (1 - kb));
+diff --git a/video/out/vo.h b/video/out/vo.h
+index 2ef5391fdbb9ae3ca44c6ac774f994de864364aa..6d116d4013e06565ecabfda48f8a17b48357d571 100644
+--- a/video/out/vo.h
++++ b/video/out/vo.h
+@@ -143,6 +143,9 @@ enum mp_voctrl {
+ };
+ 
+ struct voctrl_native_video_statistics {
++    // Last enqueued frame: 0 = pending, 1 = separate, 2 = composited,
++    // 3 = preserved Dolby Vision cannot include the requested subtitle.
++    int osd_mode;
+     int64_t pixel_buffer_copies;
+     int64_t sample_build_count;
+     int64_t last_sample_build_ns;
 diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+index 81e2116ffaaa772dd8eabd1101ef0dc727c15a87..2f4492da2c27b9fd9cd337365c2d55c1c8020a41 100644
 --- a/video/out/vo_avfoundation.m
 +++ b/video/out/vo_avfoundation.m
-@@ -326,17 +326,26 @@
+@@ -78,6 +78,9 @@ struct avfoundation_opts {
+     int native_dovi_profile7;
+     bool composite_osd;
+     bool pip_composite_osd;
++    bool pip_active;
++    int64_t osd_layer;
++    int osd_display_width, osd_display_height;
+     int queue_lead_ms;
+     int presentation;
+     int osd_max_height;
+@@ -298,6 +301,8 @@ struct priv {
+     CVPixelBufferPoolRef osdPool;
+     int osd_pool_w, osd_pool_h;
+     bool osd_needs_enqueue;
++    bool osd_cache_valid;
++    bool osd_clear_pending;
+ 
+     // Track dirty rect per IOSurface; recycled pool buffers retain pixels,
+     // with this code as sole writer. Clear touched rows only. CFRetain pins
+@@ -326,17 +331,26 @@ struct priv {
      __strong id<MTLDevice> mtlDevice;
      __strong CIContext *ciContext;
      CVPixelBufferPoolRef outputPool;
@@ -224,12 +272,130 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      // Cache format description; rebuild when dimensions, format, or
      // attachments change.
-@@ -1201,13 +1210,126 @@
+@@ -397,17 +411,19 @@ struct priv {
+ };
+ 
+ static void clear_subtitle_cache(struct priv *p);
++static void clear_osd_display_image(struct vo *vo);
+ static void release_ci_compositor(struct priv *p);
+ static const struct m_sub_options avfoundation_conf;
+ 
+ static bool should_composite_into_video(struct priv *p)
+ {
+-    return true;
++    return !p->osdLayer || p->opts->composite_osd ||
++           (p->opts->pip_active && p->opts->pip_composite_osd);
+ }
+ 
+ static bool should_use_inline_osd_layer(struct priv *p)
+ {
+-    return false;
++    return p->osdLayer && !should_composite_into_video(p);
+ }
+ 
+ // Frame-space OSD: PiP presents samples directly and sizes its window from
+@@ -807,6 +823,7 @@ static void recover_display_layer(struct vo *vo, const char *reason, bool force)
+     p->timebase_anchor_valid = false;
+     p->timebase_paused = p->playback_paused;
+     p->osd_change_id = 0;
++    p->osd_cache_valid = false;
+     p->osd_needs_enqueue = false;
+ 
+     [displayLayer release];
+@@ -932,7 +949,24 @@ static struct avf_render_geometry compute_render_geometry(struct vo *vo,
+         frame_h = vo->params ? vo->params->h : 0;
+ 
+     if (should_use_frame_space_osd(p)) {
+-        return avf_frame_space_geometry(frame_w, frame_h,
++        int raster_w = frame_w, raster_h = frame_h;
++        if (should_use_inline_osd_layer(p) && frame_w > 0 && frame_h > 0) {
++            double height = frame_h;
++            if (!p->opts->osd_video_res && p->opts->osd_display_width > 0 &&
++                p->opts->osd_display_height > 0) {
++                double par = vo->params && vo->params->p_w > 0 && vo->params->p_h > 0
++                    ? vo->params->p_w / (double)vo->params->p_h : 1.0;
++                height = MPMIN(p->opts->osd_display_height,
++                    p->opts->osd_display_width * (double)frame_h / (frame_w * par));
++            }
++            if (p->opts->osd_max_height > 0)
++                height = MPMIN(height, p->opts->osd_max_height);
++            // Match the coded aspect ratio. The OSD sample carries the same
++            // pixel aspect ratio as video, and the host uses matching gravity.
++            raster_h = MPCLAMP((int)lrint(height), 1, 16384);
++            raster_w = MPCLAMP((int)lrint(frame_w * (double)raster_h / frame_h), 1, 16384);
++        }
++        return avf_frame_space_geometry(raster_w, raster_h,
+                                         vo->params ? vo->params->p_w : 1,
+                                         vo->params ? vo->params->p_h : 1);
+     }
+@@ -1021,6 +1055,9 @@ static void update_avfoundation_options(struct vo *vo)
+ 
+     bool old_composite_osd = p->opts->composite_osd;
+     bool old_pip_composite_osd = p->opts->pip_composite_osd;
++    bool old_pip_active = p->opts->pip_active;
++    int old_osd_display_width = p->opts->osd_display_width;
++    int old_osd_display_height = p->opts->osd_display_height;
+     int old_queue_lead_ms = p->opts->queue_lead_ms;
+     int old_osd_max_height = p->opts->osd_max_height;
+     bool old_osd_video_res = p->opts->osd_video_res;
+@@ -1034,14 +1071,23 @@ static void update_avfoundation_options(struct vo *vo)
+ 
+     bool composite_changed =
+         old_composite_osd != p->opts->composite_osd ||
+-        old_pip_composite_osd != p->opts->pip_composite_osd;
++        old_pip_composite_osd != p->opts->pip_composite_osd ||
++        old_pip_active != p->opts->pip_active;
+     bool osd_scale_changed = old_osd_max_height != p->opts->osd_max_height ||
+-        old_osd_video_res != p->opts->osd_video_res;
++        old_osd_video_res != p->opts->osd_video_res ||
++        old_osd_display_width != p->opts->osd_display_width ||
++        old_osd_display_height != p->opts->osd_display_height;
+ 
+     bool luminance_changed = old_subtitle_luminance != p->opts->subtitle_luminance;
+     if (!composite_changed && !osd_scale_changed && !luminance_changed)
+         return;
+-    if (luminance_changed) vo->want_redraw = true;
++    vo->want_redraw = true;
++    if (composite_changed) {
++        // Retire queued samples from the previous mode before acknowledging
++        // a PiP transition. A paused frame is replaced by the requested redraw.
++        sample_buffer_renderer_flush(p->displayLayer, false);
++        p->video_statistics.osd_mode = 0;
++    }
+ 
+     if (composite_changed) {
+         MP_VERBOSE(vo, "OSD compositing updated: composite_osd: %s, "
+@@ -1056,10 +1102,20 @@ static void update_avfoundation_options(struct vo *vo)
+     }
+ 
+     clear_subtitle_cache(p);
+-    if (composite_changed && !should_composite_into_video(p))
++    if (composite_changed && !should_composite_into_video(p)) {
+         release_ci_compositor(p);
+-    if (p->osdLayer)
+-        sample_buffer_renderer_flush(p->osdLayer, true);
++        // These pools can otherwise retain several full-resolution frames
++        // after PiP ends. Queued sample buffers retain their own storage.
++        if (p->outputPool) CVPixelBufferPoolRelease(p->outputPool);
++        if (p->outputReservePool) CVPixelBufferPoolRelease(p->outputReservePool);
++        p->outputPool = p->outputReservePool = NULL;
++        p->output_pool_w = p->output_pool_h = 0;
++        p->output_pool_format = 0;
++    }
++    if (p->osdLayer) {
++        sample_buffer_renderer_flush(p->osdLayer, false);
++        p->osd_clear_pending = true;
++    }
+     sync_osd_layer_frame(vo);
+ }
+ 
+@@ -1201,13 +1257,126 @@ static AVBufferRef *create_videotoolbox_device_ref(struct vo *vo)
      return device_ref;
  }
  
 -// Pool cap: eight buffers. Readiness/queue lead bound scheduling; drop frame
 -// under pressure, never grow pool.
+-static CVReturn avf_pool_get_buffer(CVPixelBufferPoolRef pool, CVPixelBufferRef *out)
 +// Presentation pool capacity follows the scheduled queue, with three buffers for
 +// renderer retention/upload and a separate paused replacement reserve. A fixed
 +// seven-buffer pool can exhaust before queued 120 fps samples are retired.
@@ -251,7 +417,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
 +// AVFoundation can retain queued buffers after flush until a new image arrives.
 +static CVReturn avf_pool_get_buffer_with_limit(CVPixelBufferPoolRef pool,
 +                                               int limit, CVPixelBufferRef *out)
-+{
+ {
 +    if (limit < 1 || limit > AVF_POOL_MAX_BUFFERS)
 +        return kCVReturnInvalidArgument;
 +    static NSDictionary *attributes[AVF_POOL_MAX_BUFFERS];
@@ -260,15 +426,14 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
 +        for (int i = 0; i < AVF_POOL_MAX_BUFFERS; i++)
 +            attributes[i] = [@{(id)kCVPixelBufferPoolAllocationThresholdKey: @(i + 1)} retain];
 +    });
-+    return CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+     return CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+-        kCFAllocatorDefault, pool,
+-        (CFDictionaryRef)@{(id)kCVPixelBufferPoolAllocationThresholdKey: @8}, out);
 +        kCFAllocatorDefault, pool, (__bridge CFDictionaryRef)attributes[limit - 1], out);
 +}
 +
- static CVReturn avf_pool_get_buffer(CVPixelBufferPoolRef pool, CVPixelBufferRef *out)
- {
--    return CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
--        kCFAllocatorDefault, pool,
--        (CFDictionaryRef)@{(id)kCVPixelBufferPoolAllocationThresholdKey: @8}, out);
++static CVReturn avf_pool_get_buffer(CVPixelBufferPoolRef pool, CVPixelBufferRef *out)
++{
 +    return avf_pool_get_buffer_with_limit(pool, 8, out);
 +}
 +
@@ -356,7 +521,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  }
  
  // Create pixel-buffer pool.
-@@ -1386,8 +1508,12 @@
+@@ -1386,8 +1555,12 @@ static bool copy_pixel_buffer_planes(CVPixelBufferRef src, CVPixelBufferRef dst)
                  ok = false;
                  break;
              }
@@ -371,7 +536,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          }
      } else if (ok) {
          uint8_t *src_base = CVPixelBufferGetBaseAddress(src);
-@@ -1398,8 +1524,12 @@
+@@ -1398,8 +1571,12 @@ static bool copy_pixel_buffer_planes(CVPixelBufferRef src, CVPixelBufferRef dst)
          size_t bytes = MPMIN(src_stride, dst_stride);
          ok = src_base && dst_base;
          if (ok) {
@@ -386,7 +551,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          }
      }
  
-@@ -1466,6 +1596,41 @@
+@@ -1466,6 +1643,41 @@ static bool create_sw_upload_pool(struct vo *vo, int w, int h, OSType format)
          &p->sw_pool_h, &p->sw_pool_format, w, h, format, "software upload");
  }
  
@@ -428,7 +593,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  static void reset_osd_buf_states(struct priv *p)
  {
      for (int i = 0; i < p->osd_buf_state_count; i++) {
-@@ -1688,7 +1853,8 @@
+@@ -1688,7 +1900,8 @@ static CVPixelBufferRef upload_software_frame(struct vo *vo, struct mp_image *mp
          return NULL;
  
      CVPixelBufferRef pixbuf = NULL;
@@ -438,7 +603,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !pixbuf) {
          MP_ERR(vo, "Failed to get upload buffer: %d\n", status);
-@@ -1756,7 +1922,7 @@
+@@ -1756,7 +1969,7 @@ static CVPixelBufferRef upload_software_frame(struct vo *vo, struct mp_image *mp
      }
  
      CVPixelBufferUnlockBaseAddress(pixbuf, 0);
@@ -447,7 +612,203 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      return pixbuf;
  }
-@@ -2379,31 +2545,44 @@
+@@ -2268,6 +2481,86 @@ static CVPixelBufferRef render_subtitle_pixel_buffer(struct vo *vo,
+     return pixbuf;
+ }
+ 
++static CMSampleBufferRef create_osd_image_sample(struct vo *vo,
++                                                CVPixelBufferRef pixbuf,
++                                                int64_t media_pts_ns)
++{
++    // This raster can be smaller than the coded frame. Unlike transformed
++    // video buffers it still uses the coded grid and needs its source PAR.
++    int p_w = vo->params ? vo->params->p_w : 1;
++    int p_h = vo->params ? vo->params->p_h : 1;
++    if (p_w > 0 && p_h > 0 && p_w != p_h) {
++        NSDictionary *par = @{
++            (id)kCVImageBufferPixelAspectRatioHorizontalSpacingKey: @(p_w),
++            (id)kCVImageBufferPixelAspectRatioVerticalSpacingKey: @(p_h),
++        };
++        CVBufferSetAttachment(pixbuf, kCVImageBufferPixelAspectRatioKey,
++            (__bridge CFDictionaryRef)par, kCVAttachmentMode_ShouldPropagate);
++    } else {
++        CVBufferRemoveAttachment(pixbuf, kCVImageBufferPixelAspectRatioKey);
++    }
++    CVBufferSetAttachment(pixbuf, kCVImageBufferAlphaChannelIsOpaque,
++        kCFBooleanFalse, kCVAttachmentMode_ShouldPropagate);
++    CVBufferSetAttachment(pixbuf, kCVImageBufferAlphaChannelModeKey,
++        kCVImageBufferAlphaChannelMode_PremultipliedAlpha, kCVAttachmentMode_ShouldPropagate);
++    CVBufferSetAttachment(pixbuf, kCVImageBufferColorPrimariesKey,
++        kCVImageBufferColorPrimaries_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
++    CVBufferSetAttachment(pixbuf, kCVImageBufferTransferFunctionKey,
++        kCVImageBufferTransferFunction_sRGB, kCVAttachmentMode_ShouldPropagate);
++
++    CMSampleTimingInfo info = {
++        .presentationTimeStamp = cm_time_from_ns(media_pts_ns),
++        .duration = kCMTimeInvalid,
++        .decodeTimeStamp = kCMTimeInvalid
++    };
++
++    CMFormatDescriptionRef format = NULL;
++    CMSampleBufferRef buf = NULL;
++    OSStatus err = CMVideoFormatDescriptionCreateForImageBuffer(NULL, pixbuf, &format);
++    if (err == noErr && format)
++        err = CMSampleBufferCreateReadyWithImageBuffer(NULL, pixbuf, format, &info, &buf);
++
++    if (format)
++        CFRelease(format);
++
++    if (err != noErr || !buf) {
++        MP_ERR(vo, "Failed to create OSD sample buffer: %d\n", (int)err);
++        return NULL;
++    }
++
++    return buf;
++}
++
++// A renderer can retain its last displayed IOSurface after a removal flush.
++// Replace it with explicit transparent pixels. This transition-only sample
++// uses a tiny surface and can be timed or displayed immediately.
++static CMSampleBufferRef create_transparent_osd_sample(struct vo *vo, int64_t pts_ns)
++{
++    NSDictionary *attrs = @{
++        (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
++    };
++    CVPixelBufferRef pixbuf = NULL;
++    if (CVPixelBufferCreate(kCFAllocatorDefault, 2, 2,
++            kCVPixelFormatType_32BGRA, (__bridge CFDictionaryRef)attrs,
++            &pixbuf) != kCVReturnSuccess || !pixbuf)
++        return NULL;
++    if (CVPixelBufferLockBaseAddress(pixbuf, 0) != kCVReturnSuccess) {
++        CVPixelBufferRelease(pixbuf);
++        return NULL;
++    }
++    void *base = CVPixelBufferGetBaseAddress(pixbuf);
++    if (!base) {
++        CVPixelBufferUnlockBaseAddress(pixbuf, 0);
++        CVPixelBufferRelease(pixbuf);
++        return NULL;
++    }
++    memset(base, 0, CVPixelBufferGetBytesPerRow(pixbuf) * CVPixelBufferGetHeight(pixbuf));
++    CVPixelBufferUnlockBaseAddress(pixbuf, 0);
++    CMSampleBufferRef buf = create_osd_image_sample(vo, pixbuf, pts_ns);
++    CVPixelBufferRelease(pixbuf);
++    return buf;
++}
++
+ static CMSampleBufferRef create_osd_sample_buffer(struct vo *vo,
+                                                   int64_t media_pts_ns,
+                                                   bool *needed)
+@@ -2277,12 +2570,17 @@ static CMSampleBufferRef create_osd_sample_buffer(struct vo *vo,
+     if (needed)
+         *needed = false;
+ 
+-    if (!should_use_inline_osd_layer(p) || !p->osd_needs_enqueue)
++    bool inline_osd = should_use_inline_osd_layer(p);
++    if (!p->osdLayer || (!p->osd_clear_pending &&
++                        (!inline_osd || !p->osd_needs_enqueue)))
+         return NULL;
+ 
+     if (needed)
+         *needed = true;
+ 
++    if (!inline_osd || (p->osd_clear_pending && !p->has_subtitle))
++        return create_transparent_osd_sample(vo, media_pts_ns);
++
+     CVPixelBufferRef pixbuf = NULL;
+     if (p->has_subtitle && p->cachedSubtitleBuffer) {
+         pixbuf = CVPixelBufferRetain(p->cachedSubtitleBuffer);
+@@ -2292,28 +2590,30 @@ static CMSampleBufferRef create_osd_sample_buffer(struct vo *vo,
+     if (!pixbuf)
+         return NULL;
+ 
+-    CMSampleTimingInfo info = {
+-        .presentationTimeStamp = cm_time_from_ns(media_pts_ns),
+-        .duration = kCMTimeInvalid,
+-        .decodeTimeStamp = kCMTimeInvalid
+-    };
+-
+-    CMFormatDescriptionRef format = NULL;
+-    CMSampleBufferRef buf = NULL;
+-    OSStatus err = CMVideoFormatDescriptionCreateForImageBuffer(NULL, pixbuf, &format);
+-    if (err == noErr && format)
+-        err = CMSampleBufferCreateReadyWithImageBuffer(NULL, pixbuf, format, &info, &buf);
+-
+-    if (format)
+-        CFRelease(format);
++    CMSampleBufferRef buf = create_osd_image_sample(vo, pixbuf, media_pts_ns);
+     CVPixelBufferRelease(pixbuf);
++    return buf;
++}
+ 
+-    if (err != noErr || !buf) {
+-        MP_ERR(vo, "Failed to create OSD sample buffer: %d\n", (int)err);
+-        return NULL;
+-    }
++static void clear_osd_display_image(struct vo *vo)
++{
++    struct priv *p = vo->priv;
++    if (!p->osdLayer)
++        return;
+ 
+-    return buf;
++    // Redraw may flush the queue again while paused. Retain a pending clear
++    // until a sample accompanying the next video frame has been enqueued.
++    p->osd_clear_pending = true;
++    sample_buffer_renderer_flush(p->osdLayer, false);
++    CMSampleBufferRef buf = create_transparent_osd_sample(vo, 0);
++    if (!buf)
++        return;
++    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(buf, true);
++    if (attachments && CFArrayGetCount(attachments))
++        CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0),
++            kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
++    sample_buffer_renderer_enqueue(p->osdLayer, buf);
++    CFRelease(buf);
+ }
+ 
+ static bool enqueue_osd_sample(struct vo *vo, CMSampleBufferRef buf)
+@@ -2333,6 +2633,12 @@ static bool enqueue_osd_sample(struct vo *vo, CMSampleBufferRef buf)
+         return false;
+     }
+ 
++    if (p->playback_paused && !p->presentation_host) {
++        CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(buf, true);
++        if (attachments && CFArrayGetCount(attachments))
++            CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0),
++                kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
++    }
+     sample_buffer_renderer_enqueue(osdLayer, buf);
+     [osdLayer release];
+ 
+@@ -2352,6 +2658,7 @@ static bool render_osd_with_geometry(struct vo *vo, double pts,
+     if (!osd_res_equals(p->osd_res, geometry.osd_res)) {
+         p->osd_res = geometry.osd_res;
+         p->osd_change_id = 0;
++        p->osd_cache_valid = false;
+     }
+     p->osd_w = geometry.w;
+     p->osd_h = geometry.h;
+@@ -2360,13 +2667,17 @@ static bool render_osd_with_geometry(struct vo *vo, double pts,
+         [SUBBITMAP_LIBASS] = true,
+     };
+     struct sub_bitmap_list *list = osd_render(vo->osd, p->osd_res, pts, 0, formats);
+-    if (list->change_id == p->osd_change_id && p->cachedSubtitleBuffer) {
++    if (p->osd_cache_valid && list->change_id == p->osd_change_id) {
+         p->perf.skipped++;
+         talloc_free(list);
+         return true;
+     }
+     clear_subtitle_cache(p);
++    p->osd_needs_enqueue = should_use_inline_osd_layer(p);
+     if (!list->num_items) {
++        p->osd_change_id = list->change_id;
++        p->osd_cache_valid = true;
++        p->perf.empty++;
+         talloc_free(list);
+         return true;
+     }
+@@ -2379,31 +2690,44 @@ static bool render_osd_with_geometry(struct vo *vo, double pts,
      }
      void *base = CVPixelBufferGetBaseAddress(buf);
      size_t stride = CVPixelBufferGetBytesPerRow(buf);
@@ -501,7 +862,15 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
      CVPixelBufferUnlockBaseAddress(buf, 0);
      p->cachedSubtitleBuffer = buf;
      p->subtitle_x0 = bounds.x0;
-@@ -2496,11 +2675,16 @@
+@@ -2412,6 +2736,7 @@ static bool render_osd_with_geometry(struct vo *vo, double pts,
+     p->subtitle_y1 = bounds.y1;
+     osd_buf_record_dirty(p, buf, bounds);
+     p->osd_change_id = list->change_id;
++    p->osd_cache_valid = true;
+     p->has_subtitle = true;
+     p->perf.renders++;
+     int64_t elapsed = mp_time_ns() - start;
+@@ -2496,11 +2821,16 @@ static struct avf_overlay_color get_overlay_color(struct vo *vo, CVPixelBufferRe
      for (int i = 0; cvprim && i < MP_ARRAY_SIZE(candidates); i++)
          if (CFEqual(cvprim, get_cv_color_primaries(candidates[i]))) prim = candidates[i];
      if (prim == PL_COLOR_PRIM_UNKNOWN) prim = PL_COLOR_PRIM_BT_709;
@@ -523,7 +892,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      return color;
  }
-@@ -2567,7 +2751,8 @@
+@@ -2567,7 +2897,8 @@ static CVPixelBufferRef composite_yuv_frame(struct vo *vo, CVPixelBufferRef vide
          if (!create_output_pool(vo, videoW, videoH, sourceFormat))
              return NULL;
  
@@ -533,7 +902,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (status != kCVReturnSuccess || !outputBuffer) {
              MP_ERR(vo, "Failed to get YUV composite buffer: %d\n", status);
              return NULL;
-@@ -2614,38 +2799,73 @@
+@@ -2614,38 +2945,73 @@ static CVPixelBufferRef composite_yuv_frame(struct vo *vo, CVPixelBufferRef vide
      double cCenter = p010 ? 512.0 : 128.0;
      double cRange = fullRange ? (p010 ? 1023.0 : 255.0) : (p010 ? 896.0 : 224.0);
  
@@ -625,7 +994,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
              }
              for (int k = 0; k < 2; k++) {
                  double code = cCenter + cRange * uv[k];
-@@ -2691,7 +2911,8 @@
+@@ -2691,7 +3057,8 @@ static CVPixelBufferRef render_video_geometry_frame(struct vo *vo,
          return NULL;
  
      CVPixelBufferRef outputBuffer = NULL;
@@ -635,7 +1004,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !outputBuffer) {
          MP_ERR(vo, "Failed to get geometry output buffer: %d\n", status);
-@@ -2780,7 +3001,8 @@
+@@ -2780,7 +3147,8 @@ static CVPixelBufferRef render_video_geometry_frame(struct vo *vo,
  }
  
  // GPU Core Image subtitle composite; HDR-compatible.
@@ -645,7 +1014,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  {
      struct priv *p = vo->priv;
  
-@@ -2796,7 +3018,7 @@
+@@ -2796,7 +3164,7 @@ static CVPixelBufferRef composite_frame(struct vo *vo, CVPixelBufferRef videoBuf
  
      OSType sourceFormat = CVPixelBufferGetPixelFormatType(videoBuffer);
      if (is_biplanar_yuv_format(sourceFormat)) {
@@ -654,7 +1023,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (composited)
              return composited;
      }
-@@ -2828,7 +3050,8 @@
+@@ -2828,7 +3196,8 @@ static CVPixelBufferRef composite_frame(struct vo *vo, CVPixelBufferRef videoBuf
  
      // Acquire output buffer.
      CVPixelBufferRef outputBuffer = NULL;
@@ -664,7 +1033,39 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (status != kCVReturnSuccess || !outputBuffer) {
          MP_ERR(vo, "Failed to get output buffer from pool: %d\n", status);
-@@ -3066,6 +3289,7 @@
+@@ -2936,10 +3305,23 @@ static int preinit(struct vo *vo)
+         return -1;
+     }
+     p->displayLayer = [layer retain];
++    if (p->opts->osd_layer) {
++        id osd = (__bridge id)(void *)(intptr_t)p->opts->osd_layer;
++        if (![osd isKindOfClass:[AVSampleBufferDisplayLayer class]] || osd == layer) {
++            MP_ERR(vo, "--avfoundation-osd-layer must identify a separate display layer\n");
++            [p->displayLayer release];
++            p->displayLayer = nil;
++            return -1;
++        }
++        p->osdLayer = [osd retain];
++        p->osd_clear_pending = true;
++    }
+     if (CMTimebaseCreateWithSourceClock(kCFAllocatorDefault,
+             CMClockGetHostTimeClock(), &p->timebase) != noErr || !p->timebase) {
+         [p->displayLayer release];
+         p->displayLayer = nil;
++        [p->osdLayer release];
++        p->osdLayer = nil;
+         return -1;
+     }
+     p->presentation_host = p->opts->presentation == AVF_PRESENTATION_HOST;
+@@ -2949,6 +3331,7 @@ static int preinit(struct vo *vo)
+     // Renderer owns controlTimebase; host must not replace it. PiP playback
+     // delegate may read it on main queue.
+     p->displayLayer.controlTimebase = p->timebase;
++    p->osdLayer.controlTimebase = p->timebase;
+     vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);
+     update_avfoundation_geometry(vo);
+     vo->hwdec_devs = hwdec_devices_create();
+@@ -3066,6 +3449,7 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
  
          CVPixelBufferRef finalBuffer = pixbuf;
          bool needsRelease = false;
@@ -672,7 +1073,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
          bool applyGeometry = should_apply_video_geometry(vo);
          // Native dvh1 RPU describes untouched frames. Core Image redraw
-@@ -3083,11 +3307,14 @@
+@@ -3083,11 +3467,14 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
          if (applyGeometry) {
              CVPixelBufferRef overlay = NULL;
              if (p->has_subtitle && is_biplanar_yuv_format(CVPixelBufferGetPixelFormatType(pixbuf)))
@@ -689,7 +1090,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  CVPixelBufferRelease(overlay);
              }
              if (rendered) {
-@@ -3104,6 +3331,7 @@
+@@ -3104,6 +3491,7 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
                  }
                  finalBuffer = rendered;
                  needsRelease = true;
@@ -697,7 +1098,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  p->applied_geometry_last_frame = true;
                  p->geometry_render_failure_logged = false;
              } else if (!p->geometry_render_failure_logged) {
-@@ -3125,8 +3353,8 @@
+@@ -3125,8 +3513,8 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
  
          if (!needsRelease && !applyGeometry && should_composite_into_video(p)) {
              // Composite this flip's subtitle.
@@ -708,7 +1109,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
                  p->video_statistics.pixel_buffer_copies++;
              if (composited && should_use_frame_space_osd(p) &&
                  (CVPixelBufferGetWidth(composited) != CVPixelBufferGetWidth(pixbuf) ||
-@@ -3149,6 +3377,7 @@
+@@ -3149,6 +3537,7 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
              if (composited) {
                  finalBuffer = composited;
                  needsRelease = true;
@@ -716,7 +1117,7 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
              }
          }
  
-@@ -3219,7 +3448,7 @@
+@@ -3219,7 +3608,7 @@ static CMSampleBufferRef create_video_sample_buffer(struct vo *vo, mp_image_t *m
          // Static source mastering metadata remains meaningful after an overlay,
          // but dynamic scene mapping describes the untouched original pixels.
          int hdr_state = avf_attach_hdr10plus(buf, hdr10plus, hdr10plus_size,
@@ -725,7 +1126,16 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          if (hdr_state != p->hdr10plus_state) {
              const char *states[] = {"absent", "attached", "invalid",
                                      "pixels-transformed", "os-unavailable"};
-@@ -3330,6 +3559,8 @@
+@@ -3312,6 +3701,8 @@ static void flip_page(struct vo *vo)
+             // Retire future samples before readiness check: rate-zero queue
+             // cannot drain. Replace equal-PTS image without blanking.
+             sample_buffer_renderer_flush(p->displayLayer, false);
++            sample_buffer_renderer_flush(p->osdLayer, false);
++            p->osd_needs_enqueue = should_use_inline_osd_layer(p);
+         }
+         CMSampleBufferRef osd_buf = NULL;
+         bool osd_needed = false;
+@@ -3330,6 +3721,8 @@ static void flip_page(struct vo *vo)
          p->video_statistics.sample_build_count++;
          p->video_statistics.last_sample_build_ns = sample_ns;
          p->video_statistics.total_sample_build_ns += sample_ns;
@@ -734,7 +1144,40 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
          bool osd_enqueued = !osd_needed;
  
-@@ -3429,6 +3660,9 @@
+@@ -3348,6 +3741,7 @@ static void flip_page(struct vo *vo)
+                 p->perf.enqueue_ns += mp_time_ns() - t;
+                 if (osd_enqueued) {
+                     p->osd_needs_enqueue = false;
++                    p->osd_clear_pending = false;
+                     // Lead from OSD/video enqueue to intended presentation,
+                     // same clock.
+                     int64_t lead = p->next_present_host_ns - mp_time_ns();
+@@ -3360,11 +3754,22 @@ static void flip_page(struct vo *vo)
+                 }
+             }
+ 
+-            enqueue_video_sample(vo, video_buf);
++            bool video_enqueued = enqueue_video_sample(vo, video_buf);
++            // Do not acknowledge a PiP subtitle composition that preserved
++            // Dolby Vision pixels deliberately rejected. The host restores
++            // inline mode instead of starting PiP with missing subtitles.
++            if (video_enqueued && osd_enqueued) {
++                p->video_statistics.osd_mode = should_composite_into_video(p)
++                    ? (p->dovi_validated_state > 0 && p->has_subtitle ? 3 : 2) : 1;
++            }
+         }
+ 
+-        if (osd_needed && !osd_enqueued)
++        if (osd_needed && !osd_enqueued) {
+             p->osd_change_id = 0;
++            p->osd_cache_valid = false;
++            if (p->playback_paused)
++                vo->want_redraw = true;
++        }
+ 
+         if (osd_buf)
+             CFRelease(osd_buf);
+@@ -3429,6 +3834,9 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
                                      frame->ideal_frame_duration > 0.0
              ? MP_TIME_S_TO_NS(frame->ideal_frame_duration)
              : frame->duration > 0.0 ? (int64_t)llrint(frame->duration) : 0;
@@ -744,7 +1187,15 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
          p->next_timebase_rate_valid = avf_rate_sample(
              &p->rate_est, p->next_media_pts_ns, frame_duration_ns,
              p->timebase_rate > 0.0 ? p->timebase_rate : 1.0,
-@@ -3478,6 +3712,7 @@
+@@ -3460,6 +3868,7 @@ static void clear_subtitle_cache(struct priv *p)
+     }
+     p->has_subtitle = false;
+     p->osd_change_id = 0;
++    p->osd_cache_valid = false;
+     p->osd_needs_enqueue = false;
+     p->osd_callback_invoked = false;
+     p->subtitle_x0 = p->subtitle_y0 = p->subtitle_x1 = p->subtitle_y1 = 0;
+@@ -3478,6 +3887,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
      p->dovi_validated_state = p->hdr10plus_state = 0;
      p->video_statistics = (struct voctrl_native_video_statistics){0};
      p->dovi_unsupported_logged = false;
@@ -752,17 +1203,76 @@ diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
  
      if (params->repr.sys == PL_COLOR_SYSTEM_DOLBYVISION &&
          params->imgfmt != IMGFMT_VIDEOTOOLBOX) {
-@@ -3509,6 +3744,13 @@
+@@ -3500,16 +3910,24 @@ static void uninit(struct vo *vo)
+ 
+     mp_image_unrefp(&p->next_image);
+     sample_buffer_renderer_flush(p->displayLayer, true);
+-    sample_buffer_renderer_flush(p->osdLayer, true);
++    clear_osd_display_image(vo);
+ 
+     if (p->timebase) {
+         p->displayLayer.controlTimebase = NULL;
++        p->osdLayer.controlTimebase = NULL;
+         CFRelease(p->timebase);
+         p->timebase = NULL;
      }
  
      clear_subtitle_cache(p);
-+
+ 
 +    clear_sw_upload_metadata(p);
 +
 +    if (p->outputReservePool)
 +        CVPixelBufferPoolRelease(p->outputReservePool);
 +    if (p->swUploadReservePool)
 +        CVPixelBufferPoolRelease(p->swUploadReservePool);
- 
++
      if (p->outputPool) {
          CVPixelBufferPoolRelease(p->outputPool);
+         p->outputPool = NULL;
+@@ -3537,6 +3955,8 @@ static void uninit(struct vo *vo)
+ 
+     [p->displayLayer release];
+     p->displayLayer = nil;
++    [p->osdLayer release];
++    p->osdLayer = nil;
+ 
+     talloc_free(p->opts_cache);
+     p->opts_cache = NULL;
+@@ -3588,7 +4008,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
+         p->playback_paused = was_paused;
+         p->timebase_paused = was_paused;
+         sample_buffer_renderer_flush(p->displayLayer, false);
+-        sample_buffer_renderer_flush(p->osdLayer, true);
++        clear_osd_display_image(vo);
+         if (p->presentation_host && p->timebase) {
+             // Fresh host samples have future timestamps. Free-running clock
+             // needs only reseed if CoreMedia clamped it between videos.
+@@ -3614,6 +4034,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
+         return VO_TRUE;
+     case VOCTRL_REDRAW:
+         p->osd_change_id = 0;
++        p->osd_cache_valid = false;
+         return VO_TRUE;
+     case VOCTRL_UPDATE_WINDOW_TITLE:
+         return VO_TRUE;
+@@ -3636,6 +4057,10 @@ static const struct m_option avfoundation_options[] = {
+         {"no", 0}, {"p8.1", 1})},
+     {"composite-osd", OPT_BOOL(composite_osd)},
+     {"pip-composite-osd", OPT_BOOL(pip_composite_osd)},
++    {"pip-active", OPT_BOOL(pip_active)},
++    {"osd-layer", OPT_INT64(osd_layer)},
++    {"osd-display-width", OPT_INT(osd_display_width), M_RANGE(0, 16384)},
++    {"osd-display-height", OPT_INT(osd_display_height), M_RANGE(0, 16384)},
+     {"queue-lead-ms", OPT_INT(queue_lead_ms), M_RANGE(0, 1000)},
+     {"presentation", OPT_CHOICE(presentation,
+         {"media", AVF_PRESENTATION_MEDIA},
+@@ -3655,7 +4080,8 @@ static const struct m_sub_options avfoundation_conf = {
+     .size = sizeof(struct avfoundation_opts),
+     .defaults = &(const struct avfoundation_opts){
+         .native_dovi_profile7 = 0,
+-        .composite_osd = true,
++        .composite_osd = false,
++        .osd_max_height = 1080,
+         .pip_composite_osd = true,
+         .queue_lead_ms = 128,
+         .subtitle_luminance = 203,

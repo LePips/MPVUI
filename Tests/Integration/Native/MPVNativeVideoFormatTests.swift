@@ -172,7 +172,7 @@ struct MPVNativeVideoFormatTests {
 
         try await eventually("paused overlay source") {
             fixture.player.isPaused && fixture.buffer != nil
-                && fixture.layer.controlTimebase.map { CMTimebaseGetRate($0) == 0 } == true
+                && fixture.pausedClockMatches(position: 1)
         }
 
         let source = try fixture.snapshot()
@@ -222,9 +222,7 @@ struct MPVNativeVideoFormatTests {
         #expect(fixture.player.isPaused)
         #expect(fixture.player.lastError == nil)
 
-        let timebase = try #require(fixture.layer.controlTimebase)
-        #expect(CMTimebaseGetRate(timebase) == 0)
-        #expect(abs(CMTimebaseGetTime(timebase).seconds - 1) < 0.15)
+        #expect(fixture.pausedClockMatches(position: 1))
     }
 
     @MainActor
@@ -326,9 +324,7 @@ struct MPVNativeVideoFormatTests {
         try await eventually("subtitle fixture initial frame") {
             guard player.state == .paused, fixture.buffer != nil,
                   fixture.layer.isReadyForDisplay,
-                  let clock = fixture.layer.controlTimebase,
-                  CMTimebaseGetRate(clock) == 0,
-                  abs(CMTimebaseGetTime(clock).seconds - 1) < 0.15
+                  fixture.pausedClockMatches(position: 1)
             else { return false }
 
             return player.mediaInformation.tracks.contains { $0.type == .subtitle && $0.codec == "ass" }
@@ -402,9 +398,7 @@ struct MPVNativeVideoFormatTests {
         #expect(player.isPaused)
         #expect(player.lastError == nil)
 
-        let timebase = try #require(fixture.layer.controlTimebase)
-        #expect(CMTimebaseGetRate(timebase) == 0)
-        #expect(abs(CMTimebaseGetTime(timebase).seconds - 1) < 0.15)
+        #expect(fixture.pausedClockMatches(position: 1))
     }
 
     @MainActor
@@ -568,7 +562,7 @@ private final class NativeFormatFixture {
 
     init(options: [String: String]) {
         playback = PlaybackFixture(configuration: .init(
-            additionalOptions: options.merging(["ao": "null"]) { _, new in new },
+            additionalOptions: options.merging(["ao": "null", "avfoundation-composite-osd": "yes"]) { _, new in new },
             automaticallyPlays: false,
             hardwareDecoding: .disabled,
             logLevel: .verbose,
@@ -584,6 +578,18 @@ private final class NativeFormatFixture {
                 nativeLogs.removeFirst()
             }
         }
+    }
+
+    func pausedClockMatches(position: Double) -> Bool {
+        guard player.isPaused, abs(player.position.seconds - position) < 0.15,
+              let clock = layer.controlTimebase else { return false }
+
+        #if os(tvOS)
+        // Host time keeps advancing while the displayed frame is held.
+        return CMTimebaseGetRate(clock) == 1
+        #else
+        return CMTimebaseGetRate(clock) == 0 && abs(CMTimebaseGetTime(clock).seconds - position) < 0.15
+        #endif
     }
 
     func close() {

@@ -76,6 +76,9 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
     /// The default initial buffer duration, one second.
     public static let defaultInitialBufferDuration: Duration = .seconds(1)
 
+    /// The default buffer duration after underruns and seeks, one second.
+    public static let defaultRebufferDuration: Duration = .seconds(1)
+
     /// The default network cache duration, ten seconds.
     public static let defaultNetworkCacheDuration: Duration = .seconds(10)
 
@@ -114,10 +117,16 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
 
     // MARK: - Timing options
 
-    /// Buffered duration required before initial playback, clamped to zero or greater.
+    /// Buffered duration requested before first playback of each source, clamped to zero or greater.
+    /// Zero skips initial buffering without changing ``rebufferDuration``.
     public let initialBufferDuration: Duration
 
+    /// Buffered duration requested after cache underruns and seeks, clamped to zero or greater.
+    /// Zero removes the recovery cushion. Cache capacity and end of input can shorten either wait.
+    public let rebufferDuration: Duration
+
     /// Desired network cache duration, clamped to zero or greater.
+    /// The byte limits in ``cache`` can cap the buffered duration below this target.
     public let networkCacheDuration: Duration
 
     /// Initial position, or `nil` for the default. Negative values become zero.
@@ -197,6 +206,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
             isLoopingEnabled: isLoopingEnabled,
             networkCacheDuration: networkCacheDuration,
             playbackRate: playbackRate,
+            rebufferDuration: rebufferDuration,
             renderingQuality: renderingQuality,
             startTime: startTime,
             subtitleLuminance: subtitleLuminance,
@@ -225,6 +235,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         isLoopingEnabled: Bool = false,
         networkCacheDuration: Duration = defaultNetworkCacheDuration,
         playbackRate: Double = 1,
+        rebufferDuration: Duration = defaultRebufferDuration,
         renderingQuality: MPVRenderingQuality = .init(),
         sdrOutput: MPVSDROutputPolicy = .automatic,
         startTime: Duration? = nil,
@@ -247,6 +258,7 @@ public struct MPVPlayerConfiguration: Equatable, Sendable {
         self.isLoopingEnabled = isLoopingEnabled
         self.networkCacheDuration = networkCacheDuration.clampPositiveOrZero
         self.playbackRate = MPVSessionConfiguration.normalizedPlaybackRate(playbackRate)
+        self.rebufferDuration = rebufferDuration.clampPositiveOrZero
         self.renderingQuality = renderingQuality
         self.sdrOutput = sdrOutput
         self.startTime = startTime?.clampPositiveOrZero

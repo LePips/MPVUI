@@ -105,6 +105,7 @@ package extension MPVSession {
         if ["set", "add", "multiply", "cycle", "cycle-values", "change-list"].contains(command),
            let name = arguments.first
         {
+            recordPlaybackPolicyMutation(name)
             property = Self.canonicalOptionName(name)
         } else if command == "vf" || command == "af" {
             property = command
@@ -165,6 +166,10 @@ package extension MPVSession {
         }
 
         for name in commandMutatedOptions.subtracting(names) {
+            // Policy overrides are captured when accepted. Reading them here
+            // could promote a temporary per-file value into global settings.
+            guard !Self.automaticPlaybackPolicyOptions.contains(name) else { continue }
+
             if let value = getString("options/\(name)") {
                 // Store the resolved value of add/cycle/list operations, never
                 // replay a mutation that could compound after every stop.
@@ -177,6 +182,13 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
 
         for (name, value) in desiredProperties {
+            // These values apply only to the current native file. A recreated
+            // client receives the persistent override or its new source policy.
+            if name.hasPrefix("file-local-options/"),
+               Self.automaticPlaybackPolicyOptions.contains(MPVOptionOwnership.normalizedProperty(name))
+            {
+                continue
+            }
             let status = setPropertyImmediately(name, to: value)
 
             if status < 0 {
@@ -300,7 +312,12 @@ package extension MPVSession {
 
         if status < 0 {
             publishCommandError(status, context: "Set \(name)")
-        } else if Self.canonicalOptionName(name) == "vid" {
+            return
+        }
+
+        recordPlaybackPolicyMutation(name)
+
+        if Self.canonicalOptionName(name) == "vid" {
             continuePreloadIfPossible()
         } else if audioSetting {
             refreshAudioState()

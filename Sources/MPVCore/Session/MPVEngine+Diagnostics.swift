@@ -65,15 +65,30 @@ package extension MPVSession {
         guard let data = event.data else { return }
 
         let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
+        let prefix = message.prefix.map { String(cString: $0) } ?? "mpv"
+        let carriesNativeDiagnostics = prefix == "ffmpeg/video" || (videoOutput == .sampleBuffer && prefix == "vo/avfoundation")
+
+        // Internal capability logs remain subscribed even with public logging
+        // disabled. Unrelated messages need neither a payload copy nor parsing.
+        guard configuration.logLevel != .none || carriesNativeDiagnostics else { return }
+
+        let level = message.level.flatMap {
+            MPVSessionConfiguration.LogLevel(rawValue: String(cString: $0))
+        } ?? .info
+        let shouldPublish = level.diagnosticPriority > 0 && level.diagnosticPriority <= configuration.logLevel.diagnosticPriority
+        guard shouldPublish || carriesNativeDiagnostics else { return }
 
         // Copy before retiring a rejected native handle invalidates event data.
         let log = MPVLogMessage(
-            prefix: message.prefix.map { String(cString: $0) } ?? "mpv",
-            level: message.level.flatMap {
-                MPVSessionConfiguration.LogLevel(rawValue: String(cString: $0))
-            } ?? .info,
+            prefix: prefix,
+            level: level,
             message: message.text.map { String(cString: $0) } ?? ""
         )
+
+        guard carriesNativeDiagnostics else {
+            publish(.log(log))
+            return
+        }
 
         if isRequestedPlaylistEntryActive, let hardware = MPVPlaybackDiagnosticsParser.videoToolboxSession(log) {
             updateVideoToolboxSession(hardware, hardwareDecoder: getString("hwdec-current"))
@@ -102,11 +117,7 @@ package extension MPVSession {
             publishFatalError(.nativeVideoOutputUnavailable(reason))
         }
 
-        let orderedLevels: [MPVSessionConfiguration.LogLevel] = [.none, .fatal, .error, .warning, .info, .status, .verbose, .debug, .trace]
-        let threshold = orderedLevels.firstIndex(of: configuration.logLevel) ?? 0
-        let severity = orderedLevels.firstIndex(of: log.level) ?? 0
-
-        if threshold > 0, severity > 0, severity <= threshold {
+        if shouldPublish {
             publish(.log(log))
         }
     }
@@ -135,7 +146,9 @@ package extension MPVSession {
         guard diagnosticsTimer == nil else { return }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(500), leeway: .milliseconds(100))
+        // Opt-in and playback restart already refresh synchronously. Avoid
+        // immediately repeating the same native queries on timer creation.
+        timer.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500), leeway: .milliseconds(100))
 
         timer.setEventHandler { [weak self] in
             guard let self, self.isRequestedPlaylistEntryActive, self.isFileLoaded else { return }
@@ -247,14 +260,16 @@ package extension MPVSession {
     }
 
     func decoderDiagnostics(hardwareDecoder: String?) -> MPVPlaybackDiagnostics.Decoder {
-        MPVPlaybackDiagnosticsParser.decoder(
-            codec: getString("video-format"),
+        let codec = getString("video-format")
+
+        return MPVPlaybackDiagnosticsParser.decoder(
+            codec: codec,
             hardwareDecoder: hardwareDecoder,
             interop: getString("hwdec-interop"),
             pixelFormat: getString("video-dec-params/pixelformat"),
             requested: configuration.hardwareDecoding,
             sessionUsesHardware: videoToolboxSessionUsesHardware,
-            codecSupportsHardware: platform.codecSupportsHardware(getString("video-format"))
+            codecSupportsHardware: platform.codecSupportsHardware(codec)
         )
     }
 
@@ -309,5 +324,22 @@ package extension MPVSession {
     private func diagnosticFallbackReasons(_ result: MPVPlaybackDiagnostics) -> [String] {
         [result.decoder.fallbackReason, result.deinterlace.reason, liveConfigurationFailure, androidNativeFallbackReason]
             .compactMap(\.self)
+    }
+}
+
+private extension MPVSessionConfiguration.LogLevel {
+
+    var diagnosticPriority: Int {
+        switch self {
+        case .none: 0
+        case .fatal: 1
+        case .error: 2
+        case .warning: 3
+        case .info: 4
+        case .status: 5
+        case .verbose: 6
+        case .debug: 7
+        case .trace: 8
+        }
     }
 }

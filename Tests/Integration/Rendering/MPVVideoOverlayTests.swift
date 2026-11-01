@@ -101,6 +101,64 @@ struct MPVVideoOverlayTests {
 
     @Test
     @MainActor
+    func `updates during submission coalesce to the latest content and geometry`() async throws {
+        let (answers, continuation) = AsyncStream<Bool>.makeStream()
+        defer { continuation.finish() }
+        var bitmaps: [MPVVideoOverlayBitmap] = []
+        var availability: [Bool] = []
+        let renderer = MPVVideoOverlayRenderer(
+            content: AnyView(Color.red),
+            submit: { bitmap in
+                if let bitmap {
+                    bitmaps.append(bitmap)
+                }
+                for await answer in answers {
+                    return answer
+                }
+                return false
+            },
+            availabilityChanged: { availability.append($0) }
+        )
+        defer { renderer.invalidate() }
+        renderer.updateSize(CGSize(width: 8, height: 4), displayScale: 1)
+        try await eventually("first overlay waits for acceptance") { bitmaps.count == 1 }
+
+        for index in 0 ..< 100 {
+            renderer.updateContent(AnyView(Color(.sRGB, red: 0, green: 0, blue: Double(index % 2))))
+            renderer.updateSize(CGSize(width: CGFloat(10 + index), height: 6), displayScale: 1)
+        }
+        #expect(bitmaps.count == 1)
+        continuation.yield(false)
+        try await eventually("latest overlay replaces rejected submission") { bitmaps.count == 2 }
+        let latest = try #require(bitmaps.last)
+        #expect(latest.width == 218 && latest.height == 12)
+        #expect(Array(latest.bytes.prefix(4)) == [255, 0, 0, 255])
+        #expect(availability == [false])
+        continuation.yield(true)
+        try await eventually("replacement is accepted") { availability.last == true }
+    }
+
+    @Test
+    @MainActor
+    func `observed SwiftUI changes invalidate the settled render tree`() async throws {
+        let state = OverlayColorState()
+        var bitmap: MPVVideoOverlayBitmap?
+        let renderer = MPVVideoOverlayRenderer(
+            content: AnyView(ObservedOverlayColor(state: state)),
+            submit: { value in bitmap = value
+                return value != nil
+            },
+            availabilityChanged: { _ in }
+        )
+        defer { renderer.invalidate() }
+        renderer.updateSize(CGSize(width: 8, height: 4), displayScale: 1)
+        try await eventually("initial observed overlay") { bitmap?.bytes[2] == 255 }
+        state.isBlue = true
+        try await eventually("observed overlay changes without replacing content") { bitmap?.bytes.first == 255 }
+    }
+
+    @Test
+    @MainActor
     func `invalidating during submission ignores late compositor acceptance`() async throws {
         let (answers, continuation) = AsyncStream<Bool>.makeStream()
         defer { continuation.finish() }
@@ -232,6 +290,23 @@ struct MPVVideoOverlayTests {
 
         #expect(original == nil)
         #expect(surface.metalLayer === layer)
+    }
+}
+
+@MainActor
+private final class OverlayColorState: ObservableObject {
+
+    @Published
+    var isBlue = false
+}
+
+private struct ObservedOverlayColor: View {
+
+    @ObservedObject
+    var state: OverlayColorState
+
+    var body: some View {
+        Color(.sRGB, red: state.isBlue ? 0 : 1, green: 0, blue: state.isBlue ? 1 : 0)
     }
 }
 

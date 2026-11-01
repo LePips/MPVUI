@@ -10,22 +10,29 @@ struct MPVModelTests {
         let configuration = MPVPlayerConfiguration(
             initialBufferDuration: .seconds(-2),
             networkCacheDuration: .seconds(-10),
+            rebufferDuration: .seconds(-3),
             startTime: .seconds(-1)
         )
 
         #expect(configuration.startTime == .zero)
         #expect(configuration.networkCacheDuration == .zero)
         #expect(configuration.initialBufferDuration == .zero)
+        #expect(configuration.rebufferDuration == .zero)
+        #expect(configuration.sessionConfiguration.rebufferDuration == .zero)
 
         let positive = MPVPlayerConfiguration(
             initialBufferDuration: .seconds(3),
             networkCacheDuration: .seconds(30),
+            rebufferDuration: .milliseconds(250),
             startTime: nil
         )
 
         #expect(positive.startTime == nil)
         #expect(positive.networkCacheDuration == .seconds(30))
         #expect(positive.initialBufferDuration == .seconds(3))
+        #expect(positive.rebufferDuration == .milliseconds(250))
+        #expect(positive.sessionConfiguration.rebufferDuration == .milliseconds(250))
+        #expect(MPVPlayerConfiguration(initialBufferDuration: .zero).rebufferDuration == .seconds(1))
     }
 
     @Test

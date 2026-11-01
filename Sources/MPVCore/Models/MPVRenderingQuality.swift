@@ -9,7 +9,7 @@ public struct MPVRenderingQuality: Equatable, Sendable {
     /// A method for reducing output quantization artifacts.
     public enum Dithering: String, CaseIterable, Sendable {
 
-        /// Uses mpv's fruit dithering method.
+        /// Disables dithering for the battery preset and uses mpv's fruit method otherwise.
         case automatic
         /// Disables output dithering.
         case disabled

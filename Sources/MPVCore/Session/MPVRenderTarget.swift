@@ -2,6 +2,8 @@ package final class MPVRenderTarget: @unchecked Sendable {
 
     package let layerAddress: Int64
     package let layerOwner: AnyObject
+    package let osdLayerAddress: Int64?
+    package let osdLayerOwner: AnyObject?
     package let drawableWidth: Int
     package let drawableHeight: Int
     package let usesExtendedDynamicRange: Bool
@@ -23,10 +25,14 @@ package final class MPVRenderTarget: @unchecked Sendable {
         displayCapabilities: MPVDisplayCapabilities? = nil,
         configuredDynamicRange: MPVPresentationStatus.DynamicRange? = nil,
         policyFallbackReason: MPVPresentationStatus.FallbackReason? = nil,
-        colorConfiguration: MPVSurfaceColorConfiguration? = nil
+        colorConfiguration: MPVSurfaceColorConfiguration? = nil,
+        osdLayerAddress: Int64? = nil,
+        osdLayerOwner: AnyObject? = nil
     ) {
         self.layerAddress = layerAddress
         self.layerOwner = layerOwner
+        self.osdLayerAddress = osdLayerAddress
+        self.osdLayerOwner = osdLayerOwner
         self.drawableWidth = max(0, drawableWidth)
         self.drawableHeight = max(0, drawableHeight)
         self.usesExtendedDynamicRange = usesExtendedDynamicRange
@@ -47,6 +53,7 @@ package final class MPVRenderTarget: @unchecked Sendable {
 
     package func matches(_ other: MPVRenderTarget) -> Bool {
         layerAddress == other.layerAddress
+            && osdLayerAddress == other.osdLayerAddress
             && drawableWidth == other.drawableWidth
             && drawableHeight == other.drawableHeight
             && usesExtendedDynamicRange == other.usesExtendedDynamicRange
@@ -60,6 +67,7 @@ package final class MPVRenderTarget: @unchecked Sendable {
 
     package func matchesSurfaceConfiguration(_ other: MPVRenderTarget) -> Bool {
         layerAddress == other.layerAddress
+            && osdLayerAddress == other.osdLayerAddress
             && usesExtendedDynamicRange == other.usesExtendedDynamicRange
             && displaySupportsExtendedDynamicRange == other.displaySupportsExtendedDynamicRange
             && abs(outputHeadroom - other.outputHeadroom) < 0.01
@@ -81,7 +89,9 @@ package final class MPVRenderTarget: @unchecked Sendable {
             displayCapabilities: displayCapabilities,
             configuredDynamicRange: configuredDynamicRange,
             policyFallbackReason: policyFallbackReason,
-            colorConfiguration: colorConfiguration
+            colorConfiguration: colorConfiguration,
+            osdLayerAddress: osdLayerAddress,
+            osdLayerOwner: osdLayerOwner
         )
     }
 }

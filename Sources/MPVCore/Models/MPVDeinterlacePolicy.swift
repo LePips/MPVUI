@@ -1,5 +1,5 @@
 /// Deinterlacing settings applied when creating a player.
-/// Produces one frame per field to preserve motion.
+/// Produces one frame per field by default to preserve motion.
 public struct MPVDeinterlacePolicy: Equatable, Sendable {
 
     // MARK: - Types
@@ -37,6 +37,16 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
         case forced
     }
 
+    /// The number of progressive frames produced from interlaced input.
+    public enum OutputCadence: String, CaseIterable, Sendable {
+
+        /// Produces one frame per field, preserving full temporal resolution.
+        case field = "send_field"
+        /// Produces one frame per input frame, reducing filtering and presentation
+        /// work at the cost of half the motion samples for interlaced content.
+        case frame = "send_frame"
+    }
+
     // MARK: - Boolean options
 
     /// Whether to run `idet` before an explicitly selected software filter to correct bad field tags.
@@ -54,17 +64,22 @@ public struct MPVDeinterlacePolicy: Equatable, Sendable {
     /// When to enable deinterlacing.
     public let mode: Mode
 
+    /// Progressive output cadence. Frame cadence uses a software filter.
+    public let outputCadence: OutputCadence
+
     /// Creates a deinterlacing policy, disabled by default.
     public init(
         algorithm: Algorithm = .automatic,
         analyzesFieldOrder: Bool = false,
         fieldOrder: FieldOrder = .automatic,
-        mode: Mode = .disabled
+        mode: Mode = .disabled,
+        outputCadence: OutputCadence = .field
     ) {
         self.algorithm = algorithm
         self.analyzesFieldOrder = analyzesFieldOrder
         self.fieldOrder = fieldOrder
         self.mode = mode
+        self.outputCadence = outputCadence
     }
 }
 

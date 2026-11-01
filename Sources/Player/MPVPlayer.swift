@@ -85,6 +85,7 @@ public final class MPVPlayer {
     private var storedPictureInPicture: MPVPictureInPictureController?
     @ObservationIgnored
     private var storedSampleBufferDisplayLayer: AVSampleBufferDisplayLayer?
+    private var storedSampleBufferOSDLayer: AVSampleBufferDisplayLayer?
     @ObservationIgnored
     private var pictureInPictureSurfaceToken: UUID?
     @ObservationIgnored
@@ -670,6 +671,19 @@ extension MPVPlayer {
         return displayLayer
     }
 
+    var sampleBufferOSDLayer: AVSampleBufferDisplayLayer {
+        if let storedSampleBufferOSDLayer {
+            return storedSampleBufferOSDLayer
+        }
+
+        let layer = AVSampleBufferDisplayLayer()
+        layer.videoGravity = .resizeAspect
+        layer.isOpaque = false
+        layer.backgroundColor = nil
+        storedSampleBufferOSDLayer = layer
+        return layer
+    }
+
     var hasActiveRenderSurface: Bool {
         activeRenderSurfaceToken != nil
     }
@@ -740,17 +754,19 @@ extension MPVPlayer {
         displayCapabilities: MPVDisplayCapabilities,
         configuredDynamicRange: MPVPresentationStatus.DynamicRange,
         policyFallbackReason: MPVPresentationStatus.FallbackReason? = nil,
-        colorConfiguration: MPVRenderColorConfiguration? = nil
+        colorConfiguration: MPVRenderColorConfiguration? = nil,
+        drawableSize: CGSize = CGSize(width: 2, height: 2)
     ) {
         guard videoOutput == .sampleBuffer else { return }
 
         let displayLayer = sampleBufferDisplayLayer
+        let osdLayer = sampleBufferOSDLayer
 
         let target = MPVRenderTarget(
             layerAddress: Int64(Int(bitPattern: Unmanaged.passUnretained(displayLayer).toOpaque())),
             layerOwner: displayLayer,
-            drawableWidth: 2,
-            drawableHeight: 2,
+            drawableWidth: max(2, Int(min(16384, drawableSize.width))),
+            drawableHeight: max(2, Int(min(16384, drawableSize.height))),
             usesExtendedDynamicRange: configuredDynamicRange == .hdr
                 || configuredDynamicRange == .constrainedHDR,
             displaySupportsExtendedDynamicRange: displayCapabilities.hdrSupport == .supported,
@@ -758,7 +774,9 @@ extension MPVPlayer {
             displayCapabilities: displayCapabilities,
             configuredDynamicRange: configuredDynamicRange,
             policyFallbackReason: policyFallbackReason,
-            colorConfiguration: colorConfiguration?.sessionConfiguration
+            colorConfiguration: colorConfiguration?.sessionConfiguration,
+            osdLayerAddress: Int64(Int(bitPattern: Unmanaged.passUnretained(osdLayer).toOpaque())),
+            osdLayerOwner: osdLayer
         )
 
         if let previous = sampleBufferRenderTarget, previous.matches(target) {
@@ -770,6 +788,10 @@ extension MPVPlayer {
         if hasAttachedSampleBufferOutput {
             engine?.attach(to: target)
         }
+    }
+
+    func setNativePictureInPictureComposition(_ enabled: Bool) async -> Bool {
+        await engine?.setNativePictureInPictureComposition(enabled) ?? false
     }
 
     func seekForPictureInPicture(to time: Duration) async -> Bool {

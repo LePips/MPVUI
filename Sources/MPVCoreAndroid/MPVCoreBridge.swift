@@ -85,6 +85,9 @@ public func coreSessionCreate(_ configuration: UnsafePointer<MPVCoreConfiguratio
             in: fields
         ) ?? .preserveDolbyVision,
         playbackRate: fields["playbackRate"]?.double ?? value.playback_rate,
+        // The Android API requests one buffering duration for both phases.
+        rebufferDuration: fields["initialBufferSeconds"]?.double
+            .flatMap(Duration.init(mpvSeconds:)) ?? initialBuffer,
         renderingQuality: .init(
             antiringing: render["antiringing"]?.double,
             chromaAntiringing: render["chromaAntiringing"]?.double,

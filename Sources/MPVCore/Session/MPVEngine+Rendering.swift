@@ -263,6 +263,13 @@ package extension MPVSession {
         // replay without sending properties to an unavailable native client.
         guard handle != nil else { return }
 
+        if videoOutput == .sampleBuffer,
+           previous.drawableWidth != target.drawableWidth || previous.drawableHeight != target.drawableHeight
+        {
+            _ = setPropertyImmediately("avfoundation-osd-display-width", to: String(target.drawableWidth))
+            _ = setPropertyImmediately("avfoundation-osd-display-height", to: String(target.drawableHeight))
+        }
+
         if videoOutput == .metal {
             if changedColor {
                 liveConfigurationFailure = nil
@@ -433,6 +440,16 @@ package extension MPVSession {
         do {
             // Configure the surface before enabling video.
             try check(setPropertyImmediately("wid", to: String(target.layerAddress)), context: "Attach render surface")
+
+            if videoOutput == .sampleBuffer {
+                for (name, value) in [
+                    ("avfoundation-osd-layer", target.osdLayerAddress ?? 0),
+                    ("avfoundation-osd-display-width", Int64(target.drawableWidth)),
+                    ("avfoundation-osd-display-height", Int64(target.drawableHeight)),
+                ] {
+                    try check(setPropertyImmediately(name, to: String(value)), context: "Attach native subtitle surface")
+                }
+            }
 
             if videoOutput == .metal {
                 try check(

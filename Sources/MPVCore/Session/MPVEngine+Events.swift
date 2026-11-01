@@ -264,6 +264,7 @@ package extension MPVSession {
             isSeeking = false
             isIdle = false
             hasPlaybackStarted = true
+            completeInitialBufferingIfReady()
 
             if checkAndroidVideoPresentation() {
                 return
@@ -421,6 +422,7 @@ package extension MPVSession {
 
         case "paused-for-cache":
             let pausedForCache = copiedNode?.boolValue ?? getFlag(name) ?? isPausedForCache
+            completeInitialBufferingIfReady()
             guard pausedForCache != isPausedForCache else { return }
 
             flushPropertySnapshots()
@@ -455,7 +457,7 @@ package extension MPVSession {
             refreshAudioState()
 
         case "estimated-vf-fps", "container-fps":
-            let previous = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
+            let previous = lastEstimatedFramesPerSecond ?? lastContainerFramesPerSecond
             let fps = Self.normalizedFrameRate(copiedNode?.doubleValue)
 
             if name == "container-fps" {
@@ -464,7 +466,7 @@ package extension MPVSession {
                 lastEstimatedFramesPerSecond = fps
             }
 
-            let current = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
+            let current = lastEstimatedFramesPerSecond ?? lastContainerFramesPerSecond
 
             if current != previous {
                 publish(.frameRate(current))

@@ -66,6 +66,7 @@ public final class MPVSession: @unchecked Sendable {
     package var externalSecurityScopedURLs: Set<URL> = []
     package var desiredProperties: [String: String]
     package var commandMutatedOptions: Set<String> = []
+    package var fileLocalPlaybackPolicyOverrides: Set<String> = []
     package var isLoading = false
     package var isFileLoaded = false
     package var isPaused = false
@@ -74,6 +75,7 @@ public final class MPVSession: @unchecked Sendable {
     package var isIdle = true
     package var didReachEnd = false
     package var hasPlaybackStarted = false
+    package var isInitialBufferingPending = false
     package var playbackRequestIsActive = false
     package var requestedPlaylistEntryID: Int64?
     package var activePlaylistEntryID: Int64?
@@ -99,6 +101,7 @@ public final class MPVSession: @unchecked Sendable {
     // MARK: - Picture in picture
 
     package var pendingPiPSeek: PiPSeek?
+    package var nativePiPCompositionRequestID: UInt64 = 0
 
     // MARK: - Diagnostics and color updates
 

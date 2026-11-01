@@ -56,6 +56,27 @@ def generate(output):
             check=True,
         )
 
+    # The same long-GOP payload in indexed and transport containers isolates
+    # demuxer seek behavior from codec and timestamp differences.
+    for extension in ("mp4", "ts"):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-nostdin",
+                "-y",
+                "-i",
+                str(output / "video-h264-long-gop.mkv"),
+                "-c",
+                "copy",
+                "-map_metadata",
+                "-1",
+                str(output / f"video-h264-long-gop.{extension}"),
+            ],
+            check=True,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

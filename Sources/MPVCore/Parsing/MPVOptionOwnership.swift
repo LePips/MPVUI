@@ -5,7 +5,7 @@ import Foundation
 package enum MPVOptionOwnership {
 
     /// Renderer and surface wiring must remain consistent with the configuration.
-    package static let rendererProperties: Set<String> = ["vo", "gpu-api", "gpu-context", "wid", "force-window"]
+    package static let rendererProperties: Set<String> = ["vo", "gpu-api", "gpu-context", "wid", "force-window", "avfoundation-osd-layer"]
 
     /// Properties already managed
     package static let reservedProperties: Set<String> = [
@@ -14,6 +14,10 @@ package enum MPVOptionOwnership {
         "force-window",
         "avfoundation-presentation",
         "avfoundation-pip-composite-osd",
+        "avfoundation-pip-active",
+        "avfoundation-osd-layer",
+        "avfoundation-osd-display-width",
+        "avfoundation-osd-display-height",
         "avfoundation-subtitle-luminance",
         "gpu-api",
         "gpu-context",

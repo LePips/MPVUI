@@ -33,6 +33,12 @@ package extension MPVSession {
         }
     }
 
+    static func preciseSeekDemuxerOffset(for format: String?) -> Double {
+        // HLS can contain transport-stream segments, even without a .ts URL.
+        let formats = Set((format ?? "").lowercased().split(separator: ","))
+        return formats.isDisjoint(with: ["mpegts", "mpegtsraw", "hls"]) ? 0 : 0.5
+    }
+
     func load(
         _ url: URL,
         playAutomatically: Bool?,
@@ -371,6 +377,7 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
         guard needsSourceLoad, handle != nil, let sourceURL else { return }
 
+        resetFileLocalPlaybackPolicyOverrides()
         var arguments = ["loadfile", platform.mediaPath(sourceURL), "replace"]
 
         if let start = pendingStartTime, start > .zero {
@@ -435,6 +442,8 @@ package extension MPVSession {
         let selection = requestedVideoSelection
         guard renderTarget != nil || !Self.requiresVideoSurface(tracks: getNode("track-list"), selection: selection) else { return }
 
+        configurePreciseSeekOffset()
+
         // A seek received during discovery can become the initial position,
         // without starting and then resetting the audio/video clocks.
         if let position = pendingSeekAfterLoad {
@@ -461,7 +470,24 @@ package extension MPVSession {
             return
         }
 
+        applyBufferingPolicy(initial: true)
         releasePendingPreload()
+    }
+
+    /// Transport streams need earlier packets to find the keyframe before an
+    /// exact target. Apply the workaround after demuxer discovery, before any
+    /// initial seek, without adding decoding work to indexed containers.
+    func configurePreciseSeekOffset() {
+        guard !usesAndroidOutput else { return }
+
+        let name = "hr-seek-demuxer-offset"
+        let value = playbackPolicyOverride(for: name)
+            ?? Self.format(Self.preciseSeekDemuxerOffset(for: getString("file-format")))
+        let status = setPropertyImmediately("file-local-options/\(name)", to: value)
+
+        if status < 0 {
+            publishCommandError(status, context: "Configure precise seek offset")
+        }
     }
 
     func releasePendingPreload() {

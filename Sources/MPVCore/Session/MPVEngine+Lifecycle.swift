@@ -152,11 +152,6 @@ package extension MPVSession {
             try setInitialOption("volume", value: Self.format(configuration.volume))
             try setInitialOption("speed", value: Self.format(configuration.playbackRate))
 
-            // Transport-stream seeks can land between keyframes. Decode from
-            // earlier packets so precise seeks can reach the requested frame
-            // instead of waiting for the next keyframe beyond the target.
-            try setInitialOption("hr-seek-demuxer-offset", value: "0.5")
-
             // The Core Animation layer and mpv output descriptions must agree.
             // Extended linear P3 retains EDR values; the sRGB target deliberately
             // makes mpv tone-map HDR on displays where EDR is unavailable.

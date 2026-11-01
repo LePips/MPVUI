@@ -59,6 +59,24 @@ struct MPVEngineActivityTests {
     }
 
     @Test
+    func `decoder snapshots query codec once and reuse it for capability evidence`() throws {
+        var platform = MPVPlatformServices()
+        platform.codecSupportsHardware = { $0 == nil }
+        let engine = MPVSession(settings: .init(), platform: platform) { _ in }
+        let handle = try #require(mpv_create())
+        defer { mpv_destroy(handle) }
+
+        engine.queue.sync {
+            engine.handle = handle
+            defer { engine.handle = nil }
+            let before = engine.lifecycleDiagnostics.engineActivity.propertyReads
+            let result = engine.decoderDiagnostics(hardwareDecoder: "videotoolbox")
+            #expect(engine.lifecycleDiagnostics.engineActivity.propertyReads - before == 3)
+            #expect(result.codec == nil && result.videoToolboxSupportsCodec == true)
+        }
+    }
+
+    @Test
     func `total cache bytes distinguish unavailable data and normalize native values`() {
         #expect(MPVBufferStatus.empty.totalBytes == nil)
         #expect(MPVBufferStatus(bytesAhead: 10, totalBytes: 100).totalBytes == 100)

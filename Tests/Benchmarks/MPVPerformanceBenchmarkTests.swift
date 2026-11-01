@@ -26,6 +26,17 @@ struct MPVPerformanceBenchmarkTests {
         if settings.suites.contains("micro") {
             workloads += try chapterWorkloads(repetitions: settings.repetitions)
             try workloads.append(resizeWorkload(repetitions: settings.repetitions))
+            workloads += try await MPVOptionalWorkPerformanceWorkloads.measure(repetitions: settings.repetitions)
+        }
+
+        if settings.suites.contains("cache") {
+            workloads += try await MPVCachePerformanceWorkloads.measure(repetitions: settings.repetitions)
+        }
+        if settings.suites.contains("seek") {
+            workloads += try await MPVSeekPerformanceWorkloads.measure(repetitions: settings.repetitions)
+        }
+        if settings.suites.contains("audio") {
+            workloads += try await MPVAudioPerformanceWorkloads.measure(repetitions: settings.repetitions)
         }
 
         if settings.suites.contains("playback") {
@@ -187,6 +198,9 @@ struct MPVPerformanceBenchmarkTests {
     }
 
     private func playbackWorkloads(_ settings: BenchmarkSettings) async throws -> [[String: Any]] {
+        let application = NSApplication.shared
+        try #require(application.setActivationPolicy(.regular))
+
         let fixtureHash = try sha256(settings.media)
         let temporaryDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MPVUI-benchmark-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
@@ -196,7 +210,7 @@ struct MPVPerformanceBenchmarkTests {
         try benchmarkSubtitle.write(to: subtitle, atomically: true, encoding: .utf8)
 
         let subtitleHash = try sha256(subtitle)
-        let backends: [MPVPlayerConfiguration.VideoOutput] = [.metal, .sampleBuffer]
+        let backends = settings.backends
         var collected: [MPVPlayerConfiguration.VideoOutput: BenchmarkMeasurement] = [:]
 
         // Alternate which backend runs first to reduce systematic thermal/order bias.
@@ -211,23 +225,34 @@ struct MPVPerformanceBenchmarkTests {
                         "sampleSeconds": settings.sampleSeconds,
                         "warmupSeconds": settings.warmupSeconds,
                         "samplePollSeconds": 0.1,
-                        "decoder": "software",
+                        "decoder": settings.decoder,
+                        "hwdecThreads": settings.hwdecThreads.map { $0 as Any } ?? "default",
+                        "deinterlace": settings.deinterlace,
+                        "seekDemuxerOffset": settings.seekDemuxerOffset.map { $0 as Any } ?? "default",
+                        "nativeOSD": backend == .sampleBuffer ? settings.nativeOSD : "not-applicable",
+                        "nativeQueueLeadMilliseconds": backend == .sampleBuffer
+                            ? settings.nativeQueueLeadMilliseconds.map { $0 as Any } ?? "default" : "not-applicable",
                         "backend": backend.rawValue,
                         "hdrPolicy": "disabled",
-                        "sdrOutput": "compatibility8Bit",
+                        "sdrOutput": settings.sdrOutput.rawValue,
                         "audioOutput": "null",
                         "loopFile": "inf",
-                        "renderingPreset": "balanced",
+                        "renderingPreset": settings.renderingPreset.rawValue,
                         "logLevel": "none",
                         "windowWidthPoints": 1280,
                         "windowHeightPoints": 720,
+                        "windowPresentationPolicy": "nonactivating-centered-floating-panel",
+                        "windowCollectionBehavior": "all-spaces-all-applications-fullscreen-auxiliary",
+                        "windowVisibilitySource": "own-window-windowserver-onscreen",
+                        "windowPresentationTimeoutSeconds": 10,
                         "videoZoom": backend == .sampleBuffer ? 0.25 : 0,
                         "subtitleSHA256": backend == .sampleBuffer ? subtitleHash : "none",
                     ]
                     parameters.merge(sample.parameters) { _, new in new }
 
                     collected[backend] = BenchmarkMeasurement(
-                        id: backend == .metal ? "playback_metal_balanced_software" : "playback_sample_buffer_software",
+                        id: backend == .metal ? "playback_metal_\(settings.renderingPreset.rawValue)_\(settings.decoder)" :
+                            "playback_sample_buffer_\(settings.decoder)",
                         parameters: parameters
                     )
                 } else {
@@ -258,9 +283,23 @@ struct MPVPerformanceBenchmarkTests {
     ) async throws -> PlaybackSample {
         var options = ["ao": "null", "loop-file": "inf", "osd-level": "0"]
 
+        if let threads = settings.hwdecThreads {
+            options["hwdec-threads"] = String(threads)
+        }
+        if settings.deinterlace != "disabled" {
+            options["vf"] = "lavfi=[bwdif=mode=send_\(settings.deinterlace):parity=auto:deint=interlaced]"
+        }
+        if let seekOffset = settings.seekDemuxerOffset {
+            options["hr-seek-demuxer-offset"] = String(seekOffset)
+        }
+
         if backend == .sampleBuffer {
             options["video-zoom"] = "0.25"
             options["sub-visibility"] = "yes"
+            options["avfoundation-composite-osd"] = settings.nativeOSD == "composite" ? "yes" : "no"
+            if let queueLead = settings.nativeQueueLeadMilliseconds {
+                options["avfoundation-queue-lead-ms"] = String(queueLead)
+            }
         } else {
             options["sid"] = "no"
         }
@@ -268,20 +307,20 @@ struct MPVPerformanceBenchmarkTests {
         let player = MPVPlayer(configuration: .init(
             additionalOptions: options,
             automaticallyPlays: true,
-            hardwareDecoding: .disabled,
+            hardwareDecoding: settings.decoder == "software" ? .disabled : .videoToolbox,
             hdrPolicy: .disabled,
             logLevel: .none,
             isLoopingEnabled: true,
-            renderingQuality: .init(preset: .balanced),
-            sdrOutput: .compatibility8Bit,
+            renderingQuality: .init(preset: settings.renderingPreset),
+            sdrOutput: settings.sdrOutput,
             videoOutput: backend
         ))
 
         let surface = MPVPlatformVideoPlayer(player: player)
 
-        let window = NSWindow(
+        let window = NSPanel(
             contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
-            styleMask: [.titled],
+            styleMask: [.titled, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -294,9 +333,28 @@ struct MPVPerformanceBenchmarkTests {
         }
 
         window.contentView = surface
-        window.orderFront(nil)
+        window.isFloatingPanel = true
+        window.hidesOnDeactivate = false
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
+        window.center()
+        window.orderFrontRegardless()
         surface.layoutSubtreeIfNeeded()
         surface.activateRenderingSurface()
+
+        // WindowServer registration can lag ordering in the SwiftPM host.
+        // Complete presentation setup before load starts its latency clock.
+        let windowPresentationWait = ProcessTiming()
+        try await eventually("benchmark window to appear onscreen", timeout: .seconds(10)) {
+            guard window.isVisible, !window.isMiniaturized, surface.window === window, window.windowNumber > 0 else {
+                return false
+            }
+
+            let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(window.windowNumber)) as? [[String: Any]]
+            return info?.first?[kCGWindowIsOnscreen as String] as? Bool == true
+        }
+        let windowPresentationWaitSeconds = windowPresentationWait.wallSeconds
+
         player.setDiagnosticsEnabled(true)
         player.load(settings.media)
 
@@ -304,9 +362,10 @@ struct MPVPerformanceBenchmarkTests {
             player.loadExternalTrack(subtitle, type: .subtitle, select: true)
         }
 
-        try await waitForPlayback(player, backend: backend)
+        try await waitForPlayback(player, backend: backend, settings: settings)
         try await Task.sleep(for: .seconds(settings.warmupSeconds))
-        try validatePlayback(player, backend: backend)
+        try validatePlayback(player, backend: backend, settings: settings)
+        let presentationStart = try windowPresentationObservation(window, surface: surface)
 
         let screen = try #require(window.screen, "Playback benchmarking requires an attached display.")
         let dimensions = try #require(player.mediaInformation.dimensions)
@@ -335,7 +394,8 @@ struct MPVPerformanceBenchmarkTests {
 
         repeat {
             try await Task.sleep(for: .milliseconds(100))
-            try validatePlayback(player, backend: backend)
+            try validatePlayback(player, backend: backend, settings: settings)
+            let presentation = try windowPresentationObservation(window, surface: surface, includeFrontmostApplication: false)
 
             let currentPosition = player.position.seconds
 
@@ -362,6 +422,7 @@ struct MPVPerformanceBenchmarkTests {
                 "elapsedSeconds": start.wallSeconds,
                 "positionSeconds": currentPosition,
                 "state": String(describing: player.state),
+                "windowPresentation": presentation,
                 "counters": counters
             ]
 
@@ -375,11 +436,13 @@ struct MPVPerformanceBenchmarkTests {
 
         let elapsed = start.elapsed()
         let after = player.playbackDiagnostics
+        let presentationEnd = try windowPresentationObservation(window, surface: surface)
 
         try #require(progress > 0, "Playback did not advance during the measurement interval.")
 
         var sample = PlaybackSample(parameters: [
             "sourceWidth": dimensions.width,
+            "outputFramesPerSecond": player.mediaInformation.framesPerSecond.map { $0 as Any } ?? "unknown",
             "sourceHeight": dimensions.height,
             "sourceDurationSeconds": duration,
             "surfaceWidthPoints": surface.bounds.width,
@@ -396,6 +459,9 @@ struct MPVPerformanceBenchmarkTests {
             "countersStart": diagnosticCounters(before),
             "countersEnd": diagnosticCounters(after),
             "intervalSamples": observations,
+            "windowPresentationStart": presentationStart,
+            "windowPresentationEnd": presentationEnd,
+            "windowPresentationWaitSeconds": windowPresentationWaitSeconds,
             "startLatencySeconds": after.startLatencySeconds.map { $0 as Any } ?? NSNull(),
         ])
 
@@ -489,6 +555,15 @@ struct MPVPerformanceBenchmarkTests {
             }
         }
 
+        if backend == .sampleBuffer, settings.nativeOSD == "composite", settings.decoder == "videotoolbox",
+           counterDeltasEligible, wraps == 0, resetCount == 0
+        {
+            // Hardware buffers must be copied before composition. Software
+            // uploads can be composited in place and do not share this proof.
+            let copies = try #require(sample.metrics["nativePixelBufferCopiesPerSample"]?.value)
+            try #require(copies > 0, "Expected native hardware subtitle composition to copy video buffers.")
+        }
+
         if backend == .metal {
             sample.parameters["drawableWidth"] = surface.metalLayer.drawableSize.width
             sample.parameters["drawableHeight"] = surface.metalLayer.drawableSize.height
@@ -550,6 +625,17 @@ struct MPVPerformanceBenchmarkTests {
         sample.add("pausedExactSeekCompletionSeconds", seekSeconds, unit: "seconds", direction: "lower")
         sample.observation["postIntervalSeekTargetSeconds"] = seekTarget
         sample.observation["postIntervalSeekPositionSeconds"] = player.position.seconds
+        // Native SEEK-to-RESTART event interval excludes caller queueing and
+        // completion handling, helping localize latency without tracing frames.
+        sample.observation["seekEventIntervalSeconds"] = player.playbackDiagnostics.seekLatencySeconds.map { $0 as Any } ?? NSNull()
+
+        // PLAYBACK_RESTART refreshes diagnostics before completing the seek.
+        // Native counters reset on seek, so retain this absolute snapshot
+        // separately from the earlier steady-playback counter deltas.
+        var seekCounters = diagnosticCounters(player.playbackDiagnostics)
+        seekCounters["nativeLastSampleBuildNanoseconds"] = player.playbackDiagnostics.nativeOutputStatistics?.lastSampleBuildNanoseconds
+        sample.observation["postIntervalSeekCounters"] = seekCounters
+        sample.observation["postIntervalSeekWindowPresentation"] = try windowPresentationObservation(window, surface: surface)
 
         if backend == .sampleBuffer {
             sample.parameters["nativeReadbackPolicy"] = settings.nativeReadbackPolicy
@@ -603,9 +689,38 @@ struct MPVPerformanceBenchmarkTests {
                 // never a control or proof of the route used throughout timing.
                 sample.observation["pausedReadbackPixelFormat"] = CVPixelBufferGetPixelFormatType(buffer)
             }
+
+            // Count actual transparent-layer subtitle pixels after timing so a
+            // missing subtitle cannot masquerade as a faster native route.
+            if settings.nativeReadbackPolicy == "required", settings.nativeOSD == "inline" {
+                try await eventually("benchmark inline subtitle pixels") {
+                    visibleSubtitlePixels(player.sampleBufferOSDLayer) > 0
+                }
+                sample.observation["inlineSubtitleVisiblePixels"] = visibleSubtitlePixels(player.sampleBufferOSDLayer)
+            }
         }
 
         return sample
+    }
+
+    private func visibleSubtitlePixels(_ layer: AVSampleBufferDisplayLayer) -> Int {
+        guard let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
+              CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return 0 }
+
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+
+        let width = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        var visible = 0
+        for y in 0 ..< height {
+            for x in 0 ..< width where base[y * stride + x * 4 + 3] > 0 {
+                visible += 1
+            }
+        }
+        return visible
     }
 
     private func pausedExactSeek(_ player: MPVPlayer, target: Double) async throws -> Double {
@@ -651,6 +766,59 @@ struct MPVPerformanceBenchmarkTests {
         return seconds
     }
 
+    private func windowPresentationObservation(
+        _ window: NSWindow,
+        surface: MPVPlatformVideoPlayer,
+        includeFrontmostApplication: Bool = true
+    ) throws -> [String: Any] {
+        let application = NSApplication.shared
+        let visible = window.isVisible
+        let unoccluded = window.occlusionState.contains(.visible)
+        let attached = surface.window === window
+        let minimized = window.isMiniaturized
+        let onActiveSpace = window.isOnActiveSpace
+        let windowInfo = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(window.windowNumber)) as? [[String: Any]]
+        let windowServerOnscreen = windowInfo?.first?[kCGWindowIsOnscreen as String] as? Bool
+        let ownWindowKeys = windowInfo?.first?.keys.sorted() ?? []
+        let active = application.isActive
+        let activationPolicy = application.activationPolicy().rawValue
+        let details = "visible=\(visible), occlusionVisible=\(unoccluded), occlusionState=\(window.occlusionState.rawValue), "
+            + "surfaceAttached=\(attached), applicationActive=\(active), activationPolicy=\(activationPolicy), "
+            + "applicationHidden=\(application.isHidden), windowMiniaturized=\(minimized), "
+            + "windowOnActiveSpace=\(onActiveSpace), windowServerOnscreen=\(windowServerOnscreen.map(String.init) ?? "unknown"), "
+            + "windowNumber=\(window.windowNumber), windowInfoCount=\(windowInfo?.count ?? -1), "
+            + "ownWindowKeys=\(ownWindowKeys), collectionBehavior=\(window.collectionBehavior.rawValue), "
+            + "windowFrame=\(NSStringFromRect(window.frame)), "
+            + "screenFrame=\(window.screen.map { NSStringFromRect($0.frame) } ?? "nil")"
+
+        // SwiftPM can retain stale AppKit occlusion and active-Space state.
+        // Query our window in WindowServer; the runner checks console unlock,
+        // and native playback still requires the paused video/subtitle pixels.
+        try #require(
+            visible && attached && !minimized && windowServerOnscreen == true,
+            "Playback benchmarking requires a visible, attached window confirmed onscreen by WindowServer: \(details)"
+        )
+
+        var observation: [String: Any] = [
+            "visible": visible,
+            "occlusionVisible": unoccluded,
+            "surfaceAttached": attached,
+            "applicationActive": active,
+            "activationPolicy": activationPolicy,
+            "windowMiniaturized": minimized,
+            "windowOnActiveSpace": onActiveSpace,
+            "windowServerOnscreen": windowServerOnscreen.map { $0 as Any } ?? NSNull(),
+            "windowFrame": NSStringFromRect(window.frame),
+        ]
+
+        if includeFrontmostApplication {
+            observation["frontmostApplicationIsBenchmark"] = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == ProcessInfo.processInfo.processIdentifier
+        }
+
+        return observation
+    }
+
     private func pausedNativeBuffer(_ player: MPVPlayer) async throws -> CVPixelBuffer {
         let layer = player.sampleBufferDisplayLayer
 
@@ -681,14 +849,18 @@ struct MPVPerformanceBenchmarkTests {
         throw BenchmarkReadbackError.noPausedNativeFrame(details)
     }
 
-    private func waitForPlayback(_ player: MPVPlayer, backend: MPVPlayerConfiguration.VideoOutput) async throws {
+    private func waitForPlayback(
+        _ player: MPVPlayer,
+        backend: MPVPlayerConfiguration.VideoOutput,
+        settings: BenchmarkSettings
+    ) async throws {
         for _ in 0 ..< 200 {
             if player.lastError != nil {
                 break
             }
 
             if player.state == .playing, player.position.seconds > 0,
-               player.playbackDiagnostics.decoder.session == .software,
+               settings.matchesDecoder(player.playbackDiagnostics.decoder),
                backend == .metal ||
                (player.sampleBufferDisplayLayer.isReadyForDisplay && player.subtitleTracks.contains(where: \.isSelected))
             {
@@ -701,19 +873,33 @@ struct MPVPerformanceBenchmarkTests {
         try #require(Bool(false), "Benchmark playback failed to start: \(player.state), \(String(describing: player.lastError))")
     }
 
-    private func validatePlayback(_ player: MPVPlayer, backend: MPVPlayerConfiguration.VideoOutput) throws {
+    private func validatePlayback(
+        _ player: MPVPlayer,
+        backend: MPVPlayerConfiguration.VideoOutput,
+        settings: BenchmarkSettings
+    ) throws {
         try #require(player.lastError == nil, "Playback error: \(String(describing: player.lastError))")
 
         // A loop emits seeking/restart events while remaining in active playback.
         try #require(player.state == .playing || player.state == .seeking, "Playback stopped during benchmark: \(player.state)")
         try #require(player.videoOutput == backend && player.lastError == nil, "Benchmark output fell back.")
-        try #require(player.playbackDiagnostics.decoder.session == .software)
+        try #require(
+            settings.matchesDecoder(player.playbackDiagnostics.decoder),
+            "Unexpected decoder or missing hardware acceleration evidence."
+        )
         try #require(player.playbackDiagnostics.fallbackReasons.isEmpty)
 
         if backend == .metal {
-            try #require(player.playbackDiagnostics.renderingQuality.resolvedPreset == .balanced)
+            try #require(player.playbackDiagnostics.renderingQuality.resolvedPreset == settings.renderingPreset)
             try #require(!player.playbackDiagnostics.renderingQuality.effectiveOptions.isEmpty)
-            try #require(player.renderColorStatus.precision == .unorm8)
+            switch settings.sdrOutput {
+            case .compatibility8Bit:
+                try #require(player.renderColorStatus.precision == .unorm8)
+            case .highPrecision:
+                try #require(player.renderColorStatus.precision == .float16)
+            case .automatic:
+                try #require([MPVRenderColorStatus.Precision.unorm8, .float16].contains(player.renderColorStatus.precision))
+            }
         } else {
             try #require(player.sampleBufferDisplayLayer.sampleBufferRenderer.status != .failed)
             try #require(player.subtitleTracks.contains { $0.isSelected && ["ass", "ssa"].contains($0.codec ?? "") })
@@ -736,6 +922,15 @@ private struct BenchmarkSettings {
     let output: URL
     let media: URL
     let nativeReadbackPolicy: String
+    let backends: [MPVPlayerConfiguration.VideoOutput]
+    let renderingPreset: MPVRenderingQuality.Preset
+    let sdrOutput: MPVSDROutputPolicy
+    let decoder: String
+    let hwdecThreads: Int?
+    let deinterlace: String
+    let seekDemuxerOffset: Double?
+    let nativeOSD: String
+    let nativeQueueLeadMilliseconds: Int?
 
     init() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -744,10 +939,35 @@ private struct BenchmarkSettings {
         warmupSeconds = Double(environment["MPVUI_PERF_WARMUP_SECONDS"] ?? "1") ?? .nan
         suites = Set((environment["MPVUI_PERF_SUITES"] ?? "micro,playback").split(separator: ",").map(String.init))
         nativeReadbackPolicy = environment["MPVUI_PERF_NATIVE_READBACK"] ?? "required"
+        decoder = environment["MPVUI_PERF_DECODER"] ?? "software"
+        hwdecThreads = environment["MPVUI_PERF_HWDEC_THREADS"].flatMap(Int.init)
+        deinterlace = environment["MPVUI_PERF_DEINTERLACE"] ?? "disabled"
+        seekDemuxerOffset = environment["MPVUI_PERF_SEEK_DEMUXER_OFFSET"].flatMap(Double.init)
+        nativeOSD = environment["MPVUI_PERF_NATIVE_OSD"] ?? "inline"
+        let queueLead = environment["MPVUI_PERF_NATIVE_QUEUE_LEAD_MS"] ?? ""
+        nativeQueueLeadMilliseconds = Int(queueLead)
+        try #require(queueLead.isEmpty || nativeQueueLeadMilliseconds != nil)
+        try #require(nativeQueueLeadMilliseconds == nil || (0 ... 1000).contains(nativeQueueLeadMilliseconds!))
+        try #require(["software", "videotoolbox"].contains(decoder))
+        try #require(["disabled", "field", "frame"].contains(deinterlace))
+        try #require(["inline", "composite"].contains(nativeOSD))
+        try #require(seekDemuxerOffset == nil || (seekDemuxerOffset!.isFinite && (0 ... 2).contains(seekDemuxerOffset!)))
+        try #require(hwdecThreads == nil || (1 ... 16).contains(hwdecThreads!))
+        let backend = environment["MPVUI_PERF_BACKEND"] ?? "all"
+        switch backend {
+        case "all": backends = [.metal, .sampleBuffer]
+        case "metal": backends = [.metal]
+        case "sampleBuffer": backends = [.sampleBuffer]
+        default: throw BenchmarkConfigurationError.invalidBackend(backend)
+        }
+        try #require(nativeQueueLeadMilliseconds == nil || (suites.contains("playback") && backends.contains(.sampleBuffer)))
+        renderingPreset = try #require(MPVRenderingQuality.Preset(rawValue: environment["MPVUI_PERF_RENDERING_PRESET"] ?? "balanced"))
+        try #require(renderingPreset != .automatic, "Choose an explicit rendering preset for repeatable comparisons.")
+        sdrOutput = try #require(MPVSDROutputPolicy(rawValue: environment["MPVUI_PERF_SDR_OUTPUT"] ?? "compatibility8Bit"))
         try #require((1 ... 20).contains(repetitions))
         try #require(sampleSeconds.isFinite && (0.5 ... 60).contains(sampleSeconds))
         try #require(warmupSeconds.isFinite && (0.5 ... 30).contains(warmupSeconds))
-        try #require(!suites.isEmpty && suites.isSubset(of: ["micro", "playback"]))
+        try #require(!suites.isEmpty && suites.isSubset(of: ["micro", "playback", "cache", "seek", "audio"]))
 
         try #require(
             ["required", "optional"].contains(nativeReadbackPolicy),
@@ -761,6 +981,18 @@ private struct BenchmarkSettings {
 
         media = environment["MPVUI_PERF_MEDIA"].map { URL(fileURLWithPath: $0) } ?? TestPaths.baselineMedia
     }
+
+    func matchesDecoder(_ observed: MPVPlaybackDiagnostics.Decoder) -> Bool {
+        if decoder == "software" {
+            return observed.session == .software
+        }
+        return observed.session == .hardware("videotoolbox") && observed.videoToolboxSessionUsesHardware == true
+    }
+}
+
+private enum BenchmarkConfigurationError: Error {
+
+    case invalidBackend(String)
 }
 
 private struct BenchmarkMetric {

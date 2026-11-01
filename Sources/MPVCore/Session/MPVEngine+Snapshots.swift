@@ -339,7 +339,9 @@ package extension MPVSession {
         lastContainerFramesPerSecond = Self.normalizedFrameRate(getDouble("container-fps"))
         lastEstimatedFramesPerSecond = Self.normalizedFrameRate(getDouble("estimated-vf-fps"))
 
-        let framesPerSecond = lastContainerFramesPerSecond ?? lastEstimatedFramesPerSecond
+        // Filter output describes presentation cadence, including field-rate
+        // deinterlacing. Container timing is a fallback while it is unavailable.
+        let framesPerSecond = lastEstimatedFramesPerSecond ?? lastContainerFramesPerSecond
 
         publish(
             .media(

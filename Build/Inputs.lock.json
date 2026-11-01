@@ -1084,7 +1084,7 @@
           "platforms": [
             "apple"
           ],
-          "sha256": "ef3c1b6f24aa8b2e1a45eb9c063ce0d06e639834afa51f7103c613301f36ecbb"
+          "sha256": "117ea7ac3b694190bd54ce51fde5810f1033845ee78421c22a85e919f0329826"
         },
         {
           "id": "0009-native-hdr-color-metadata",
@@ -1143,7 +1143,7 @@
           "platforms": [
             "apple"
           ],
-          "sha256": "2a19ffc239b4a9e72fc7e8c637a813e91b5cfbd7455663b6264792fdca59b2e2"
+          "sha256": "e1541bac168ac0daed818811d6e8856f4cbb409f5c159347a283519513f46671"
         },
         {
           "id": "0016-native-audio-clock-wakeup",
@@ -1191,7 +1191,7 @@
           "platforms": [
             "apple"
           ],
-          "sha256": "ddc842647ce41c39906f354e1862e1406a9b97e6a87bcb91c36a3bd2af2acf1e"
+          "sha256": "f306bb5e869e8637af0e6b42278f5b127055ee04b6d8fb92d7642461d28dd4a4"
         },
         {
           "id": "0020-unavailable-pixel-aspect-ratio",

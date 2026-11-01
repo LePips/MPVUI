@@ -53,6 +53,11 @@ struct MPVNativeVideoOutputTests {
         defer { fixture.close() }
 
         let layer = player.sampleBufferDisplayLayer
+        #if os(tvOS)
+        let pausedClockRate = 1.0
+        #else
+        let pausedClockRate = 0.0
+        #endif
 
         player.load(TestPaths.baselineMedia, playAutomatically: false)
 
@@ -63,7 +68,7 @@ struct MPVNativeVideoOutputTests {
                 + "error=\(String(describing: layer.sampleBufferRenderer.error))"
         ) {
             guard player.state == .paused, layer.isReadyForDisplay,
-                  let clock = layer.controlTimebase, CMTimebaseGetRate(clock) == 0
+                  let clock = layer.controlTimebase, CMTimebaseGetRate(clock) == pausedClockRate
             else { return false }
 
             #if targetEnvironment(simulator)
@@ -93,8 +98,10 @@ struct MPVNativeVideoOutputTests {
         #endif
 
         let timebase = try #require(layer.controlTimebase)
+        #if !os(tvOS)
         #expect(abs(CMTimebaseGetTime(timebase).seconds - player.position.seconds) < 0.3)
-        #expect(CMTimebaseGetRate(timebase) == 0)
+        #endif
+        #expect(CMTimebaseGetRate(timebase) == pausedClockRate)
 
         let lifecycle = await player.lifecycleDiagnostics()
 
@@ -103,13 +110,21 @@ struct MPVNativeVideoOutputTests {
             #expect(await player.seekForPictureInPicture(to: .seconds(destination)))
 
             try await waitUntil(
-                "seek clock \(destination); clock=\(CMTimebaseGetTime(timebase).seconds), "
+                "paused seek \(destination); clock=\(CMTimebaseGetTime(timebase).seconds), "
                     + "position=\(player.position.seconds), rate=\(CMTimebaseGetRate(timebase)), "
                     + "state=\(player.state), ready=\(layer.isReadyForDisplay)"
-            ) { abs(CMTimebaseGetTime(timebase).seconds - destination) < 0.15 }
+            ) {
+                guard abs(player.position.seconds - destination) < 0.15, layer.isReadyForDisplay else { return false }
+
+                #if os(tvOS)
+                return CMTimebaseGetRate(timebase) == 1
+                #else
+                return abs(CMTimebaseGetTime(timebase).seconds - destination) < 0.15
+                #endif
+            }
 
             #expect(player.isPaused)
-            #expect(CMTimebaseGetRate(timebase) == 0)
+            #expect(CMTimebaseGetRate(timebase) == pausedClockRate)
         }
 
         // Detach and reattach video without reloading the audio session.

@@ -27,6 +27,45 @@ struct MPVRenderColorConfigurationTests {
     }
 
     @Test
+    func `battery SDR preserves gamut with encoded eight bit surfaces`() {
+        let configuration = MPVPlayerConfiguration(renderingQuality: .init(preset: .battery))
+        let wide = resolve(configuration)
+
+        #expect(wide.pixelFormat == .bgra8Unorm)
+        #expect(wide.status.precision == .unorm8)
+        #expect(wide.status.targetPrimaries == "display-p3")
+        #expect(wide.status.targetTransfer == "srgb")
+        #expect(wide.layerColorSpace.name == CGColorSpace.displayP3)
+        #expect(Dictionary(uniqueKeysWithValues: wide.options)["dither-depth"] == "8")
+
+        let narrow = resolve(configuration, wide: false)
+        #expect(narrow.pixelFormat == .bgra8Unorm)
+        #expect(narrow.layerColorSpace.name == CGColorSpace.sRGB)
+
+        let hdr = resolve(configuration, hdr: true)
+        #expect(hdr.pixelFormat == .rgba16Float)
+        #expect(hdr.layerColorSpace.name == CGColorSpace.extendedLinearDisplayP3)
+        #expect(hdr.usesExtendedDynamicRange)
+
+        let precise = resolve(.init(renderingQuality: .init(preset: .battery), sdrOutput: .highPrecision))
+        #expect(precise.pixelFormat == .rgba16Float)
+        #expect(precise.layerColorSpace.name == CGColorSpace.extendedLinearDisplayP3)
+
+        let compatibility = resolve(.init(renderingQuality: .init(preset: .battery), sdrOutput: .compatibility8Bit))
+        #expect(compatibility.pixelFormat == .bgra8Unorm)
+        #expect(compatibility.layerColorSpace.name == CGColorSpace.sRGB)
+    }
+
+    @Test
+    func `battery P3 retains reference conversion for legacy sRGB viewing`() {
+        let color = resolve(.init(
+            colorManagement: .init(sdrViewing: .legacyDisplay),
+            renderingQuality: .init(preset: .battery)
+        ))
+        #expect(Dictionary(uniqueKeysWithValues: color.options)["sdr-adjust-gamma"] == "yes")
+    }
+
+    @Test
     func `compatibility and precision are explicit`() {
         let compatibility = resolve(.init(sdrOutput: .compatibility8Bit))
 

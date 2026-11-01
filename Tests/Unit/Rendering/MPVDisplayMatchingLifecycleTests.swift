@@ -78,6 +78,73 @@ struct MPVDisplayMatchingLifecycleTests {
     }
 
     @Test
+    func `speed changes update cadence and retain the latest value during a mode switch`() {
+        let endpoint = Endpoint()
+        let coordinator = MPVDisplayMatchingCoordinator()
+        defer { coordinator.detach() }
+        update(coordinator, endpoint: endpoint, fps: 24)
+        update(coordinator, endpoint: endpoint, fps: 24, playbackRate: 1.5)
+
+        #expect(coordinator.content?.refreshRate == 36)
+        #expect(endpoint.requests.count == 2)
+        endpoint.switching = true
+        endpoint.notify()
+        update(coordinator, endpoint: endpoint, fps: 24, playbackRate: 2)
+        update(coordinator, endpoint: endpoint, fps: 24, playbackRate: 1)
+
+        #expect(endpoint.requests.count == 2)
+        endpoint.switching = false
+        endpoint.notify()
+
+        #expect(coordinator.content?.refreshRate == 24)
+        #expect(endpoint.requests.count == 3)
+    }
+
+    @Test
+    func `unsupported speed clears the old hint while missing metadata retains it`() {
+        let endpoint = Endpoint()
+        let coordinator = MPVDisplayMatchingCoordinator()
+        defer { coordinator.detach() }
+        update(coordinator, endpoint: endpoint, fps: 120)
+        update(coordinator, endpoint: endpoint, fps: nil)
+
+        #expect(coordinator.content?.refreshRate == 120)
+        #expect(endpoint.requests.count == 1)
+        update(coordinator, endpoint: endpoint, fps: 120, playbackRate: 3)
+
+        #expect(coordinator.content == nil)
+        #expect(endpoint.requests.count == 2)
+        #expect(endpoint.requests[1] == nil)
+        update(coordinator, endpoint: endpoint, fps: 120, playbackRate: 4)
+
+        #expect(endpoint.requests.count == 2)
+        update(coordinator, endpoint: endpoint, fps: 120)
+
+        #expect(coordinator.content?.refreshRate == 120)
+        #expect(endpoint.requests.count == 3)
+    }
+
+    @Test
+    func `unsupported cadence waits for an active mode switch to finish`() {
+        let endpoint = Endpoint()
+        let coordinator = MPVDisplayMatchingCoordinator()
+        defer { coordinator.detach() }
+        update(coordinator, endpoint: endpoint, fps: 120)
+        endpoint.switching = true
+        endpoint.notify()
+        update(coordinator, endpoint: endpoint, fps: 120, playbackRate: 3)
+
+        #expect(coordinator.content?.refreshRate == 120)
+        #expect(endpoint.requests.count == 1)
+        endpoint.switching = false
+        endpoint.notify()
+
+        #expect(coordinator.content == nil)
+        #expect(endpoint.requests.count == 2)
+        #expect(endpoint.requests[1] == nil)
+    }
+
+    @Test
     func `handoff cancels the old subscription without clearing the successor`() {
         let endpoint = Endpoint()
         let old = MPVDisplayMatchingCoordinator()
@@ -146,7 +213,8 @@ struct MPVDisplayMatchingLifecycleTests {
     private func update(
         _ coordinator: MPVDisplayMatchingCoordinator,
         endpoint: Endpoint?,
-        fps: Double = 23.976,
+        fps: Double? = 23.976,
+        playbackRate: Double = 1,
         state: MPVPlaybackState = .playing
     ) {
         coordinator.update(
@@ -158,6 +226,7 @@ struct MPVDisplayMatchingLifecycleTests {
                 hdr: .init(source: .init(primaries: "bt.2020", transferFunction: .pq))
             ),
             mediaGeneration: 1,
+            playbackRate: playbackRate,
             state: state,
             isActive: true,
             outputUsesHDR: true,

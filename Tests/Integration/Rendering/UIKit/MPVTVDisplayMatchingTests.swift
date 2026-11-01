@@ -124,6 +124,7 @@ struct MPVTVDisplayMatchingTests {
                 ))
             ),
             mediaGeneration: 1,
+            playbackRate: 1,
             state: state,
             isActive: true,
             outputUsesHDR: true,

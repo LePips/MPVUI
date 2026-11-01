@@ -28,14 +28,15 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         let isSeekable: Bool
         let isPaused: Bool
         let sourceURL: URL?
+        let mediaGeneration: UInt64
+        let subtitleTrackID: MPVMediaTrackIdentifier?
     }
 
     private(set) var snapshot = Snapshot()
 
     var allowsAutomaticStartFromInline = false {
         didSet {
-            platformController?.canStartPictureInPictureAutomaticallyFromInline =
-                allowsAutomaticStartFromInline
+            refreshNativeCompositionPolicy()
         }
     }
 
@@ -50,6 +51,11 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     private var isRenderingInPictureInPicture = false
     private var stopRequested = false
     private var startupTask: Task<Void, Never>?
+    private var startPreparationTask: Task<Void, Never>?
+    private var compositionTask: Task<Bool, Never>?
+    private var compositionRequest: Bool?
+    private var compositionReady = false
+    private var compositionFailed = false
     private var requestTasks: [UUID: Task<Void, Never>] = [:]
     private var requestTimeouts: [UUID: Task<Void, Never>] = [:]
     private var pendingSkips: [UUID: () -> Void] = [:]
@@ -111,6 +117,8 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
 
     isolated deinit {
         startupTask?.cancel()
+        startPreparationTask?.cancel()
+        compositionTask?.cancel()
         requestTasks.values.forEach { $0.cancel() }
         requestTimeouts.values.forEach { $0.cancel() }
         pendingSkips.values.forEach { $0() }
@@ -131,16 +139,32 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
             duration: player.duration,
             isSeekable: player.isSeekable,
             isPaused: player.isPlaybackPausedForPictureInPicture,
-            sourceURL: player.mediaInformation.sourceURL
+            sourceURL: player.mediaInformation.sourceURL,
+            mediaGeneration: player.mediaGeneration,
+            subtitleTrackID: player.mediaInformation.tracks.first { $0.type == .subtitle && $0.isSelected }?.id
         )
 
         if value != lastPlaybackState {
+            let outputUnavailable = value.state == .idle || value.state == .loading || value.state.isTerminal
+            let replacedOutput = value.mediaGeneration != lastPlaybackState?.mediaGeneration
+                || value.sourceURL != lastPlaybackState?.sourceURL
+                || value.subtitleTrackID != lastPlaybackState?.subtitleTrackID
+                || (value.state != lastPlaybackState?.state && outputUnavailable)
+            if replacedOutput || compositionFailed {
+                compositionTask?.cancel()
+                compositionTask = nil
+                compositionRequest = nil
+                compositionReady = false
+                compositionFailed = false
+                platformController?.canStartPictureInPictureAutomaticallyFromInline = false
+            }
             lastPlaybackState = value
             platformController?.requiresLinearPlayback = !value.isSeekable
             platformController?.invalidatePlaybackState()
         }
 
         refreshPlatformState()
+        refreshNativeCompositionPolicy()
 
         switch player.state {
         case .idle, .stopped, .failed:
@@ -165,14 +189,44 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
             return
         }
 
+        // A user request may retry a failed automatic arm without waiting
+        // for playback metadata to change.
+        compositionFailed = false
         prepareToStartPictureInPicture()
-        controller.startPictureInPicture()
+        let preparation = compositionTask
+        let ready = compositionReady
+        startPreparationTask = Task { @MainActor [weak self, weak controller] in
+            let accepted = await preparation?.value ?? ready
+            guard !Task.isCancelled, let self, !self.isInvalidated,
+                  self.snapshot.isStarting, !self.stopRequested else { return }
+            guard accepted else {
+                self.didFailToStartPictureInPicture(error: MPVPlayerError.pictureInPictureFailed(
+                    operation: .start,
+                    message: "The native subtitle output could not prepare Picture in Picture."
+                ))
+                return
+            }
+
+            self.startPreparationTask = nil
+            controller?.startPictureInPicture()
+        }
     }
 
     func stop() {
         guard !isInvalidated, snapshot.isActive || snapshot.isStarting else { return }
 
         stopRequested = true
+        if startPreparationTask != nil, !snapshot.isActive {
+            startPreparationTask?.cancel()
+            startPreparationTask = nil
+            startupTask?.cancel()
+            startupTask = nil
+            snapshot.isStarting = false
+            snapshot.isStopping = false
+            setRenderingMode(false)
+            publish()
+            return
+        }
         snapshot.isStopping = true
         publish()
         platformController?.stopPictureInPicture()
@@ -191,6 +245,10 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         isInvalidated = true
         startupTask?.cancel()
         startupTask = nil
+        startPreparationTask?.cancel()
+        startPreparationTask = nil
+        compositionTask?.cancel()
+        compositionTask = nil
         requestTasks.values.forEach { $0.cancel() }
         requestTasks.removeAll()
         requestTimeouts.values.forEach { $0.cancel() }
@@ -213,6 +271,8 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         platformController?.contentSource = nil
         platformController = nil
         setRenderingMode(false)
+        let player = player
+        Task { _ = await player?.setNativePictureInPictureComposition(false) }
         snapshot.isPossible = false
         snapshot.isActive = false
         snapshot.isStarting = false
@@ -249,6 +309,8 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
 
         startupTask?.cancel()
         startupTask = nil
+        startPreparationTask?.cancel()
+        startPreparationTask = nil
         snapshot.isStarting = false
         snapshot.isStopping = false
         stopRequested = false
@@ -309,6 +371,38 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
 
         isRenderingInPictureInPicture = enabled
         onRenderingModeChange(enabled)
+        refreshNativeCompositionPolicy()
+    }
+
+    private func refreshNativeCompositionPolicy() {
+        guard !isInvalidated else { return }
+
+        let requested = isRenderingInPictureInPicture || allowsAutomaticStartFromInline
+        platformController?.canStartPictureInPictureAutomaticallyFromInline =
+            allowsAutomaticStartFromInline && compositionReady && compositionRequest == true
+        if compositionRequest == requested, compositionReady || compositionTask != nil || compositionFailed {
+            return
+        }
+
+        compositionTask?.cancel()
+        compositionRequest = requested
+        compositionReady = false
+        compositionFailed = false
+        let player = player
+        compositionTask = Task { @MainActor [weak self] in
+            let accepted = await player?.setNativePictureInPictureComposition(requested) ?? false
+            guard !Task.isCancelled, let self, !self.isInvalidated,
+                  self.compositionRequest == requested else { return false }
+
+            self.compositionReady = accepted
+            self.compositionFailed = !accepted
+            self.compositionTask = nil
+            // Automatic PiP is enabled only after the video-only source has a
+            // composited frame. Keeping that mode armed avoids a background race.
+            self.platformController?.canStartPictureInPictureAutomaticallyFromInline =
+                self.allowsAutomaticStartFromInline && requested && accepted
+            return accepted
+        }
     }
 
     private func fail(_ error: MPVPlayerError) {

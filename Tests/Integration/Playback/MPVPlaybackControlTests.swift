@@ -64,7 +64,7 @@ struct MPVPlaybackControlTests {
     }
 
     @Test
-    func `toggle resumes and pauses the same native clock`() async throws {
+    func `toggle resumes and pauses playback with the same native clock`() async throws {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
@@ -72,11 +72,16 @@ struct MPVPlaybackControlTests {
         let player = fixture.player
 
         let clock = try #require(player.sampleBufferDisplayLayer.controlTimebase)
+        #if os(tvOS)
+        let pausedClockRate = 1.0
+        #else
+        let pausedClockRate = 0.0
+        #endif
 
         player.togglePlayback()
         try await eventually("toggle resumes clock") { player.state == .playing && CMTimebaseGetRate(clock) > 0 }
         player.togglePlayback()
-        try await eventually("toggle pauses clock") { player.isPaused && CMTimebaseGetRate(clock) == 0 }
+        try await eventually("toggle pauses playback") { player.isPaused && CMTimebaseGetRate(clock) == pausedClockRate }
 
         #expect(player.lastError == nil)
         #expect(await player.lifecycleDiagnostics().loadCommands == 1)
@@ -119,7 +124,7 @@ struct MPVPlaybackControlTests {
     }
 
     @Test
-    func `playback rate reaches the native clock and survives pause resume`() async throws {
+    func `playback rate reaches the native output and survives pause resume`() async throws {
         let fixture = PlaybackFixture()
         defer { fixture.close() }
         try await fixture.loadPaused()
@@ -127,15 +132,26 @@ struct MPVPlaybackControlTests {
         let player = fixture.player
 
         let clock = try #require(player.sampleBufferDisplayLayer.controlTimebase)
+        #if os(tvOS)
+        let playingClockRate = 1.0
+        let pausedClockRate = 1.0
+        #else
+        let playingClockRate = 1.5
+        let pausedClockRate = 0.0
+        #endif
         player.setPlaybackRate(1.5)
         player.play()
-        try await eventually("native clock at requested rate") { player.state == .playing && abs(CMTimebaseGetRate(clock) - 1.5) < 0.01 }
+        try await eventually("native playback starts") {
+            player.state == .playing && abs(CMTimebaseGetRate(clock) - playingClockRate) < 0.01
+        }
         player.pause()
-        try await eventually("rate change remains paused") { player.isPaused && CMTimebaseGetRate(clock) == 0 }
+        try await eventually("rate change remains paused") { player.isPaused && CMTimebaseGetRate(clock) == pausedClockRate }
 
         #expect(player.playbackRate == 1.5)
         player.play()
-        try await eventually("resumed clock retains rate") { player.state == .playing && abs(CMTimebaseGetRate(clock) - 1.5) < 0.01 }
+        try await eventually("resumed clock retains rate") {
+            player.state == .playing && abs(CMTimebaseGetRate(clock) - playingClockRate) < 0.01
+        }
 
         #expect(player.lastError == nil)
     }

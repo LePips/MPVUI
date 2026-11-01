@@ -40,8 +40,8 @@ struct MPVPlayerEmissionTests {
         #expect(configuration.cache.maximumBytes == 0)
         #expect(configuration.cache.maximumBackBytes == 4)
         #expect(configuration.displayMatching == .disabled)
-        #expect(MPVCacheConfiguration().maximumBytes == 64 * 1024 * 1024)
-        #expect(MPVCacheConfiguration().maximumBackBytes == 16 * 1024 * 1024)
+        #expect(MPVCacheConfiguration().maximumBytes == 128 * 1024 * 1024)
+        #expect(MPVCacheConfiguration().maximumBackBytes == 32 * 1024 * 1024)
         #expect(MPVCacheConfiguration().mode == .automatic)
     }
 

@@ -17,6 +17,11 @@ final class MPVMetalLayer: CAMetalLayer {
         didSet { layoutVideoSublayer() }
     }
 
+    /// Transparent native subtitles follow the exact same geometry as video.
+    weak var osdSublayer: CALayer? {
+        didSet { layoutVideoSublayer() }
+    }
+
     var geometryAnimationDidStart: (@MainActor () -> Void)?
 
     override var bounds: CGRect {
@@ -175,8 +180,8 @@ final class MPVMetalLayer: CAMetalLayer {
         // Copy the actual animation, preserving spring parameters, keyframes,
         // timing, and interactive interruption. A new default-duration implicit
         // animation would visibly lag behind the hosting view.
-        if let videoSublayer, videoSublayer.superlayer === self {
-            videoSublayer.add(geometry, forKey: key)
+        for child in [videoSublayer, osdSublayer].compactMap(\.self) where child.superlayer === self {
+            child.add(geometry, forKey: key)
         }
 
         if Thread.isMainThread {
@@ -186,10 +191,10 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 
     override func removeAnimation(forKey key: String) {
-        if videoSublayer?.superlayer === self,
-           animation(forKey: key).flatMap(Self.geometryAnimation) != nil
-        {
-            videoSublayer?.removeAnimation(forKey: key)
+        if animation(forKey: key).flatMap(Self.geometryAnimation) != nil {
+            for child in [videoSublayer, osdSublayer].compactMap(\.self) where child.superlayer === self {
+                child.removeAnimation(forKey: key)
+            }
         }
 
         super.removeAnimation(forKey: key)
@@ -395,13 +400,13 @@ final class MPVMetalLayer: CAMetalLayer {
     #endif
 
     private func layoutVideoSublayer() {
-        guard let videoSublayer, videoSublayer.superlayer === self else { return }
-
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        videoSublayer.anchorPoint = .zero
-        videoSublayer.position = bounds.origin
-        videoSublayer.bounds = bounds
+        for child in [videoSublayer, osdSublayer].compactMap(\.self) where child.superlayer === self {
+            child.anchorPoint = .zero
+            child.position = bounds.origin
+            child.bounds = bounds
+        }
         CATransaction.commit()
     }
 

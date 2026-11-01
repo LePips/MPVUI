@@ -7,14 +7,21 @@ import Testing
 @Suite(.tags(.unit))
 struct MPVRenderingOptionsTests {
 
-    @Test
-    func `low power Android GPU defaults avoid dithering while explicit overrides remain honored`() {
-        let battery = MPVRenderingOptions.resolve(.init(), backend: .gpu, lowPowerMode: true)
+    @Test(arguments: [MPVVideoOutput.gpu, .metal])
+    func `low power GPU defaults avoid dithering while explicit overrides remain honored`(backend: MPVVideoOutput) {
+        let battery = MPVRenderingOptions.resolve(.init(), backend: backend, lowPowerMode: true)
         #expect(battery.preset == .battery)
         #expect(battery.options["dither"] == "no")
 
-        let requested = MPVRenderingOptions.resolve(.init(dithering: .ordered), backend: .gpu, lowPowerMode: true)
-        #expect(requested.options["dither"] == "ordered")
+        for dithering in [MPVRenderingQuality.Dithering.ordered, .fruit, .errorDiffusion] {
+            let requested = MPVRenderingOptions.resolve(.init(dithering: dithering), backend: backend, lowPowerMode: true)
+            #expect(requested.options["dither"] == dithering.rawValue)
+        }
+
+        let explicit = MPVRenderingOptions.resolve(.init(preset: .battery), backend: backend, lowPowerMode: false)
+        #expect(explicit.options["dither"] == "no")
+        let balanced = MPVRenderingOptions.resolve(.init(), backend: backend, lowPowerMode: false)
+        #expect(balanced.options["dither"] == "fruit")
     }
 
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases)
@@ -114,5 +121,18 @@ struct MPVRenderingOptionsTests {
 
         #expect(result["deinterlace"] == "no")
         #expect(result["vf"] == "lavfi=[idet,yadif=mode=send_field:parity=bff:deint=all]")
+    }
+
+    @Test(arguments: [MPVDeinterlacePolicy.Algorithm.automatic, .bwdif, .yadif])
+    func `frame cadence limits software output while field cadence stays default`(algorithm: MPVDeinterlacePolicy.Algorithm) {
+        let policy = MPVDeinterlacePolicy(algorithm: algorithm, mode: .automatic, outputCadence: .frame)
+        let filter = algorithm == .yadif ? "yadif" : "bwdif"
+        let options = MPVRenderingOptions.deinterlaceOptions(policy)
+        #expect(options["vf"] == "lavfi=[\(filter)=mode=send_frame:parity=auto:deint=interlaced]")
+        #expect(options["deinterlace"] == "no")
+        #expect(MPVDeinterlacePolicy().outputCadence == .field)
+        let status = MPVRenderingOptions.deinterlaceStatus(policy: policy, interlaced: true, hardwareDecoder: "videotoolbox")
+        #expect(status.requiresSoftwareFrames == true)
+        #expect(status.effectiveFilter == filter)
     }
 }

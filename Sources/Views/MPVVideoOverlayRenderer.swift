@@ -15,7 +15,10 @@ final class MPVVideoOverlayRenderer {
     private var renderTask: Task<Void, Never>?
     private var isDirty = false
     private var isInvalidated = false
+    private var contentNeedsUpdate = true
+    private var isConfiguringRenderer = false
     private var size: CGSize = .zero
+    private var displayScale: CGFloat = 1
     private var rasterScale: CGFloat = 1
 
     init(
@@ -30,7 +33,13 @@ final class MPVVideoOverlayRenderer {
         self.availabilityChanged = availabilityChanged
 
         observation = renderer.objectWillChange.sink { [weak self] in
-            Task { @MainActor [weak self] in self?.setNeedsRender() }
+            // ImageRenderer is main-actor isolated and sends synchronously.
+            // Our own configuration changes already belong to this render.
+            MainActor.assumeIsolated {
+                guard let self, !self.isConfiguringRenderer else { return }
+
+                self.setNeedsRender()
+            }
         }
     }
 
@@ -38,7 +47,7 @@ final class MPVVideoOverlayRenderer {
 
     func updateContent(_ content: AnyView) {
         self.content = content
-        updateRendererContent()
+        contentNeedsUpdate = true
         setNeedsRender()
     }
 
@@ -61,16 +70,15 @@ final class MPVVideoOverlayRenderer {
             ))
         }
 
-        guard proposedSize != size || displayScale != renderer.scale || scale != rasterScale else { return }
+        guard proposedSize != size || displayScale != self.displayScale || scale != rasterScale else { return }
 
         if proposedSize != size {
             size = proposedSize
-            renderer.proposedSize = ProposedViewSize(proposedSize)
-            updateRendererContent()
+            contentNeedsUpdate = true
         }
 
         // Keep SwiftUI's layout pixel grid stable as PiP resolution changes.
-        renderer.scale = displayScale
+        self.displayScale = displayScale
         rasterScale = scale
         setNeedsRender()
     }
@@ -82,7 +90,20 @@ final class MPVVideoOverlayRenderer {
         renderTask = nil
     }
 
-    private func updateRendererContent() {
+    private func updateRendererConfiguration() {
+        isConfiguringRenderer = true
+        defer { isConfiguringRenderer = false }
+
+        if renderer.proposedSize.width != size.width || renderer.proposedSize.height != size.height {
+            renderer.proposedSize = ProposedViewSize(size)
+        }
+        if renderer.scale != displayScale {
+            renderer.scale = displayScale
+        }
+
+        guard contentNeedsUpdate else { return }
+
+        contentNeedsUpdate = false
         // A proposal alone lets intrinsic-size content shrink the bitmap, which
         // mpv would then stretch across the entire video frame.
         renderer.content = AnyView(content.frame(width: size.width, height: size.height))
@@ -102,6 +123,9 @@ final class MPVVideoOverlayRenderer {
                 .isDirty
             {
                 self.isDirty = false
+                // A burst replaces only the pending value. Rebuild SwiftUI's
+                // render tree once, after the latest content and size settle.
+                self.updateRendererConfiguration()
 
                 // Draw directly into CPU-owned storage. This does not depend
                 // on a visible UIKit view or a foreground window snapshot.

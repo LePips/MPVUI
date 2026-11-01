@@ -60,10 +60,18 @@ struct MPVWideGamutLiveTests {
 
     @Test
     func `initial SDR swapchain matches precision and gamut`() async throws {
-        for policy in [MPVSDROutputPolicy.automatic, .compatibility8Bit] {
+        for (preset, policy) in [
+            (MPVRenderingQuality.Preset.balanced, MPVSDROutputPolicy.automatic),
+            (.balanced, .compatibility8Bit),
+            (.balanced, .highPrecision),
+            (.battery, .automatic),
+            (.battery, .compatibility8Bit),
+            (.battery, .highPrecision),
+        ] {
             let player = MPVPlayer(configuration: .init(
                 automaticallyPlays: false,
                 hdrPolicy: .disabled,
+                renderingQuality: .init(preset: preset),
                 sdrOutput: policy,
                 videoOutput: .metal
             ))
@@ -86,11 +94,17 @@ struct MPVWideGamutLiveTests {
             }
 
             let output = player.mediaInformation.hdr.output
-            let expectedFloat = policy == .automatic
+            let expectedWide = policy != .compatibility8Bit
+            let expectedFloat = policy == .highPrecision || (policy == .automatic && preset != .battery)
+            let expectedSpace = expectedFloat ? CGColorSpace.extendedLinearDisplayP3
+                : (expectedWide ? CGColorSpace.displayP3 : CGColorSpace.sRGB)
 
             #expect(player.mediaInformation.hdr.presentation.configuredDynamicRange == .sdr)
             #expect(player.renderColorStatus.precision == (expectedFloat ? .float16 : .unorm8))
-            #expect(output.primaries == (expectedFloat ? "display-p3" : "bt.709"))
+            #expect(output.primaries == (expectedWide ? "display-p3" : "bt.709"))
+            #expect(output.transferFunction == (expectedFloat ? .linear : .sRGB))
+            #expect(surface.metalLayer.pixelFormat == (expectedFloat ? .rgba16Float : .bgra8Unorm))
+            #expect(surface.metalLayer.colorspace?.name == expectedSpace)
 
             #expect(
                 output.pixelFormat?.contains(expectedFloat ? "16" : "8") == true,

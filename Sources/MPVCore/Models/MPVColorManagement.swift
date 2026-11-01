@@ -5,8 +5,9 @@ import Foundation
 public enum MPVSDROutputPolicy: String, CaseIterable, Equatable, Sendable {
 
     /// Uses linear floating-point Display P3 on wide-gamut screens and 8-bit sRGB elsewhere.
+    /// The explicit battery rendering preset uses 8-bit output while preserving the supported gamut.
     case automatic
-    /// Uses 8-bit sRGB output with renderer dithering for compatibility.
+    /// Uses 8-bit sRGB output for compatibility.
     case compatibility8Bit
     /// Uses linear floating-point output in the screen's supported standard gamut.
     case highPrecision

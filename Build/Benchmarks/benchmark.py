@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from xml.parsers.expat import ExpatError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from validation import EVIDENCE_ENV, failure_excerpt, publish_evidence
@@ -21,7 +22,106 @@ from validation import EVIDENCE_ENV, failure_excerpt, publish_evidence
 from comparison import compare_reports, render_markdown
 
 ROOT = Path(__file__).resolve().parents[2]
-SUITES = ("micro", "playback", "subtitle", "size")
+SUITES = ("micro", "playback", "cache", "seek", "audio", "subtitle", "size")
+SWIFT_SUITES = ("micro", "playback", "cache", "seek", "audio")
+
+
+def selected_suites(value):
+    suites = [suite for suite in SUITES if suite != "audio"] if value == "all" else value.split(",")
+    if not suites or len(suites) != len(set(suites)) or set(suites) - set(SUITES):
+        raise ValueError("--suites must be all or a comma-separated selection of " + ",".join(SUITES))
+    return suites
+
+
+def validate_capture_options(args, suites):
+    if "audio" in suites and os.environ.get("MPVUI_RUN_NATIVE_AUDIO_TESTS") != "1":
+        raise ValueError("Audio measurements require MPVUI_RUN_NATIVE_AUDIO_TESTS=1 and a real audio output.")
+    if args.media is not None and args.fixture != "baseline":
+        raise ValueError("Choose --media or a generated --fixture, not both")
+    if args.fixture != "baseline" and "playback" not in suites:
+        raise ValueError("--fixture requires the playback suite")
+    if args.hwdec_threads is not None and args.decoder != "videotoolbox":
+        raise ValueError("--hwdec-threads requires --decoder videotoolbox")
+    if args.seek_demuxer_offset is not None and "playback" not in suites:
+        raise ValueError("--seek-demuxer-offset requires the playback suite")
+    if args.native_osd == "composite" and ("playback" not in suites or args.backend == "metal"):
+        raise ValueError("--native-osd composite requires playback with sampleBuffer output")
+    if args.native_queue_lead_ms is not None and ("playback" not in suites or args.backend == "metal"):
+        raise ValueError("--native-queue-lead-ms requires playback with sampleBuffer output")
+
+
+def display_session_identity(suites):
+    if "playback" not in suites:
+        return {}
+    unavailable = (
+        "Cannot verify whether the macOS console is unlocked. Playback benchmarking requires a verifiable unlocked display session."
+    )
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/ioreg", "-n", "Root", "-d1", "-a"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=5,
+        )
+        root = plistlib.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException, ExpatError, ValueError):
+        raise ValueError(unavailable) from None
+    locked = root.get("IOConsoleLocked") if isinstance(root, dict) else None
+    if type(locked) is not bool:
+        raise ValueError(unavailable)
+    if locked:
+        raise ValueError("Playback benchmarking requires an unlocked macOS console. Unlock this Mac and rerun.")
+    # Retain only this boolean. IORegistry may also contain console user data.
+    return {"displaySessionUnlocked": True}
+
+
+def prepare_media(root, suites, args, logs, env):
+    generated = None
+    if "playback" in suites and args.media is None:
+        if args.fixture != "baseline":
+            filename = {"hevc4k": "hevc-4k60.mkv", "interlaced1080": "interlaced-1080i.mkv"}[args.fixture]
+            generated = root / ".build/benchmark-media" / filename
+            run_step(
+                [
+                    sys.executable,
+                    str(ROOT / "Build/Benchmarks/generate_playback_fixture.py"),
+                    "--kind",
+                    args.fixture,
+                    "--output",
+                    str(generated),
+                ],
+                logs / "prepare-media.log",
+                env=env,
+            )
+        else:
+            run_step(
+                [sys.executable, str(root / "Build/Tests/prepare_test_media.py"), "--group", "baseline"],
+                logs / "prepare-media.log",
+                env=env,
+            )
+    for suite, group in [("audio", "audio"), ("seek", "video")]:
+        if suite in suites:
+            run_step(
+                [sys.executable, str(root / "Build/Tests/prepare_test_media.py"), "--group", group],
+                logs / f"prepare-{group}.log",
+                env=env,
+            )
+    return (args.media or generated or root / ".build/test-media/baseline.mp4").resolve()
+
+
+def media_identity(root, suites, media):
+    files = {"playback": media} if "playback" in suites else {}
+    if "seek" in suites:
+        files.update(
+            {f"seek/{extension}": root / f".build/test-media/video-h264-long-gop.{extension}" for extension in ("mp4", "mkv", "ts")}
+        )
+    if "audio" in suites:
+        files["audio/eac3-5.1"] = root / ".build/test-media/audio-eac3-5.1.mka"
+    for path in files.values():
+        if not path.is_file():
+            raise ValueError(f"Benchmark media does not exist: {path}")
+    return {name: sha256(path) for name, path in files.items()}
 
 
 def sha256(path):
@@ -55,7 +155,7 @@ def write_json(path, value):
 
 def source_identity(root):
     files = [root / "Package.swift", root / "Build/Inputs.lock.json"]
-    for relative in ("Sources", "Build/Sources", "Build/Patches", "Tests/Benchmarks"):
+    for relative in ("Sources", "Build/Sources", "Build/Patches", "Tests/Benchmarks", "Tests/Support"):
         directory = root / relative
         if directory.exists():
             files.extend(path for path in directory.rglob("*") if path.is_file() and "__pycache__" not in path.parts)
@@ -98,16 +198,23 @@ def power_state():
     return {"source": source, "modes": modes}
 
 
-def environment_identity(root, developer, xcode_build, suites):
+def environment_identity(root, developer, xcode_build, suites, media_inputs=None):
     swift = developer / "Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
     # The runner and comparison rules are part of the measurement protocol,
     # including when --package-path selects an older production checkout.
     protocol_files = [ROOT / "Build/Benchmarks/benchmark.py", ROOT / "Build/Benchmarks/comparison.py"]
-    if set(suites) & {"micro", "playback"}:
+    if set(suites) & set(SWIFT_SUITES):
         swift_protocol = sorted((root / "Tests/Benchmarks").glob("*.swift"))
         if not swift_protocol:
             raise ValueError("Missing Tests/Benchmarks Swift workloads in this checkout.")
         protocol_files += swift_protocol
+        protocol_files += sorted((root / "Tests/Support").glob("*.swift"))
+    if set(suites) & {"playback", "seek", "audio"}:
+        protocol_files.append(root / "Build/Tests/prepare_test_media.py")
+        groups = {"playback": "baseline", "seek": "video", "audio": "audio"}
+        protocol_files += [root / f"Build/Tests/generate_{group}.py" for suite, group in groups.items() if suite in suites]
+    if "playback" in suites:
+        protocol_files.append(ROOT / "Build/Benchmarks/generate_playback_fixture.py")
     if "subtitle" in suites:
         protocol_files.append(ROOT / "Build/Benchmarks/native_subtitles.m")
         protocol_files.append(ROOT / "Build/Benchmarks/native_subtitles.py")
@@ -124,6 +231,7 @@ def environment_identity(root, developer, xcode_build, suites):
         "swiftVersion": capture([str(swift), "--version"]),
         "power": power_state(),
         "benchmarkProtocol": protocol,
+        "mediaInputs": media_inputs or {},
         "configuration": "release",
     }
     return {"comparisonKey": key, "loadAverageBefore": list(os.getloadavg())}
@@ -205,9 +313,9 @@ def run_benchmarks(args):
     if sys.platform != "darwin":
         raise ValueError("Runtime capture requires macOS; report comparison works on other platforms.")
     root = args.package_path.resolve()
-    suites = list(SUITES) if args.suites == "all" else args.suites.split(",")
-    if not suites or len(suites) != len(set(suites)) or set(suites) - set(SUITES):
-        raise ValueError("--suites must be all or a comma-separated selection of " + ",".join(SUITES))
+    suites = selected_suites(args.suites)
+    validate_capture_options(args, suites)
+    display_session = display_session_identity(suites)
     repetitions = 1 if args.quick else args.repetitions
     seconds = 2.0 if args.quick else args.seconds
     warmup = 1.0 if args.quick else args.warmup
@@ -222,17 +330,11 @@ def run_benchmarks(args):
     publish_evidence(summary=dict(measurementStatus="not_evaluated", comparisonStatus="not_requested"), artifacts=dict(benchmarkLogs=logs))
     with measurement_lock():
         before = source_identity(root)
-        environment = environment_identity(root, developer, xcode_build, suites)
-        if "playback" in suites and args.media is None:
-            run_step(
-                [sys.executable, str(root / "Build/Tests/prepare_test_media.py"), "--group", "baseline"],
-                logs / "prepare-media.log",
-                env=env,
-            )
-        media = (args.media or root / ".build/test-media/baseline.mp4").resolve()
-        if "playback" in suites and not media.is_file():
-            raise ValueError(f"Media does not exist: {media}")
-        media_sha = sha256(media) if "playback" in suites else None
+        media = prepare_media(root, suites, args, logs, env)
+        media_inputs = media_identity(root, suites, media)
+        media_sha = media_inputs.get("playback")
+        environment = environment_identity(root, developer, xcode_build, suites, media_inputs)
+        environment["comparisonKey"].update(display_session)
         workloads, binaries = [], []
         framework = None
         if "size" in suites:
@@ -240,7 +342,7 @@ def run_benchmarks(args):
             sizes, binaries = binary_workloads(framework)
             workloads += sizes
         runtime, native = {}, {}
-        swift_suites = [suite for suite in suites if suite in ("micro", "playback")]
+        swift_suites = [suite for suite in suites if suite in SWIFT_SUITES]
         if swift_suites:
             raw = logs / "swift-workloads.json"
             print("Swift…", flush=True)
@@ -254,6 +356,15 @@ def run_benchmarks(args):
                 MPVUI_PERF_WARMUP_SECONDS=str(warmup),
                 MPVUI_PERF_NATIVE_READBACK=args.native_readback,
                 MPVUI_PERF_SUITES=",".join(swift_suites),
+                MPVUI_PERF_BACKEND=args.backend,
+                MPVUI_PERF_RENDERING_PRESET=args.rendering_preset,
+                MPVUI_PERF_SDR_OUTPUT=args.sdr_output,
+                MPVUI_PERF_DECODER=args.decoder,
+                MPVUI_PERF_HWDEC_THREADS=str(args.hwdec_threads or ""),
+                MPVUI_PERF_DEINTERLACE=args.deinterlace,
+                MPVUI_PERF_SEEK_DEMUXER_OFFSET=str(args.seek_demuxer_offset) if args.seek_demuxer_offset is not None else "",
+                MPVUI_PERF_NATIVE_OSD=args.native_osd,
+                MPVUI_PERF_NATIVE_QUEUE_LEAD_MS=str(args.native_queue_lead_ms) if args.native_queue_lead_ms is not None else "",
             )
             step_log = logs / "swift-test.log"
             publish_evidence(artifacts=dict(swiftTestLog=step_log))
@@ -313,11 +424,13 @@ def run_benchmarks(args):
         after = source_identity(root)
         if before["sourceSHA256"] != after["sourceSHA256"]:
             raise ValueError("Sources changed during capture. Rerun without editing or switching artifacts.")
-        after_environment = environment_identity(root, developer, xcode_build, suites)
+        after_inputs = media_identity(root, suites, media)
+        if media_inputs != after_inputs:
+            raise ValueError("Benchmark media changed during capture; no mixed report was saved.")
+        after_environment = environment_identity(root, developer, xcode_build, suites, after_inputs)
+        after_environment["comparisonKey"].update(display_session_identity(suites))
         if environment["comparisonKey"] != after_environment["comparisonKey"]:
             raise ValueError("Benchmark harness or environment changed during capture; rerun with fixed inputs.")
-        if media_sha is not None and sha256(media) != media_sha:
-            raise ValueError("Media changed during capture; no mixed report was saved.")
         if framework and binary_workloads(framework)[1] != binaries:
             raise ValueError("Native artifact changed during capture; rerun on a fixed selection.")
         if environment["comparisonKey"]["power"] != power_state():
@@ -334,8 +447,18 @@ def run_benchmarks(args):
                 "sampleSeconds": seconds,
                 "warmupSeconds": warmup,
                 "nativeReadbackPolicy": args.native_readback,
+                "backend": args.backend,
+                "renderingPreset": args.rendering_preset,
+                "sdrOutput": args.sdr_output,
+                "decoder": args.decoder,
+                "hwdecThreads": args.hwdec_threads,
+                "deinterlace": args.deinterlace,
+                "seekDemuxerOffset": args.seek_demuxer_offset,
+                "nativeOSD": args.native_osd,
+                "nativeQueueLeadMilliseconds": args.native_queue_lead_ms,
                 "mediaPath": str(media) if media_sha else None,
                 "mediaSHA256": media_sha,
+                "fixtureSHA256": media_inputs,
             },
             "runtime": runtime,
             "native": native,
@@ -436,12 +559,24 @@ def main(argv=None):
     run.add_argument("--label", required=True, type=label)
     run.add_argument("--package-path", type=Path, default=ROOT)
     run.add_argument("--output", type=Path)
-    run.add_argument("--suites", default="all", help="all or comma-separated micro,playback,subtitle,size")
+    run.add_argument(
+        "--suites", default="all", help="all (excludes audio) or comma-separated micro,playback,cache,seek,audio,subtitle,size"
+    )
     run.add_argument("--quick", action="store_true", help="One repetition and two-second playback samples; smoke checks only")
     run.add_argument("--repetitions", type=bounded_int(1, 20), default=3)
     run.add_argument("--seconds", type=finite_range(1, 60), default=3.0)
     run.add_argument("--warmup", type=finite_range(0.5, 30), default=1.0)
     run.add_argument("--media", type=Path)
+    run.add_argument("--fixture", choices=("baseline", "hevc4k", "interlaced1080"), default="baseline")
+    run.add_argument("--decoder", choices=("software", "videotoolbox"), default="software")
+    run.add_argument("--hwdec-threads", type=bounded_int(1, 16))
+    run.add_argument("--deinterlace", choices=("disabled", "field", "frame"), default="disabled")
+    run.add_argument("--seek-demuxer-offset", type=finite_range(0, 2), help="Override playback's precise-seek demuxer offset in seconds")
+    run.add_argument("--native-osd", choices=("inline", "composite"), default="inline", help="Select separate or composed native subtitles")
+    run.add_argument("--native-queue-lead-ms", type=bounded_int(0, 1000), help="Override native video enqueue lead in milliseconds")
+    run.add_argument("--backend", choices=("all", "metal", "sampleBuffer"), default="all")
+    run.add_argument("--rendering-preset", choices=("battery", "balanced", "highQuality"), default="balanced")
+    run.add_argument("--sdr-output", choices=("automatic", "compatibility8Bit", "highPrecision"), default="compatibility8Bit")
     run.add_argument(
         "--native-readback",
         choices=("required", "optional"),

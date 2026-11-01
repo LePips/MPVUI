@@ -26,7 +26,8 @@ struct MPVDisplayMatchingState {
         playbackState: MPVPlaybackState,
         matchingEnabled: Bool,
         isActive: Bool,
-        modeSwitchInProgress: Bool
+        modeSwitchInProgress: Bool,
+        hasUnsupportedCadence: Bool = false
     ) -> Action {
         guard isActive, matchingEnabled,
               playbackState != .idle, !playbackState.isTerminal
@@ -41,6 +42,10 @@ struct MPVDisplayMatchingState {
               playbackState != .seeking,
               playbackState != .buffering
         else { return .keep }
+
+        // A known cadence outside the platform hint range must release an old
+        // preference. Missing same-item metadata can still retain it below.
+        guard !hasUnsupportedCadence else { return clear() }
         guard let candidate else {
             // Retain a known format during same-item metadata refreshes; an
             // audio-only or unknown-format next item must release the old mode.
@@ -95,6 +100,7 @@ final class MPVDisplayMatchingCoordinator {
 
         let media: MPVMediaInformation
         let mediaGeneration: UInt64
+        let playbackRate: Double
         let state: MPVPlaybackState
         let outputUsesHDR: Bool
         let videoOutput: MPVPlayerConfiguration.VideoOutput
@@ -122,6 +128,7 @@ final class MPVDisplayMatchingCoordinator {
         target: (any MPVDisplayMatchingTarget)?,
         media: MPVMediaInformation,
         mediaGeneration: UInt64,
+        playbackRate: Double,
         state: MPVPlaybackState,
         isActive: Bool,
         outputUsesHDR: Bool,
@@ -138,6 +145,7 @@ final class MPVDisplayMatchingCoordinator {
         latestInput = Input(
             media: media,
             mediaGeneration: mediaGeneration,
+            playbackRate: playbackRate,
             state: state,
             outputUsesHDR: outputUsesHDR,
             videoOutput: videoOutput,
@@ -198,6 +206,7 @@ final class MPVDisplayMatchingCoordinator {
 
         let candidate = MPVDisplayMatchingContent(
             media: input.media,
+            playbackRate: input.playbackRate,
             outputUsesHDR: input.outputUsesHDR,
             videoOutput: input.videoOutput,
             dolbyVisionStatus: input.dolbyVisionStatus
@@ -209,7 +218,12 @@ final class MPVDisplayMatchingCoordinator {
             playbackState: input.state,
             matchingEnabled: target.isMatchingEnabled,
             isActive: true,
-            modeSwitchInProgress: isDisplayModeSwitchInProgress
+            modeSwitchInProgress: isDisplayModeSwitchInProgress,
+            hasUnsupportedCadence: input.media.framesPerSecond != nil
+                && MPVDisplayMatchingContent.refreshRate(
+                    for: input.media.framesPerSecond,
+                    playbackRate: input.playbackRate
+                ) == nil
         )
 
         switch action {

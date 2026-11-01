@@ -80,6 +80,7 @@ struct MPVConfigurationPropagationTests {
                 "volume": "99",
                 "speed": "2",
                 "target-contrast": "invalid-contrast",
+                "avfoundation-presentation": "invalid-presentation",
             ],
             audio: .init(audioSession: .hostManaged, spatialization: .disabled),
             automaticallyPlays: false,
@@ -89,6 +90,7 @@ struct MPVConfigurationPropagationTests {
             isLoopingEnabled: true,
             networkCacheDuration: .seconds(21),
             playbackRate: 1.25,
+            rebufferDuration: .milliseconds(125),
             startTime: .milliseconds(400),
             videoOutput: output,
             volume: 37
@@ -119,6 +121,7 @@ struct MPVConfigurationPropagationTests {
             "ao-avfoundation-spatial-audio",
             "ao-avfoundation-manage-audio-session",
             "sub-font",
+            "avfoundation-presentation",
         ]
 
         var observed: [String: String] = [:]
@@ -161,7 +164,7 @@ struct MPVConfigurationPropagationTests {
             #expect(observed["vo"] == (expectedOutput == .metal ? "gpu-next" : "avfoundation"))
             #expect(observed["hwdec"] == "no")
             #expect(observed["cache-secs"].flatMap(Double.init) == 7)
-            #expect(observed["cache-pause-wait"].flatMap(Double.init) == 0.25)
+            #expect(observed["cache-pause-wait"].flatMap(Double.init) == 0.125)
             #expect(observed["cache-pause-initial"] == "yes")
             #expect(observed["loop-file"] == "inf")
             #expect(observed["speed"].flatMap(Double.init) == 1.25)
@@ -170,6 +173,11 @@ struct MPVConfigurationPropagationTests {
             #expect(observed["ao-avfoundation-spatial-audio"] == "multichannel")
             #expect(observed["ao-avfoundation-manage-audio-session"] == "no")
             #expect(observed["sub-font"] == "sans-serif")
+            #if os(tvOS)
+            #expect(observed["avfoundation-presentation"] == "host")
+            #else
+            #expect(observed["avfoundation-presentation"] == "media")
+            #endif
             #expect(player.videoOutput == expectedOutput)
             #expect(player.lastError == nil)
         }

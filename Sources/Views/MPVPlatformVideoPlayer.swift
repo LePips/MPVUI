@@ -342,6 +342,7 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
            player.isRenderSurfaceActive(token: surfaceToken)
         {
             player.sampleBufferDisplayLayer.removeFromSuperlayer()
+            player.sampleBufferOSDLayer.removeFromSuperlayer()
 
             player.updateSampleBufferOutput(
                 displayCapabilities: .unknown,
@@ -635,9 +636,10 @@ extension MPVPlatformVideoPlayer {
         guard isActiveRenderingSurface, bounds.width > 0, bounds.height > 0 else { return }
 
         let displayLayer = player.sampleBufferDisplayLayer
+        let osdLayer = player.sampleBufferOSDLayer
         let scale = platformScale
 
-        if displayLayer.superlayer !== metalLayer || displayLayer.contentsScale != scale {
+        if displayLayer.superlayer !== metalLayer || osdLayer.superlayer !== metalLayer || displayLayer.contentsScale != scale {
             applyWithoutImplicitAnimations {
                 if displayLayer.superlayer !== metalLayer {
                     displayLayer.removeFromSuperlayer()
@@ -645,7 +647,14 @@ extension MPVPlatformVideoPlayer {
                     (metalLayer as? MPVMetalLayer)?.videoSublayer = displayLayer
                 }
 
+                if osdLayer.superlayer !== metalLayer {
+                    osdLayer.removeFromSuperlayer()
+                    metalLayer.insertSublayer(osdLayer, above: displayLayer)
+                    (metalLayer as? MPVMetalLayer)?.osdSublayer = osdLayer
+                }
                 displayLayer.contentsScale = scale
+                osdLayer.contentsScale = scale
+                osdLayer.videoGravity = displayLayer.videoGravity
             }
         }
 
@@ -658,7 +667,8 @@ extension MPVPlatformVideoPlayer {
             displayCapabilities: configuration.displayCapabilities,
             configuredDynamicRange: configuration.configuredDynamicRange,
             policyFallbackReason: configuration.policyFallbackReason,
-            colorConfiguration: configuration.colorConfiguration
+            colorConfiguration: configuration.colorConfiguration,
+            drawableSize: CGSize(width: bounds.width * scale, height: bounds.height * scale)
         )
 
         player.attachSampleBufferOutput()
@@ -759,6 +769,7 @@ private extension MPVPlatformVideoPlayer {
     func observePlayerRenderingState() {
         withObservationTracking {
             _ = player.mediaInformation
+            _ = player.playbackRate
             _ = player.state
             _ = player.videoOutput
             _ = player.dolbyVisionStatus
@@ -1161,6 +1172,7 @@ private extension MPVPlatformVideoPlayer {
             target: MPVPlatformDisplayMatchingTarget.make(for: window),
             media: player.mediaInformation,
             mediaGeneration: player.mediaGeneration,
+            playbackRate: player.playbackRate,
             state: player.state,
             isActive: isActiveRenderingSurface,
             outputUsesHDR: outputUsesHDR,

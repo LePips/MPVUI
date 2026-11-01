@@ -32,7 +32,8 @@ public struct MPVMediaInformation: Equatable, Sendable {
     /// The active video's encoded and display dimensions.
     public let dimensions: MPVVideoDimensions?
 
-    /// The active video's frame rate, when known.
+    /// The estimated filter-output frame rate, falling back to container timing.
+    /// This rate excludes playback-speed scaling.
     public package(set) var framesPerSecond: Double?
 
     /// Clockwise video rotation in degrees.

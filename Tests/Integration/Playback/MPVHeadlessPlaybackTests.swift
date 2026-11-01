@@ -152,8 +152,12 @@ struct MPVHeadlessPlaybackTests {
 
         if output == .sampleBuffer {
             let clock = try #require(player.sampleBufferDisplayLayer.controlTimebase)
+            #if os(tvOS)
+            #expect(CMTimebaseGetRate(clock) == 1)
+            #else
             #expect(CMTimebaseGetRate(clock) > 0)
             #expect(abs(CMTimebaseGetTime(clock).seconds - player.position.seconds) < 0.3)
+            #endif
         }
 
         try await eventually("audio and video are synchronized", timeout: .seconds(1)) {

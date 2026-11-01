@@ -61,6 +61,7 @@ struct MPVDisplayMatchingContent {
 
     init?(
         media: MPVMediaInformation,
+        playbackRate: Double = 1,
         outputUsesHDR: Bool,
         videoOutput: MPVPlayerConfiguration.VideoOutput = .metal,
         dolbyVisionStatus: MPVDolbyVisionStatus = .unknown
@@ -70,7 +71,7 @@ struct MPVDisplayMatchingContent {
         guard let dimensions = media.dimensions,
               let width = Int32(exactly: dimensions.width), width > 0,
               let height = Int32(exactly: dimensions.height), height > 0,
-              let refreshRate = Self.refreshRate(for: media.framesPerSecond),
+              let refreshRate = Self.refreshRate(for: media.framesPerSecond, playbackRate: playbackRate),
               let codec = Self.codecType(for: selectedCodec ?? media.videoCodec)
         else { return nil }
 
@@ -95,9 +96,10 @@ struct MPVDisplayMatchingContent {
 
     /// Preserve the NTSC rational families, including when mpv reports their
     /// common three-decimal spelling. In particular, never round 23.976 to 24.
-    static func refreshRate(for framesPerSecond: Double?) -> Float? {
+    static func refreshRate(for framesPerSecond: Double?, playbackRate: Double = 1) -> Float? {
         guard let value = framesPerSecond, value.isFinite,
-              value > 0, value <= 240
+              value > 0, value <= 1000,
+              playbackRate.isFinite, playbackRate > 0
         else { return nil }
 
         let standardRates = [
@@ -116,7 +118,13 @@ struct MPVDisplayMatchingContent {
             120,
         ]
 
-        let rate = standardRates.first { abs($0 - value) < 0.001 } ?? value
+        // Recover the source rational before applying speed. This also keeps
+        // 23.976 fps at 1.001x aligned with the exact 24 Hz family.
+        let sourceRate = standardRates.first { abs($0 - value) < 0.001 } ?? value
+        let effectiveRate = sourceRate * playbackRate
+        guard effectiveRate.isFinite, effectiveRate > 0, effectiveRate <= 240 else { return nil }
+
+        let rate = standardRates.first { abs($0 - effectiveRate) < 0.001 } ?? effectiveRate
 
         return Float(rate)
     }

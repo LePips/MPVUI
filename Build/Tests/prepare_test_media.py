@@ -33,6 +33,8 @@ GROUPS = {
             "video-av1-10bit.mkv",
             "video-h264-120fps.mkv",
             "video-h264-long-gop.mkv",
+            "video-h264-long-gop.mp4",
+            "video-h264-long-gop.ts",
         ),
     ),
     "color": (("ffmpeg",), ("color-hdr10.mkv", "color-hlg.mkv")),
