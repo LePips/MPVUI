@@ -20,14 +20,14 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/skiptools/skip.git", from: "1.9.16"),
         .package(url: "https://github.com/skiptools/skip-fuse-ui.git", from: "1.19.0"),
-        .package(name: "MPVUI", path: android ? "Packages/android" : "..")
+        .package(name: "MPVUI", path: android ? "Packages/MPVUI" : "..")
     ] + (android ? [] : [
         .package(url: "https://github.com/LePips/MediaAccessibilityKit", from: "0.2.0")
     ]),
     targets: [
         .target(name: "MPVUIExample", dependencies: [
             .product(name: "SkipFuseUI", package: "skip-fuse-ui")
-        ] + (android ? [.product(name: "MPVCoreAndroid", package: "android")] : [
+        ] + (android ? [.product(name: "MPVCoreAndroid", package: "MPVUI")] : [
             .product(name: "MPVUI", package: "MPVUI"),
             .product(name: "MediaAccessibilityKit", package: "mediaaccessibilitykit")
         ]), resources: [.copy("Resources/Media")], plugins: [.plugin(

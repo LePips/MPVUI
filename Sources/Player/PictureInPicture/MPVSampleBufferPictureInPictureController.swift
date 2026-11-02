@@ -272,7 +272,7 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         platformController = nil
         setRenderingMode(false)
         let player = player
-        Task { _ = await player?.setNativePictureInPictureComposition(false) }
+        Task { @MainActor [weak player] in _ = await player?.setNativePictureInPictureComposition(false) }
         snapshot.isPossible = false
         snapshot.isActive = false
         snapshot.isStarting = false
@@ -389,7 +389,7 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         compositionReady = false
         compositionFailed = false
         let player = player
-        compositionTask = Task { @MainActor [weak self] in
+        compositionTask = Task { @MainActor [weak self, weak player] in
             let accepted = await player?.setNativePictureInPictureComposition(requested) ?? false
             guard !Task.isCancelled, let self, !self.isInvalidated,
                   self.compositionRequest == requested else { return false }

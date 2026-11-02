@@ -25,12 +25,15 @@ struct MPVPiPLifecycleTests {
         #expect(player.lastError == nil)
     }
 
-    @Test
-    func `retained controller cannot restart after its player is destroyed`() throws {
+    @Test(arguments: [false, true])
+    func `retained controller cannot restart after its player is destroyed`(invalidateFirst: Bool) throws {
         var player: MPVPlayer? = MPVPlayer()
         let weakPlayer = try WeakBox(#require(player))
 
         let pip = try #require(player?.pictureInPicture)
+        if invalidateFirst {
+            pip.invalidate()
+        }
         player = nil
 
         #expect(weakPlayer.value == nil)

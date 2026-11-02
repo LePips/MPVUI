@@ -25,4 +25,4 @@ build:
           contents:
             - 'System.getenv("MPVUI_ANDROID_DEVELOPER_DIR")?.let { environment("DEVELOPER_DIR", it) }'
             # Build each ABI with its matching native prefix and one AAR runtime set.
-            - 'commandLine("python3", "${swiftSourceFolder()}/Packages/android/Build/Android/example_swift.py", commandLine.last().toString())'
+            - 'commandLine("python3", "${swiftSourceFolder()}/Packages/MPVUI/Build/Android/example_swift.py", commandLine.last().toString())'
