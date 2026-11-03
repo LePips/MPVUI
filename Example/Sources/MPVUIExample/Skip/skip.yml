@@ -18,7 +18,7 @@ build:
   contents:
     - block: 'dependencies'
       contents:
-        - 'implementation("io.github.lepips:mpvui:0.7.0")'
+        - 'implementation("io.github.lepips:mpvui:0.10.0")'
     - block: 'fun buildAndroidSwiftPackageDebug(mode: String)'
       contents:
         - block: 'project.objects.newInstance<SkipBridgeExecOps>().execOps.exec'

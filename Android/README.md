@@ -11,7 +11,7 @@ Configure the [local Maven repository](../Build/BUILD.md#local-repository), then
 
 ```kotlin
 dependencies {
-    implementation("io.github.lepips:mpvui:0.7.0")
+    implementation("io.github.lepips:mpvui:0.10.0")
 }
 ```
 
