@@ -152,9 +152,15 @@ final class MPVHTTPMediaServer: @unchecked Sendable {
               attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? Int,
               size <= 512 * 1024 * 1024,
-              let data = try? Data(contentsOf: file, options: .mappedIfSafe)
+              var data = try? Data(contentsOf: file, options: .mappedIfSafe)
         else {
             return response("404 Not Found", head: head)
+        }
+
+        // The renderer's first segment starts at the source position requested for this handoff.
+        // Tell HLS clients to open it there while the unfinished playlist still looks live.
+        if filename == "stream.m3u8", let firstWindow = data.range(of: Data("\n#EXT-X-MEDIA-SEQUENCE:0\n".utf8)) {
+            data.insert(contentsOf: "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n".utf8, at: firstWindow.upperBound)
         }
 
         var headers = [

@@ -713,7 +713,11 @@ public final class MPVExternalPlaybackController {
 
             try validate(id)
             guard finished else {
-                throw MPVPlayerError.externalPlaybackFailed("The system player could not reach the requested position.")
+                let clock = systemPlayer.currentTime().seconds
+                let range = item.seekableTimeRanges.first?.timeRangeValue
+                throw MPVPlayerError.externalPlaybackFailed(
+                    "The system player reached \(clock)s while seeking to \(target)s (seekable \(range?.start.seconds ?? .nan)s to \(range?.end.seconds ?? .nan)s)."
+                )
             }
         }
 

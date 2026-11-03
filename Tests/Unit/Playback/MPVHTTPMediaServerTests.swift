@@ -80,6 +80,16 @@ struct MPVHTTPMediaServerTests {
         #expect(head.contains("Content-Length: 10\r\n"))
         #expect(head.hasSuffix("\r\n\r\n"))
 
+        let playlist = "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2,\nstream0.ts\n"
+        let url = directory.appendingPathComponent("stream.m3u8")
+        try Data(playlist.utf8).write(to: url)
+        let start = "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n"
+        #expect(request("/session/stream.m3u8").contains(start))
+        #expect(request("/session/stream.m3u8", method: "HEAD").contains("Content-Length: \(playlist.utf8.count + start.utf8.count)\r\n"))
+        #expect(request("/session/stream.m3u8", range: "bytes=-11").hasSuffix("stream0.ts\n"))
+        try Data(playlist.replacingOccurrences(of: "SEQUENCE:0", with: "SEQUENCE:1").utf8).write(to: url)
+        #expect(!request("/session/stream.m3u8").contains(start))
+
         for path in [
             "/wrong/stream0.ts",
             "/session/private.txt",
