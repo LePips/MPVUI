@@ -63,7 +63,7 @@ struct MPVNativeVideoOutputTests {
         let pausedClockRate = 0.0
         #endif
 
-        player.load(TestPaths.baselineMedia, playAutomatically: false)
+        try await fixture.loadForVideoReadback(TestPaths.baselineMedia)
 
         try await waitUntil(
             "initial paused frame; state=\(player.state), \(fixture.presentationContext), "

@@ -42,7 +42,7 @@ struct MPVNativeVideoFormatTests {
         ])
         defer { fixture.close() }
         fixture.player.setDiagnosticsEnabled(true)
-        fixture.player.load(TestPaths.baselineMedia, playAutomatically: true)
+        try await fixture.playback.loadForVideoReadback(TestPaths.baselineMedia, playAutomatically: true)
 
         try await eventually("software presentation starts") {
             fixture.player.state == .playing
@@ -168,7 +168,7 @@ struct MPVNativeVideoFormatTests {
             "video-zoom": String(zoom),
         ])
         defer { fixture.close() }
-        fixture.player.load(TestPaths.baselineMedia, playAutomatically: false, startTime: .seconds(1))
+        try await fixture.playback.loadForVideoReadback(TestPaths.baselineMedia, startTime: .seconds(1))
 
         try await eventually("paused overlay source") {
             fixture.player.isPaused && fixture.buffer != nil
@@ -243,7 +243,7 @@ struct MPVNativeVideoFormatTests {
             "osd-level": "0",
         ])
         defer { fixture.close() }
-        fixture.player.load(TestPaths.baselineMedia, playAutomatically: false)
+        try await fixture.playback.loadForVideoReadback(TestPaths.baselineMedia)
 
         try await eventually("software displayed pixels") {
             fixture.player.state == .paused && fixture.buffer != nil
@@ -323,7 +323,7 @@ struct MPVNativeVideoFormatTests {
 
         let player = fixture.player
         player.setDiagnosticsEnabled(true)
-        player.load(media, playAutomatically: false, startTime: .seconds(1))
+        try await fixture.playback.loadForVideoReadback(media, startTime: .seconds(1))
 
         try await eventually("subtitle fixture initial frame") {
             guard player.state == .paused,
@@ -559,7 +559,7 @@ private final class NativeFormatFixture {
     }
 
     var nativeLogs: [String] = []
-    private let playback: PlaybackFixture
+    let playback: PlaybackFixture
 
     var player: MPVPlayer {
         playback.player

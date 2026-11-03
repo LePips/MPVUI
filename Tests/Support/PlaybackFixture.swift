@@ -17,6 +17,13 @@ final class PlaybackFixture {
     let surface: MPVPlatformVideoPlayer
     #if os(macOS)
     let window: NSWindow
+
+    private var isWindowOnscreen: Bool {
+        guard window.windowNumber > 0 else { return false }
+
+        let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(window.windowNumber)) as? [[String: Any]]
+        return info?.first?[kCGWindowIsOnscreen as String] as? Bool == true
+    }
     #else
     let window: UIWindow
     private weak var previousKeyWindow: UIWindow?
@@ -24,7 +31,8 @@ final class PlaybackFixture {
 
     var presentationContext: String {
         #if os(macOS)
-        "windowVisible=\(window.isVisible), surfaceWindow=\(surface.window != nil), bounds=\(surface.bounds)"
+        "windowVisible=\(window.isVisible), windowOnscreen=\(isWindowOnscreen), "
+            + "surfaceWindow=\(surface.window != nil), bounds=\(surface.bounds)"
         #else
         "windowScene=\(window.windowScene != nil), activation=\(window.windowScene?.activationState.rawValue ?? -1), "
             + "windowHidden=\(window.isHidden), key=\(window.isKeyWindow), "
@@ -77,6 +85,23 @@ final class PlaybackFixture {
         surface.layoutIfNeeded()
         #endif
         surface.activateRenderingSurface()
+    }
+
+    func loadForVideoReadback(_ url: URL, playAutomatically: Bool = false, startTime: Duration? = nil) async throws {
+        #if os(macOS)
+        // SwiftPM can retain stale AppKit occlusion state. Confirm presentation with WindowServer.
+        if NSApplication.shared.activationPolicy() == .prohibited {
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
+        window.center()
+        window.orderFrontRegardless()
+        try await eventually("WindowServer to present the video surface") {
+            self.surface.window === self.window && self.isWindowOnscreen
+        }
+        #endif
+        player.load(url, playAutomatically: playAutomatically, startTime: startTime)
     }
 
     func loadPaused(_ url: URL = TestPaths.baselineMedia, at position: Duration = .seconds(1)) async throws {
