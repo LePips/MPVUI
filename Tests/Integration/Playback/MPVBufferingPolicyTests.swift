@@ -206,10 +206,10 @@ struct MPVBufferingPolicyTests {
         }
 
         engine.load(TestPaths.baselineMedia, playAutomatically: false, startTime: nil, generation: 2)
-        try await eventually("replacement source retains only persistent overrides") {
+        try await eventually("replacement source finishes initial buffering") {
             try engine.queue.sync {
                 try #require(engine.fatalPlaybackError == nil)
-                return engine.currentGeneration == 2 && engine.hasPlaybackStarted
+                return engine.currentGeneration == 2 && engine.hasPlaybackStarted && !engine.isInitialBufferingPending
             }
         }
 
