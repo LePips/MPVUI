@@ -172,10 +172,18 @@ struct MPVExternalPlaybackTests {
             """
         )
 
-        let seek = try await player.seekAndWait(to: .seconds(2), timeout: .seconds(30))
-
-        #expect(abs(seek.position.seconds - 2) < 0.2)
-        #expect(player.externalPlayback.isPrepared && player.isPaused)
+        for target in [Duration.seconds(4), .seconds(2)] {
+            let seek = try await player.seekAndWait(to: target, timeout: .seconds(30))
+            #expect(seek.target == target)
+            #expect(
+                abs((seek.position - target).seconds) < 0.2,
+                """
+                Seek result: \(seek), system time: \(player.externalPlayback.systemPlayer.currentTime()), ranges: \
+                \(String(describing: player.externalPlayback.systemPlayer.currentItem?.seekableTimeRanges))
+                """
+            )
+            #expect(player.externalPlayback.isPrepared && player.isPaused)
+        }
 
         player.setMuted(true)
         player.play()

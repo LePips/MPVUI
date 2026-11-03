@@ -678,9 +678,11 @@ public final class MPVExternalPlaybackController {
         let target = stream.map { timelineOrigin + max(0, position.seconds - $0.startTime.seconds) } ?? position.seconds
 
         if target > 0 || stream != nil {
+            let targetTime = CMTime(seconds: target, preferredTimescale: 600)
+            let seekDeadline = ContinuousClock.now + .seconds(15)
             let timeout = Task {
                 do {
-                    try await Task.sleep(for: .seconds(15))
+                    try await Task.sleep(until: seekDeadline, clock: .continuous)
                 } catch {
                     return
                 }
@@ -690,8 +692,21 @@ public final class MPVExternalPlaybackController {
                 timeout.cancel()
             }
 
-            let finished = await withTaskCancellationHandler {
-                await systemPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            let finished = try await withTaskCancellationHandler {
+                repeat {
+                    try validate(id)
+                    let completed = await systemPlayer.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+                    try validate(id)
+                    guard completed else { return false }
+
+                    // A newly opened HLS item can acknowledge its first seek at the live edge.
+                    // Confirm its clock before publishing the source position or resuming playback.
+                    if stream == nil || abs(systemPlayer.currentTime().seconds - target) < 0.1 {
+                        return true
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                } while ContinuousClock.now < seekDeadline
+                return false
             } onCancel: {
                 item.cancelPendingSeeks()
             }
