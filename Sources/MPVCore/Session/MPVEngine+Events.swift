@@ -309,7 +309,19 @@ package extension MPVSession {
                request.sawSeek,
                abs((lastPosition - request.target).seconds) < 1
             {
-                completePendingSeek(at: lastPosition)
+                if isPaused, lastDuration > .zero, request.target == lastDuration {
+                    // mpv can keep the last decoded frame on screen indefinitely while paused.
+                    // An explicit seek to the endpoint must retire this item just as natural EOF does.
+                    let status = runCommand(["stop", "keep-playlist"])
+                    guard status >= 0 else {
+                        failPendingSeek(MPVPlayerError.seekFailed(code: status, message: mpvErrorMessage(status)))
+                        return
+                    }
+
+                    finishPlayback(reason: MPV_END_FILE_REASON_EOF)
+                } else {
+                    completePendingSeek(at: lastPosition)
+                }
             }
 
         case MPV_EVENT_VIDEO_RECONFIG, MPV_EVENT_AUDIO_RECONFIG:
@@ -593,8 +605,11 @@ package extension MPVSession {
             }
         }
 
-        let failedDuringLoad = !isFileLoaded
+        finishPlayback(reason: endEvent.reason, error: endEvent.error)
+    }
 
+    private func finishPlayback(reason: mpv_end_file_reason, error: Int32 = 0) {
+        let failedDuringLoad = !isFileLoaded
         cancelExternalTrackRequests()
 
         playbackRequestIsActive = false
@@ -608,7 +623,7 @@ package extension MPVSession {
         isIdle = true
         hasPlaybackStarted = false
 
-        switch endEvent.reason {
+        switch reason {
         case MPV_END_FILE_REASON_EOF:
             didReachEnd = true
             lastPosition = lastDuration
@@ -631,11 +646,9 @@ package extension MPVSession {
             publishState(.stopped)
 
         case MPV_END_FILE_REASON_ERROR:
-            let code = endEvent.error
-
             publishFatalError(
-                failedDuringLoad ? .loadFailed(code: code, message: mpvErrorMessage(code)) :
-                    .playbackFailed(code: code, message: mpvErrorMessage(code))
+                failedDuringLoad ? .loadFailed(code: error, message: mpvErrorMessage(error)) :
+                    .playbackFailed(code: error, message: mpvErrorMessage(error))
             )
 
         default:

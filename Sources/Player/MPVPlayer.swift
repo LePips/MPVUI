@@ -913,7 +913,12 @@ extension MPVPlayer {
     }
 
     func seekForPictureInPicture(to time: Duration) async -> Bool {
-        await engine?.seekForPictureInPicture(to: time) ?? false
+        guard let engine else { return false }
+
+        let generation = playbackGeneration
+        let reached = await engine.seekForPictureInPicture(to: time)
+        await engine.synchronizeUpdates()
+        return reached && generation == playbackGeneration && !Task.isCancelled
     }
 
     func renderedScreenshotForTesting() async -> MPVNodeValue? {

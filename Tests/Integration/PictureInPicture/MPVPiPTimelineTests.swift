@@ -35,9 +35,13 @@ struct MPVPiPTimelineTests {
         #expect(fixture.player.lastError == nil)
     }
 
-    @Test
-    func `PiP can seek to EOF and reopen the same source for a backward skip`() async throws {
-        let fixture = PlaybackFixture()
+    @Test(arguments: [true, false])
+    func `PiP can seek to EOF and reopen the same source for a backward skip`(dropFrames: Bool) async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null", "hr-seek-framedrop": dropFrames ? "yes" : "no"],
+            automaticallyPlays: false,
+            videoOutput: .sampleBuffer
+        ))
         defer { fixture.close() }
         try await fixture.loadPaused()
 
@@ -45,7 +49,8 @@ struct MPVPiPTimelineTests {
 
         #expect(duration > .zero)
         #expect(await fixture.player.seekForPictureInPicture(to: duration))
-        try await eventually("endpoint seek reaches the terminal timeline") { fixture.player.state == .ended }
+        #expect(fixture.player.state == .ended)
+        #expect(fixture.player.position == duration)
 
         #expect(await fixture.player.seekForPictureInPicture(to: duration + .seconds(10)))
 
