@@ -47,10 +47,12 @@ struct MPVSubtitleQueryLifecycleTests {
     @Test
     func `targeted cancellation leaves unrelated subtitle queries pending`() async {
         let engine = MPVSession(configuration: .init()) { _ in }
-        let selected = MPVSubtitleQueryCancellation()
-        let unrelated = MPVSubtitleQueryCancellation()
+        let selected = MPVOperationCancellation()
+        let unrelated = MPVOperationCancellation()
         let (registrations, registered) = AsyncStream<Void>.makeStream()
-        defer { registered.finish() }
+        defer {
+            registered.finish()
+        }
 
         let first = Task {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[TimedTextSubtitleSnapshot], any Error>) in
@@ -72,17 +74,23 @@ struct MPVSubtitleQueryLifecycleTests {
 
                     #expect(engine.subtitleQueries[1] == nil)
                     #expect(engine.subtitleQueries[2] != nil)
+
                     engine.subtitleQueries.removeValue(forKey: 2)?.continuation.resume(returning: [])
                 }
             }
 
             #expect(result.isEmpty)
-        } catch { Issue.record("Unrelated query was cancelled: \(error)") }
+        } catch {
+            Issue.record("Unrelated query was cancelled: \(error)")
+        }
 
-        do { _ = try await first.value
+        do {
+            _ = try await first.value
 
             Issue.record("Selected query was not cancelled")
-        } catch { #expect(error is CancellationError) }
+        } catch {
+            #expect(error is CancellationError)
+        }
 
         #expect(engine.queue.sync { engine.subtitleQueries.isEmpty })
     }

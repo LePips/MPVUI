@@ -147,17 +147,21 @@ struct MPVNativeAudioIntegrationTests {
     @Test(arguments: ["all", "multichannel", "no"], ["mono", "stereo", "5.1", "7.1"])
     func `PCM keeps speaker layouts and reads back Apple spatialization policy`(policy: String, layout: String) async throws {
         let audio = try Session(options: ["ao-avfoundation-spatial-audio": policy])
-        defer { audio.close() }
+        defer {
+            audio.close()
+        }
+
         try await audio.load(TestPaths.testMedia("audio-pcm-\(layout).mka"))
         try await audio.wait("PCM native renderer") { audio.number("audio-pts") > 0.2 }
 
         let fields = try #require(audio.node("avfoundation-audio-spatialization")?.mapValue)
+
         #expect(fields["path"] == .string("sample-buffer"))
         #expect(fields["allows-stereo"] == .bool(policy == "all"))
         #expect(fields["allows-multichannel"] == .bool(policy != "no"))
         #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
 
-        let count = ["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout]!
+        let count = try #require(["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout])
 
         #expect(audio.number("audio-out-params/channel-count") == count)
     }
@@ -379,30 +383,42 @@ struct MPVNativeAudioIntegrationTests {
 
     @Test
     func `explicit device uses PCM without affecting another compressed player`() async throws {
-        let compressed = try Session(options: [
-            "audio-spdif": "ac3,eac3",
-            "loop-file": "inf",
-        ])
-        defer { compressed.close() }
+        let compressed = try Session(
+            options: [
+                "audio-spdif": "ac3,eac3",
+                "loop-file": "inf",
+            ]
+        )
+        defer {
+            compressed.close()
+        }
 
         let devices = compressed.node("audio-device-list")
 
         guard case let .array(entries) = devices else {
             Issue.record("Audio device list unavailable")
+
             return
         }
 
         let names = entries.compactMap { entry -> String? in
-            guard case let .map(values) = entry, case let .string(name) = values["name"],
-                  name.hasPrefix("avfoundation/"), name != "avfoundation/"
-            else { return nil }
+            guard case let .map(values) = entry,
+                  case let .string(name) = values["name"],
+                  name.hasPrefix("avfoundation/"),
+                  name != "avfoundation/"
+            else {
+                return nil
+            }
 
             return name
         }
 
         let device = try #require(names.first, "This test needs an explicit AVFoundation output device.")
         let routed = try Session(options: ["audio-spdif": "ac3,eac3", "audio-device": device])
-        defer { routed.close() }
+        defer {
+            routed.close()
+        }
+
         try await compressed.load(TestPaths.testMedia("audio-ac3-stereo.mka"))
 
         try await compressed.wait("first compressed player clock") {

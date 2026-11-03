@@ -26,8 +26,12 @@ package extension MPVSession {
         // mpv emits playback-restart before an initial cache pause finishes.
         // Keep the startup target until that pause clears, even when the user
         // has separately paused playback.
-        guard isInitialBufferingPending, hasPlaybackStarted,
-              getFlag("paused-for-cache") == false else { return }
+        guard isInitialBufferingPending,
+              hasPlaybackStarted,
+              getFlag("paused-for-cache") == false
+        else {
+            return
+        }
 
         applyBufferingPolicy(initial: false)
     }

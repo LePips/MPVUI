@@ -3,7 +3,9 @@
 package enum MPVTextSubtitleTimeline {
 
     package static func snapshots(from node: MPVNodeValue?) -> [TimedTextSubtitleSnapshot]? {
-        guard let values = node?.arrayValue else { return nil }
+        guard let values = node?.arrayValue else {
+            return nil
+        }
 
         struct Boundary {
 
@@ -21,7 +23,9 @@ package enum MPVTextSubtitleTimeline {
                   let end = fields["end"]?.doubleValue.flatMap(Duration.init(mpvSeconds:)),
                   start < end,
                   let region = MPVTextSubtitleParser.snapshot(from: .array([value])).regions.first
-            else { return nil }
+            else {
+                return nil
+            }
 
             let index = regions.count
 
@@ -51,7 +55,9 @@ package enum MPVTextSubtitleTimeline {
                 index += 1
             } while index < boundaries.count && boundaries[index].time == start
 
-            guard index < boundaries.count, !active.isEmpty else {
+            guard index < boundaries.count,
+                  !active.isEmpty
+            else {
                 continue
             }
 

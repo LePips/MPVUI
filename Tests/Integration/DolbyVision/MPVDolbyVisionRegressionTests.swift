@@ -194,7 +194,9 @@ struct MPVDolbyVisionRegressionTests {
                    let height = frame["h"]?.integerValue,
                    let stride = frame["stride"]?.integerValue,
                    case let .data(data) = frame["data"],
-                   width > 0, height > 0, stride >= width * 4,
+                   width > 0,
+                   height > 0,
+                   stride >= width * 4,
                    data.count >= stride * height
                 {
                     try #require(frame["format"]?.stringValue == "bgr0")
@@ -202,21 +204,23 @@ struct MPVDolbyVisionRegressionTests {
                     let provider = try #require(CGDataProvider(data: data as CFData))
                     let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
 
-                    let image = try #require(CGImage(
-                        width: Int(width),
-                        height: Int(height),
-                        bitsPerComponent: 8,
-                        bitsPerPixel: 32,
-                        bytesPerRow: Int(stride),
-                        space: colorSpace,
-                        bitmapInfo: CGBitmapInfo.byteOrder32Little.union(
-                            CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue)
-                        ),
-                        provider: provider,
-                        decode: nil,
-                        shouldInterpolate: false,
-                        intent: .defaultIntent
-                    ))
+                    let image = try #require(
+                        CGImage(
+                            width: Int(width),
+                            height: Int(height),
+                            bitsPerComponent: 8,
+                            bitsPerPixel: 32,
+                            bytesPerRow: Int(stride),
+                            space: colorSpace,
+                            bitmapInfo: CGBitmapInfo.byteOrder32Little.union(
+                                CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue)
+                            ),
+                            provider: provider,
+                            decode: nil,
+                            shouldInterpolate: false,
+                            intent: .defaultIntent
+                        )
+                    )
                     try Self.write(image, to: url)
 
                     return image

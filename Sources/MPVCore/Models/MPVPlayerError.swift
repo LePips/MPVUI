@@ -38,6 +38,14 @@ public enum MPVPlayerError: Error, Equatable, Sendable {
     case reservedProperty(name: String)
     /// Subtitle selection requires a subtitle identifier from the current item.
     case invalidSubtitleTrack(MPVMediaTrackIdentifier)
+    /// An external resource could not be loaded. The descriptor identifies the request.
+    case externalTrackFailed(MPVExternalTrack, code: Int32, message: String)
+    /// The current source cannot accept a seek.
+    case seekUnavailable
+    /// A native seek command failed without ending playback.
+    case seekFailed(code: Int32, message: String)
+    /// Playback did not reach the requested seek destination before its deadline.
+    case seekTimedOut
     /// mpv's event queue overflowed and player state was refreshed.
     case eventQueueOverflow
     /// Picture in picture is unsupported by the platform or video output.
@@ -71,6 +79,14 @@ public enum MPVPlayerError: Error, Equatable, Sendable {
             "The mpv property '\(name)' is managed by MPVUI."
         case .invalidSubtitleTrack:
             "Choose a subtitle track from the currently loaded media."
+        case let .externalTrackFailed(track, _, message):
+            "Load external \(track.type.rawValue): \(message)"
+        case .seekUnavailable:
+            "The current media cannot seek."
+        case let .seekFailed(_, message):
+            "Seek: \(message)"
+        case .seekTimedOut:
+            "Playback did not reach the requested position before the seek timed out."
         case .eventQueueOverflow:
             "The mpv event queue overflowed. Player state was refreshed."
         case .pictureInPictureUnsupported:

@@ -28,17 +28,27 @@ public func coreSessionSend(
     _ command: UnsafePointer<MPVCoreCommand>?,
     _ operation: UnsafeMutablePointer<MPVCoreOperation>?
 ) -> Int32 {
-    guard let session = session(handle), let value = command?.pointee,
-          value.version == MPVCORE_ABI_VERSION, value.size == MemoryLayout<MPVCoreCommand>.size,
-          value.value.isFinite, (0 ... 2).contains(value.track_type), (-1 ... 1).contains(value.role),
+    guard let session = session(handle),
+          let value = command?.pointee,
+          value.version == MPVCORE_ABI_VERSION,
+          value.size == MemoryLayout<MPVCoreCommand>.size,
+          value.value.isFinite,
+          (0 ... 2).contains(value.track_type),
+          (-1 ... 1).contains(value.role),
           value.kind == 1 ? (-1 ... 1).contains(value.flags) : (0 ... 1).contains(value.flags),
-          (0 ... 1).contains(value.has_value), value.string_count <= 1024,
-          value.string_count == 0 || value.strings != nil else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+          (0 ... 1).contains(value.has_value),
+          value.string_count <= 1024,
+          value.string_count == 0 || value.strings != nil
+    else {
+        return MPV_ERROR_INVALID_PARAMETER.rawValue
+    }
 
     var strings: [String] = []
 
     for item in UnsafeBufferPointer(start: value.strings, count: value.string_count) {
-        guard let string = copiedString(item) else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard let string = copiedString(item) else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         strings.append(string)
     }
@@ -48,7 +58,9 @@ public func coreSessionSend(
     let role: MPVSubtitleRole = value.role == 1 ? .secondary : .primary
 
     func source() -> URL? {
-        guard let text = strings.first, !text.isEmpty else { return nil }
+        guard let text = strings.first, !text.isEmpty else {
+            return nil
+        }
 
         if let url = URL(string: text), url.scheme != nil {
             return url
@@ -61,8 +73,12 @@ public func coreSessionSend(
 
     switch value.kind {
     case 1:
-        guard let url = source(), (-1 ... 1).contains(value.flags),
-              value.has_value == 0 || Duration(mpvSeconds: value.value) != nil else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard let url = source(),
+              (-1 ... 1).contains(value.flags),
+              value.has_value == 0 || Duration(mpvSeconds: value.value) != nil
+        else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         request = .load(
             url,
@@ -70,64 +86,90 @@ public func coreSessionSend(
             startTime: value.has_value == 0 ? nil : Duration(mpvSeconds: value.value)
         )
 
-    case 2: request = .play
+    case 2:
+        request = .play
 
-    case 3: request = .pause
+    case 3:
+        request = .pause
 
-    case 4: request = .togglePlayback
+    case 4:
+        request = .togglePlayback
 
-    case 5: request = .stop
+    case 5:
+        request = .stop
 
     case 6, 7:
-        guard let time = Duration(mpvSeconds: value.value) else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard let time = Duration(mpvSeconds: value.value) else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         request = value.kind == 6 ? .seek(to: time) : .seekByOffset(time)
 
-    case 8: request = value.flags != 0 ? .stepBackward : .stepForward
+    case 8:
+        request = value.flags != 0 ? .stepBackward : .stepForward
 
-    case 9: request = .setVolume(value.value)
+    case 9:
+        request = .setVolume(value.value)
 
-    case 10: request = .setMuted(value.flags != 0)
+    case 10:
+        request = .setMuted(value.flags != 0)
 
-    case 11: request = .setPlaybackRate(value.value)
+    case 11:
+        request = .setPlaybackRate(value.value)
 
-    case 12: request = .selectTrack(id)
+    case 12:
+        request = .selectTrack(id)
 
-    case 13: request = .selectSubtitle(value.track_id < 0 ? nil : id, for: role)
+    case 13:
+        request = .selectSubtitle(value.track_id < 0 ? nil : id, for: role)
 
-    case 14: request = .disableTrack(type)
+    case 14:
+        request = .disableTrack(type)
 
-    case 15: request = .setTextSubtitleInterceptionEnabled(value.flags != 0)
+    case 15:
+        request = .setTextSubtitleInterceptionEnabled(value.flags != 0)
 
-    case 16: request = .setDiagnosticsEnabled(value.flags != 0)
+    case 16:
+        request = .setDiagnosticsEnabled(value.flags != 0)
 
     case 17:
-        guard strings.count == 2 else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard strings.count == 2 else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         request = .setProperty(strings[0], to: strings[1])
 
     case 18:
-        guard !strings.isEmpty else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard !strings.isEmpty else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         request = .executeCommand(strings[0], arguments: Array(strings.dropFirst()))
 
     case 19:
-        guard let url = source() else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+        guard let url = source() else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
 
         request = .loadExternalTrack(url, type: type, select: value.flags != 0, subtitleRole: value.role == -1 ? nil : role)
 
-    case 20: request = .clearLastError
+    case 20:
+        request = .clearLastError
 
-    case 21: request = .toggleMute
+    case 21:
+        request = .toggleMute
 
-    default: return MPV_ERROR_INVALID_PARAMETER.rawValue
+    default:
+        return MPV_ERROR_INVALID_PARAMETER.rawValue
     }
 
     do {
         let result = try session.send(request)
         operation?.pointee = .init(id: result.id, generation: result.generation)
         return 0
-    } catch { return MPV_ERROR_UNINITIALIZED.rawValue }
+    } catch {
+        return MPV_ERROR_UNINITIALIZED.rawValue
+    }
 }
 
 /// Copies the latest complete domain state into an owned ABI record.
@@ -235,8 +277,14 @@ public func coreQuerySubtitles(
     _ delivery: MPVCoreDelivery?,
     _ releaseContext: MPVCoreContextRelease?
 ) -> UnsafeMutableRawPointer? {
-    guard let session = session(handle), let delivery, (0 ... 2).contains(trackType),
-          trackID > 0, let id = Int(exactly: trackID) else { return nil }
+    guard let session = session(handle),
+          let delivery,
+          (0 ... 2).contains(trackType),
+          trackID > 0,
+          let id = Int(exactly: trackID)
+    else {
+        return nil
+    }
 
     let type: MPVTrackType = trackType == 0 ? .video : trackType == 1 ? .audio : .subtitle
     let query = Query(context: context, delivery: delivery, release: releaseContext)
@@ -247,7 +295,9 @@ public func coreQuerySubtitles(
             let timeline = try await session.textSubtitleSnapshots(for: .init(type: type, mpvID: id))
 
             try Task.checkCancellation()
-            guard generation == session.snapshot.generation else { throw CancellationError() }
+            guard generation == session.snapshot.generation else {
+                throw CancellationError()
+            }
 
             query.delivery(query.context, 3, generation, CoreValue.timeline(timeline).ownedBuffer())
         } catch is CancellationError {
@@ -257,11 +307,13 @@ public func coreQuerySubtitles(
                 query.context,
                 5,
                 generation,
-                CoreValue.failure(error as? MPVPlayerError ?? .commandFailed(
-                    context: "Subtitle query",
-                    code: -1,
-                    message: error.localizedDescription
-                ))
+                CoreValue.failure(
+                    error as? MPVPlayerError ?? .commandFailed(
+                        context: "Subtitle query",
+                        code: -1,
+                        message: error.localizedDescription
+                    )
+                )
                 .ownedBuffer()
             )
         }

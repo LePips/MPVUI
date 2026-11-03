@@ -41,16 +41,20 @@ struct MPVNativeVideoOutputTests {
     @MainActor
     @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox])
     func `native frames and seek`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) async throws {
-        let fixture = PlaybackFixture(configuration: .init(
-            additionalOptions: ["ao": "null"],
-            automaticallyPlays: false,
-            hardwareDecoding: hardwareDecoding,
-            videoOutput: .sampleBuffer
-        ))
+        let fixture = PlaybackFixture(
+            configuration: .init(
+                additionalOptions: ["ao": "null"],
+                automaticallyPlays: false,
+                hardwareDecoding: hardwareDecoding,
+                videoOutput: .sampleBuffer
+            )
+        )
 
         let player = fixture.player
         let surface = fixture.surface
-        defer { fixture.close() }
+        defer {
+            fixture.close()
+        }
 
         let layer = player.sampleBufferDisplayLayer
         #if os(tvOS)
@@ -67,9 +71,13 @@ struct MPVNativeVideoOutputTests {
                 + "ready=\(layer.isReadyForDisplay), status=\(layer.sampleBufferRenderer.status.rawValue), "
                 + "error=\(String(describing: layer.sampleBufferRenderer.error))"
         ) {
-            guard player.state == .paused, layer.isReadyForDisplay,
-                  let clock = layer.controlTimebase, CMTimebaseGetRate(clock) == pausedClockRate
-            else { return false }
+            guard player.state == .paused,
+                  layer.isReadyForDisplay,
+                  let clock = layer.controlTimebase,
+                  CMTimebaseGetRate(clock) == pausedClockRate
+            else {
+                return false
+            }
 
             #if targetEnvironment(simulator)
             return true
@@ -84,6 +92,7 @@ struct MPVNativeVideoOutputTests {
         #if !targetEnvironment(simulator)
 
         let buffer = try #require(layer.sampleBufferRenderer.displayedPixelBuffer())
+
         #expect(CVPixelBufferGetWidth(buffer) > 0)
         #expect(CVPixelBufferGetHeight(buffer) > 0)
         #expect(CVPixelBufferGetIOSurface(buffer) != nil)
@@ -91,6 +100,7 @@ struct MPVNativeVideoOutputTests {
 
         #expect(layer.sampleBufferRenderer.status != .failed)
         #expect(player.lastError == nil)
+
         #if !targetEnvironment(simulator)
         if hardwareDecoding == .videoToolbox {
             #expect(player.mediaInformation.hardwareDecoder == "videotoolbox")
@@ -101,6 +111,7 @@ struct MPVNativeVideoOutputTests {
         #if !os(tvOS)
         #expect(abs(CMTimebaseGetTime(timebase).seconds - player.position.seconds) < 0.3)
         #endif
+
         #expect(CMTimebaseGetRate(timebase) == pausedClockRate)
 
         let lifecycle = await player.lifecycleDiagnostics()
@@ -114,7 +125,9 @@ struct MPVNativeVideoOutputTests {
                     + "position=\(player.position.seconds), rate=\(CMTimebaseGetRate(timebase)), "
                     + "state=\(player.state), ready=\(layer.isReadyForDisplay)"
             ) {
-                guard abs(player.position.seconds - destination) < 0.15, layer.isReadyForDisplay else { return false }
+                guard abs(player.position.seconds - destination) < 0.15, layer.isReadyForDisplay else {
+                    return false
+                }
 
                 #if os(tvOS)
                 return CMTimebaseGetRate(timebase) == 1

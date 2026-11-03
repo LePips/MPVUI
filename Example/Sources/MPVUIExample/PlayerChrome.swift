@@ -223,7 +223,6 @@ struct TrackMenu: View {
         .accessibilityIdentifier("tracksMenu")
     }
 
-    @ViewBuilder
     func trackSection(_ title: String, kind: MPVTrackType) -> some View {
         Section(title) {
             let tracks = model.details.tracks.filter { $0.type == kind }

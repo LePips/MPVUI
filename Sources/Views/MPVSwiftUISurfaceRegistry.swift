@@ -77,7 +77,9 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
     func activateMostRecentSurface(for player: MPVPlayer) {
         // A native surface may have claimed the player after restoration was
         // queued. Never let an older SwiftUI surface steal that newer owner.
-        guard !player.hasActiveRenderSurface else { return }
+        guard !player.hasActiveRenderSurface else {
+            return
+        }
 
         let key = ObjectIdentifier(player)
         let surfaces = liveSurfaces(for: key)
@@ -89,11 +91,16 @@ final class MPVSwiftUISurfaceRegistry<Surface: AnyObject> {
 
         surfacesByPlayer[key] = surfaces
 
-        guard let entry = surfaces.reversed().first(where: {
-            guard let surface = $0.surface.value else { return false }
+        guard let entry = surfaces.reversed()
+            .first(
+                where: {
+                    guard let surface = $0.surface.value else {
+                        return false
+                    }
 
-            return $0.isInWindow && isAttachedToWindow(surface)
-        }),
+                    return $0.isInWindow && isAttachedToWindow(surface)
+                }
+            ),
             let surface = entry.surface.value
         else {
             return

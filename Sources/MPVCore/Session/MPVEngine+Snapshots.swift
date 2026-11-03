@@ -54,39 +54,63 @@ package extension MPVSession {
         } ?? []
     }
 
-    static func parseTracks(_ node: MPVNodeValue?) -> [MPVMediaTrack] {
+    static func parseTracks(_ node: MPVNodeValue?, externalTracks: [ExternalTrack] = []) -> [MPVMediaTrack] {
         node?.arrayValue?.compactMap { value in
             guard let track = value.mapValue,
                   let id = track["id"]?.integerValue,
                   let rawType = track["type"]?.stringValue
-            else { return nil }
+            else {
+                return nil
+            }
 
             let type: MPVTrackType
 
             switch rawType {
-            case "video": type = .video
-            case "audio": type = .audio
-            case "sub": type = .subtitle
-            default: return nil
+            case "video":
+                type = .video
+            case "audio":
+                type = .audio
+            case "sub":
+                type = .subtitle
+            default:
+                return nil
             }
 
             let subtitleRole: MPVSubtitleRole? = switch track["main-selection"]?.integerValue {
-            case 0: .primary
-            case 1: .secondary
-            default: nil
+            case 0:
+                .primary
+            case 1:
+                .secondary
+            default:
+                nil
+            }
+
+            let path = track["external-filename"]?.stringValue
+            let external = externalTracks.first {
+                $0.type == type && path == mpvPath(for: $0.url)
+            }?.descriptor
+            let externalURL = path.flatMap { value in
+                value.hasPrefix("/") ? URL(fileURLWithPath: value) : URL(string: value)
             }
 
             return MPVMediaTrack(
                 id: Int(id),
                 type: type,
-                title: track["title"]?.stringValue,
-                language: track["lang"]?.stringValue,
+                title: external?.title ?? track["title"]?.stringValue,
+                language: external?.language ?? track["lang"]?.stringValue,
                 codec: track["codec"]?.stringValue,
                 isSelected: track["selected"]?.boolValue ?? false,
                 subtitleRole: subtitleRole,
                 isDefault: track["default"]?.boolValue ?? false,
                 isForced: track["forced"]?.boolValue ?? false,
-                isExternal: track["external"]?.boolValue ?? false
+                isExternal: track["external"]?.boolValue ?? false,
+                externalURL: externalURL,
+                clientID: external?.clientID,
+                sourceStreamIndex: track["ff-index"]?.integerValue.flatMap(Int.init(exactly:)),
+                sourceID: track["src-id"]?.integerValue.flatMap(Int.init(exactly:)),
+                isHearingImpaired: track["hearing-impaired"]?.boolValue ?? false,
+                isVisualImpaired: track["visual-impaired"]?.boolValue ?? false,
+                isCommentary: track["commentary"]?.boolValue ?? false
             )
         } ?? []
     }
@@ -259,7 +283,7 @@ package extension MPVSession {
         latestSnapshot.nativeVideoOutput = getString("current-vo")
         lifecycleDiagnostics.engineActivity.mediaSnapshots &+= 1
 
-        let tracks = Self.parseTracks(getNode("track-list"))
+        let tracks = Self.parseTracks(getNode("track-list"), externalTracks: externalTracks)
 
         // Keep discovered tracks while a pending load waits for a surface.
         if isLoading, tracks.isEmpty {
@@ -381,16 +405,19 @@ package extension MPVSession {
         lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
 
         updateContinuation.yield(
-            MPVEngineEmission(
-                generation: currentGeneration,
-                update: update,
-                snapshot: latestSnapshot
+            .update(
+                MPVEngineEmission(
+                    generation: currentGeneration,
+                    update: update,
+                    snapshot: latestSnapshot
+                )
             )
         )
     }
 
     func publishFatalError(_ error: MPVPlayerError, globally: Bool = false) {
-        completePiPSeek(false)
+        failPendingSeek(error)
+        cancelExternalTrackRequests()
         fatalPlaybackError = error
         lastState = .failed(error)
 
@@ -417,10 +444,12 @@ package extension MPVSession {
         lifecycleDiagnostics.engineActivity.publishedUpdates &+= 1
 
         updateContinuation.yield(
-            MPVEngineEmission(
-                generation: nil,
-                update: update,
-                snapshot: latestSnapshot
+            .update(
+                MPVEngineEmission(
+                    generation: nil,
+                    update: update,
+                    snapshot: latestSnapshot
+                )
             )
         )
     }

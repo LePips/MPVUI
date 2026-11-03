@@ -14,11 +14,11 @@ enum MPVPlatformDisplayMatchingTarget {
 
     static func make(for window: PlatformWindow?) -> (any MPVDisplayMatchingTarget)? {
         #if os(tvOS)
-        return window.map { MPVTVDisplayMatchingTarget(manager: $0.avDisplayManager) }
+        window.map { MPVTVDisplayMatchingTarget(manager: $0.avDisplayManager) }
         #else
         // iOS exposes presentation cadence hints, not AVDisplayManager. macOS
         // mode changes require a separate desktop-wide selection/restore policy.
-        return nil
+        nil
         #endif
     }
 }

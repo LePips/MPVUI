@@ -9,7 +9,6 @@ extension View {
             .accessibilityHidden(!visible)
     }
 
-    @ViewBuilder
     func playerSurfaceHitArea() -> some View {
         #if os(Android)
         // Compose buttons already hit-test their full layout bounds.
@@ -20,7 +19,6 @@ extension View {
         #endif
     }
 
-    @ViewBuilder
     func playerMediaTitle() -> some View {
         #if os(Android)
         self
@@ -30,7 +28,6 @@ extension View {
         #endif
     }
 
-    @ViewBuilder
     func playerMenu() -> some View {
         #if os(Android)
         self
@@ -45,7 +42,6 @@ extension View {
 /// One effect on the whole view produces a continuous trailing toolbar capsule.
 extension View {
 
-    @ViewBuilder
     func playerCapsule() -> some View {
         #if os(Android)
         self

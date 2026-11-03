@@ -1,7 +1,7 @@
 import Foundation
 
 /// Records cancellation even when it races with registering the native command.
-package final class MPVSubtitleQueryCancellation: @unchecked Sendable {
+package final class MPVOperationCancellation: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cancelled = false

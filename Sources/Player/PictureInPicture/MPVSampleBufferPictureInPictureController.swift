@@ -175,12 +175,16 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     }
 
     func start() {
-        guard !isInvalidated else { return }
+        guard !isInvalidated else {
+            return
+        }
         guard let controller = platformController else {
             fail(.pictureInPictureUnsupported)
             return
         }
-        guard !snapshot.isActive, !snapshot.isStarting, !snapshot.isStopping else { return }
+        guard !snapshot.isActive, !snapshot.isStarting, !snapshot.isStopping else {
+            return
+        }
 
         refreshPlatformState()
 
@@ -197,13 +201,21 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         let ready = compositionReady
         startPreparationTask = Task { @MainActor [weak self, weak controller] in
             let accepted = await preparation?.value ?? ready
-            guard !Task.isCancelled, let self, !self.isInvalidated,
-                  self.snapshot.isStarting, !self.stopRequested else { return }
+            guard !Task.isCancelled,
+                  let self,
+                  !self.isInvalidated,
+                  self.snapshot.isStarting,
+                  !self.stopRequested
+            else {
+                return
+            }
             guard accepted else {
-                self.didFailToStartPictureInPicture(error: MPVPlayerError.pictureInPictureFailed(
-                    operation: .start,
-                    message: "The native subtitle output could not prepare Picture in Picture."
-                ))
+                self.didFailToStartPictureInPicture(
+                    error: MPVPlayerError.pictureInPictureFailed(
+                        operation: .start,
+                        message: "The native subtitle output could not prepare Picture in Picture."
+                    )
+                )
                 return
             }
 
@@ -375,7 +387,9 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     }
 
     private func refreshNativeCompositionPolicy() {
-        guard !isInvalidated else { return }
+        guard !isInvalidated else {
+            return
+        }
 
         let requested = isRenderingInPictureInPicture || allowsAutomaticStartFromInline
         platformController?.canStartPictureInPictureAutomaticallyFromInline =
@@ -391,8 +405,13 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         let player = player
         compositionTask = Task { @MainActor [weak self, weak player] in
             let accepted = await player?.setNativePictureInPictureComposition(requested) ?? false
-            guard !Task.isCancelled, let self, !self.isInvalidated,
-                  self.compositionRequest == requested else { return false }
+            guard !Task.isCancelled,
+                  let self,
+                  !self.isInvalidated,
+                  self.compositionRequest == requested
+            else {
+                return false
+            }
 
             self.compositionReady = accepted
             self.compositionFailed = !accepted
@@ -444,7 +463,8 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
             // An exact endpoint seek can retire the VO at EOF without a new
             // frame or playback-restart. The engine's attributed EOF completes
             // that seek; there is no remaining display clock to converge.
-            if player.state == .ended, player.duration > .zero,
+            if player.state == .ended,
+               player.duration > .zero,
                target >= player.duration - .milliseconds(1)
             {
                 return true
@@ -466,7 +486,11 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
                 }
             }
 
-            do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
+            do {
+                try await Task.sleep(for: .milliseconds(20))
+            } catch {
+                return false
+            }
         }
 
         return false
@@ -574,7 +598,8 @@ extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictu
     }
 
     func requestSkip(by interval: CMTime, completion completionHandler: @escaping () -> Void) {
-        guard !isInvalidated, let player,
+        guard !isInvalidated,
+              let player,
               let target = MPVPictureInPicturePlaybackPolicy.seekTarget(
                   position: pendingSkipTarget ?? player.position,
                   interval: interval,
@@ -600,10 +625,12 @@ extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictu
                 }
 
                 if !succeeded, !Task.isCancelled, self?.latestSkipID == id {
-                    self?.fail(.pictureInPictureFailed(
-                        operation: .seek,
-                        message: "The Picture in Picture seek could not be completed."
-                    ))
+                    self?.fail(
+                        .pictureInPictureFailed(
+                            operation: .seek,
+                            message: "The Picture in Picture seek could not be completed."
+                        )
+                    )
                 }
             }
 
@@ -612,8 +639,14 @@ extension MPVSampleBufferPictureInPictureController: @MainActor AVPictureInPictu
         }
 
         requestTimeouts[id] = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(12)) } catch { return }
-            guard let self, !self.isInvalidated, self.pendingSkips[id] != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(12))
+            } catch {
+                return
+            }
+            guard let self, !self.isInvalidated, self.pendingSkips[id] != nil else {
+                return
+            }
 
             self.fail(.pictureInPictureTimedOut(operation: .seek))
             self.finishSkip(id)

@@ -107,7 +107,7 @@ struct MPVPlayerEmissionTests {
     }
 
     @Test
-    func `track accessors separate media types and unknown codecs do not request composition`() {
+    func `track accessors separate media types and unknown codecs conservatively request native composition`() {
         let player = MPVPlayer()
         let video = MPVMediaTrack(id: 1, type: .video)
         let audio = MPVMediaTrack(id: 2, type: .audio)
@@ -117,9 +117,11 @@ struct MPVPlayerEmissionTests {
         #expect(player.videoTracks == [video])
         #expect(player.audioTracks == [audio])
         #expect(player.subtitleTracks == [subtitle])
+
         player.selectSubtitle(subtitle.id)
 
-        #expect(player.videoFeatureRequestResult == nil)
+        #expect(player.videoFeatureRequestResult?.requestedFeatures == [.nativeSubtitles])
+        #expect(player.videoFeatureRequestResult?.outcome == .awaitingVideoMetadata)
         #expect(player.lastError == nil)
     }
 

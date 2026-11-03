@@ -61,18 +61,28 @@ final class MPVMacPictureInPictureController: NSObject {
     }
 
     var isPossible: Bool {
-        guard isSupported, !isInvalidated, !isActive, !isTransitioning,
-              let player, let sourceSurface,
+        guard isSupported,
+              !isInvalidated,
+              !isActive,
+              !isTransitioning,
+              let player,
+              let sourceSurface,
               sourceSurface.window != nil,
               sourceSurface.isActiveRenderingSurface,
-              sourceSurface.bounds.width > 0, sourceSurface.bounds.height > 0,
+              sourceSurface.bounds.width > 0,
+              sourceSurface.bounds.height > 0,
               let dimensions = player.mediaInformation.dimensions,
-              !dimensions.isEmpty, player.mediaInformation.sourceURL != nil
-        else { return false }
+              !dimensions.isEmpty,
+              player.mediaInformation.sourceURL != nil
+        else {
+            return false
+        }
 
         switch player.state {
-        case .ready, .playing, .paused, .buffering, .seeking: return true
-        default: return false
+        case .ready, .playing, .paused, .buffering, .seeking:
+            return true
+        default:
+            return false
         }
     }
 
@@ -143,11 +153,15 @@ final class MPVMacPictureInPictureController: NSObject {
     }
 
     func start() {
-        guard !isActive, !isTransitioning, !isInvalidated else { return }
+        guard !isActive, !isTransitioning, !isInvalidated else {
+            return
+        }
         guard isPossible, let surface = sourceSurface, let systemController else {
-            reportFailure(isSupported
-                ? .pictureInPictureNotReady
-                : .pictureInPictureUnsupported)
+            reportFailure(
+                isSupported
+                    ? .pictureInPictureNotReady
+                    : .pictureInPictureUnsupported
+            )
 
             return
         }
@@ -166,9 +180,14 @@ final class MPVMacPictureInPictureController: NSObject {
         content.view = hosting.container
 
         content.onAppear = { [weak self] in
-            guard let self, self.presentationGeneration == generation,
-                  self.hosting != nil, !self.isStopping, !self.isInvalidated
-            else { return }
+            guard let self,
+                  self.presentationGeneration == generation,
+                  self.hosting != nil,
+                  !self.isStopping,
+                  !self.isInvalidated
+            else {
+                return
+            }
 
             self.transitionTimeout?.cancel()
             self.transitionTimeout = nil
@@ -201,7 +220,9 @@ final class MPVMacPictureInPictureController: NSObject {
     }
 
     func stop() {
-        guard hosting != nil, !isStopping, !isInvalidated else { return }
+        guard hosting != nil, !isStopping, !isInvalidated else {
+            return
+        }
 
         isStopping = true
         isTransitioning = true
@@ -219,9 +240,13 @@ final class MPVMacPictureInPictureController: NSObject {
             // controller across it; the watchdog can dismiss and release PiP.
             let restored = await restore?() ?? true
 
-            guard !Task.isCancelled, let self, self.presentationGeneration == generation,
+            guard !Task.isCancelled,
+                  let self,
+                  self.presentationGeneration == generation,
                   let content = self.contentController
-            else { return }
+            else {
+                return
+            }
 
             if restored {
                 self.updateReplacementWindow(bringForward: true)
@@ -322,14 +347,25 @@ final class MPVMacPictureInPictureController: NSObject {
         let delay: Duration = restoring ? restorationTimeoutDuration : .seconds(5)
 
         transitionTimeout = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: delay) } catch { return }
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
 
-            guard let self, self.presentationGeneration == generation,
-                  self.hosting != nil, self.isTransitioning else { return }
+            guard let self,
+                  self.presentationGeneration == generation,
+                  self.hosting != nil,
+                  self.isTransitioning
+            else {
+                return
+            }
 
-            self.reportFailure(.pictureInPictureTimedOut(
-                operation: restoring ? .restoreInterface : starting ? .start : .stop
-            ))
+            self.reportFailure(
+                .pictureInPictureTimedOut(
+                    operation: restoring ? .restoreInterface : starting ? .start : .stop
+                )
+            )
 
             if let content = self.contentController {
                 try? self.systemController?.dismiss(content)

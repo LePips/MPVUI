@@ -4,14 +4,6 @@ import Foundation
 // Supplies native overlays and completes picture-in-picture seek requests.
 package extension MPVSession {
 
-    struct PiPSeek {
-
-        let id: UUID
-        let target: Duration
-        let continuation: CheckedContinuation<Bool, Never>
-        var sawSeek = false
-    }
-
     private struct NativePiPCompositionRequest: Sendable {
 
         let id: UInt64
@@ -22,37 +14,46 @@ package extension MPVSession {
     /// Waits until the native output has enqueued a frame in the requested
     /// subtitle mode before AVKit adopts its video-only sample-buffer source.
     func setNativePictureInPictureComposition(_ enabled: Bool) async -> Bool {
-        guard !Task.isCancelled else { return false }
+        guard !Task.isCancelled else {
+            return false
+        }
 
         let request: NativePiPCompositionRequest? = await withCheckedContinuation { continuation in
             queue.async { [weak self] in
-                guard let self else { continuation.resume(returning: nil)
+                guard let self else {
+                    continuation.resume(returning: nil)
                     return
                 }
 
                 self.nativePiPCompositionRequestID &+= 1
-                guard self.handle != nil, self.videoOutput == .sampleBuffer,
+                guard self.handle != nil,
+                      self.videoOutput == .sampleBuffer,
                       self.setPropertyImmediately("avfoundation-pip-active", to: enabled ? "yes" : "no") >= 0
                 else {
                     continuation.resume(returning: nil)
                     return
                 }
 
-                continuation.resume(returning: NativePiPCompositionRequest(
-                    id: self.nativePiPCompositionRequestID,
-                    generation: self.currentGeneration,
-                    handleCreation: self.lifecycleDiagnostics.handlesCreated
-                ))
+                continuation.resume(
+                    returning: NativePiPCompositionRequest(
+                        id: self.nativePiPCompositionRequestID,
+                        generation: self.currentGeneration,
+                        handleCreation: self.lifecycleDiagnostics.handlesCreated
+                    )
+                )
             }
         }
-        guard let request else { return false }
+        guard let request else {
+            return false
+        }
 
         let clock = ContinuousClock()
         let start = clock.now
         while !Task.isCancelled, start.duration(to: clock.now) < .seconds(2) {
             let acknowledged: Bool? = await withCheckedContinuation { continuation in
                 queue.async { [weak self] in
-                    guard let self, self.isCurrentNativePiPRequest(request),
+                    guard let self,
+                          self.isCurrentNativePiPRequest(request),
                           self.getFlag("avfoundation-pip-active") == enabled
                     else {
                         continuation.resume(returning: nil)
@@ -75,7 +76,11 @@ package extension MPVSession {
             if acknowledged == nil {
                 break
             }
-            do { try await Task.sleep(for: .milliseconds(10)) } catch { break }
+            do {
+                try await Task.sleep(for: .milliseconds(10))
+            } catch {
+                break
+            }
         }
         // A failed automatic arm must not leave the inline subtitles hidden.
         // Never undo a newer request or mutate a replacement media session.
@@ -111,7 +116,10 @@ package extension MPVSession {
                       self.getInt64("current-tracks/video/dolby-vision-profile") == nil,
                       let width = self.getInt64("osd-width"),
                       let height = self.getInt64("osd-height"),
-                      width > 0, height > 0, width <= 16384, height <= 16384
+                      width > 0,
+                      height > 0,
+                      width <= 16384,
+                      height <= 16384
                 else {
                     _ = self.runCommand(["overlay-remove", "63"])
                     continuation.resume(returning: false)
@@ -121,22 +129,26 @@ package extension MPVSession {
                 // runCommand is synchronous. This buffer remains pinned until
                 // mpv copies every row; no pointer escapes withUnsafeBytes.
                 let status = bitmap.bytes.withUnsafeBytes { bytes -> Int32 in
-                    guard let address = bytes.baseAddress else { return MPV_ERROR_INVALID_PARAMETER.rawValue }
+                    guard let address = bytes.baseAddress else {
+                        return MPV_ERROR_INVALID_PARAMETER.rawValue
+                    }
 
-                    return self.runCommand([
-                        "overlay-add",
-                        "63",
-                        "0",
-                        "0",
-                        "&\(UInt(bitPattern: address))",
-                        "0",
-                        "bgra",
-                        String(bitmap.width),
-                        String(bitmap.height),
-                        String(bitmap.stride),
-                        String(width),
-                        String(height),
-                    ])
+                    return self.runCommand(
+                        [
+                            "overlay-add",
+                            "63",
+                            "0",
+                            "0",
+                            "&\(UInt(bitPattern: address))",
+                            "0",
+                            "bgra",
+                            String(bitmap.width),
+                            String(bitmap.height),
+                            String(bitmap.stride),
+                            String(width),
+                            String(height),
+                        ]
+                    )
                 }
 
                 if status < 0 {
@@ -157,76 +169,7 @@ package extension MPVSession {
     }
 
     func seekForPictureInPicture(to time: Duration) async -> Bool {
-        await withCheckedContinuation { continuation in
-            queue.async { [weak self] in
-                guard let self, self.handle != nil, self.isFileLoaded || self.didReachEnd, self.lastSeekable else {
-                    continuation.resume(returning: false)
-                    return
-                }
-
-                self.completePiPSeek(false)
-
-                // Deliver already queued restarts before registering a new seek.
-                self.drainEvents()
-
-                guard self.handle != nil, self.isFileLoaded || self.didReachEnd, self.lastSeekable else {
-                    continuation.resume(returning: false)
-                    return
-                }
-
-                let target = self.lastDuration > .zero
-                    ? clamped(time, to: .zero ... self.lastDuration) : time.clampPositiveOrZero
-
-                if self.didReachEnd, target >= self.lastDuration {
-                    continuation.resume(returning: true)
-                    return
-                }
-
-                let id = UUID()
-                self.pendingPiPSeek = PiPSeek(id: id, target: target, continuation: continuation)
-
-                if self.didReachEnd, let sourceURL = self.sourceURL {
-                    // EOF retires the VO. Reopen the same source paused so a
-                    // backward PiP skip supplies a new destination frame and
-                    // timebase before completing AVKit's request.
-                    self.pendingPiPSeek?.sawSeek = true
-                    self.pendingStartTime = target
-                    self.pendingSeekAfterLoad = nil
-                    self.lastPosition = target
-                    self.shouldAutoPlay = false
-                    self.isPaused = true
-                    self.didReachEnd = false
-                    self.playbackRequestIsActive = true
-                    self.fatalPlaybackError = nil
-                    self.needsSourceLoad = true
-                    self.pendingExternalTracks = self.externalTracks
-                    self.startSecurityScopedAccessIfNeeded(for: sourceURL)
-                    self.publishState(.loading)
-                    self.loadPendingSourceIfPossible()
-                } else {
-                    let status = self.runCommand(["seek", Self.format(target), "absolute+exact"])
-
-                    guard status >= 0 else {
-                        self.publishCommandError(status, context: "Seek from picture in picture")
-                        self.completePiPSeek(false)
-                        return
-                    }
-                }
-
-                self.queue.asyncAfter(deadline: .now() + 8) { [weak self] in
-                    guard let self, self.pendingPiPSeek?.id == id else { return }
-
-                    self.completePiPSeek(false)
-                }
-            }
-        }
-    }
-
-    func completePiPSeek(_ success: Bool) {
-        let request = pendingPiPSeek
-
-        pendingPiPSeek = nil
-        request?.continuation.resume(returning: success)
+        await (try? performSeek(to: time, timeout: .seconds(8), pausesAfterEnd: true)) != nil
     }
 
     private func isCurrentNativePiPRequest(_ request: NativePiPCompositionRequest) -> Bool {

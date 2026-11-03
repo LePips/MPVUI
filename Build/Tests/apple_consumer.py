@@ -49,6 +49,7 @@ let package = Package(name: "Consumer", platforms: [.macOS(.v15)],
         source.mkdir(parents=True)
         (source / "Consumer.swift").write_text("""import Foundation
 import MPVUI
+import SwiftUI
 @main struct Consumer {
     @MainActor static func main() async {
         let configuration = MPVPlayerConfiguration(
@@ -59,6 +60,27 @@ import MPVUI
             renderingQuality: .init(isDebandingEnabled: true)
         )
         let player = MPVPlayer(configuration: configuration)
+        precondition(!player.isPlaybackReady && player.generation == 0)
+        var events = player.makeEventStream().makeAsyncIterator()
+        if case let .snapshot(snapshot) = await events.next()?.change {
+            precondition(snapshot.state == .idle && !snapshot.isPlaybackReady)
+        } else { preconditionFailure("Missing initial playback event") }
+        var timing = player.makeTimingStream().makeAsyncIterator()
+        let initialTiming = await timing.next()
+        precondition(initialTiming?.position == .zero)
+        let descriptor = MPVExternalTrack(url: URL(filePath: "/tmp/captions.srt"), type: .subtitle,
+                                          clientID: "captions", title: "English", language: "en", selection: .unselected)
+        precondition(descriptor.clientID == "captions")
+        _ = MPVTextSubtitleOverlay(snapshot: TextSubtitleSnapshot(), videoFrame: { $0 },
+                                   placementPolicy: .primaryAuthored, automaticPlacement: .container) { Text($0.text) }
+        _ = player.mediaInformation.presentationDimensions
+        _ = player.subtitleTracks.first?.sourceStreamIndex
+        _ = player.subtitleTracks.first?.subtitleCapabilities?.supportsTimelineQueries
+        do {
+            _ = try await player.seekAndWait(to: .seconds(2))
+            preconditionFailure("Unloaded media cannot seek")
+        } catch MPVPlayerError.seekUnavailable {
+        } catch { preconditionFailure(String(describing: error)) }
         precondition(!player.configuration.automaticallyPlays)
         precondition(player.configuration.isLoopingEnabled)
         precondition(player.configuration.initialBufferDuration == .seconds(2))

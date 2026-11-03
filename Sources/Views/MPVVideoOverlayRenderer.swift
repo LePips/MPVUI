@@ -52,25 +52,39 @@ final class MPVVideoOverlayRenderer {
     }
 
     func updateSize(_ proposedSize: CGSize, displayScale: CGFloat = 2, rasterSize: CGSize? = nil) {
-        guard proposedSize.width.isFinite, proposedSize.height.isFinite,
-              proposedSize.width > 0, proposedSize.height > 0,
-              displayScale.isFinite, displayScale > 0 else { return }
+        guard proposedSize.width.isFinite,
+              proposedSize.height.isFinite,
+              proposedSize.width > 0,
+              proposedSize.height > 0,
+              displayScale.isFinite,
+              displayScale > 0
+        else {
+            return
+        }
 
         // Supersample the overlay for cleaner text after native composition and
         // PiP downscaling. Match the bitmap's 2048-pixel allocation limit.
         let supersampling: CGFloat = 2
         var scale = min(displayScale * supersampling, 2048 / max(proposedSize.width, proposedSize.height))
 
-        if let rasterSize, rasterSize.width.isFinite, rasterSize.height.isFinite,
-           rasterSize.width > 0, rasterSize.height > 0
+        if let rasterSize,
+           rasterSize.width.isFinite,
+           rasterSize.height.isFinite,
+           rasterSize.width > 0,
+           rasterSize.height > 0
         {
-            scale = min(scale, supersampling * max(
-                rasterSize.width / proposedSize.width,
-                rasterSize.height / proposedSize.height
-            ))
+            scale = min(
+                scale,
+                supersampling * max(
+                    rasterSize.width / proposedSize.width,
+                    rasterSize.height / proposedSize.height
+                )
+            )
         }
 
-        guard proposedSize != size || displayScale != self.displayScale || scale != rasterScale else { return }
+        guard proposedSize != size || displayScale != self.displayScale || scale != rasterScale else {
+            return
+        }
 
         if proposedSize != size {
             size = proposedSize
@@ -110,17 +124,24 @@ final class MPVVideoOverlayRenderer {
     }
 
     private func setNeedsRender() {
-        guard !isInvalidated, size.width > 0, size.height > 0 else { return }
+        guard !isInvalidated, size.width > 0, size.height > 0 else {
+            return
+        }
 
         isDirty = true
-        guard renderTask == nil else { return }
+        guard renderTask == nil else {
+            return
+        }
 
         renderTask = Task { @MainActor [weak self] in
             // Deferring lets SwiftUI settle the change that invalidated the image.
             await Task.yield()
 
-            while let self, !self.isInvalidated, !Task.isCancelled, self
-                .isDirty
+            while let self,
+                  !self.isInvalidated,
+                  !Task.isCancelled,
+                  self
+                      .isDirty
             {
                 self.isDirty = false
                 // A burst replaces only the pending value. Rebuild SwiftUI's
@@ -139,14 +160,20 @@ final class MPVVideoOverlayRenderer {
                 let accepted = await self
                     .submit(bitmap)
 
-                guard !self.isInvalidated, !Task.isCancelled else { return }
+                guard !self.isInvalidated, !Task.isCancelled else {
+                    return
+                }
 
                 self
                     .availabilityChanged(bitmap != nil && accepted)
 
                 // Bound rapidly changing overlays to 30 updates/sec. Video is
                 // still scheduled independently at its original frame rate.
-                do { try await Task.sleep(for: .milliseconds(34)) } catch { return }
+                do {
+                    try await Task.sleep(for: .milliseconds(34))
+                } catch {
+                    return
+                }
             }
 
             self?.renderTask = nil

@@ -68,6 +68,17 @@ public extension MPVSession {
         queue.sync { latestSnapshot }
     }
 
+    /// Waits until the presentation sink has applied all previously enqueued updates.
+    package func synchronizeUpdates() async {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                if case .terminated = updateContinuation.yield(.barrier(continuation)) {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     package func closeImmediately() {
         guard !isClosed else { return }
 

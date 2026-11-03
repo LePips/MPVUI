@@ -82,8 +82,11 @@ package enum MPVVideoSignalParser {
 
     private static func string(_ node: MPVNodeValue?) -> String? {
         guard let text = node?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty, !["auto", "unknown", "unspecified"].contains(text.lowercased())
-        else { return nil }
+              !text.isEmpty,
+              !["auto", "unknown", "unspecified"].contains(text.lowercased())
+        else {
+            return nil
+        }
 
         return text
     }
@@ -94,8 +97,12 @@ package enum MPVVideoSignalParser {
     }
 
     private static func integer(_ node: MPVNodeValue?) -> Int? {
-        guard let value = number(node), value.rounded(.towardZero) == value,
-              value < Double(Int.max) else { return nil }
+        guard let value = number(node),
+              value.rounded(.towardZero) == value,
+              value < Double(Int.max)
+        else {
+            return nil
+        }
 
         return Int(value)
     }

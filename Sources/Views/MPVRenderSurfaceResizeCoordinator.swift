@@ -895,13 +895,11 @@ private extension MPVRenderSurfaceResizeCoordinator {
             }
 
             if let pending = pendingRequest,
-               pending.geometry == completed.geometry
+               pending.geometry == completed.geometry,
+               pending.kind != .final
+               || completed.commit.geometryChangeKind == .final
             {
-                if pending.kind != .final
-                    || completed.commit.geometryChangeKind == .final
-                {
-                    pendingRequest = nil
-                }
+                pendingRequest = nil
             }
 
             emit(.committed)

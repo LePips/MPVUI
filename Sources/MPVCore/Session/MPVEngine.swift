@@ -26,7 +26,7 @@ public final class MPVSession: @unchecked Sendable {
     package let queueValue: UInt8 = 1
     package let platform: MPVPlatformServices
     package let eventDrainSource: DispatchSourceUserDataAdd
-    package let updateContinuation: AsyncStream<MPVEngineEmission>.Continuation
+    package let updateContinuation: AsyncStream<MPVEngineDelivery>.Continuation
     package lazy var wakeupContext = WeakBox(self)
     package var isCoalescingPropertySnapshots = false
     package var pendingBufferSnapshot = false
@@ -63,6 +63,9 @@ public final class MPVSession: @unchecked Sendable {
     package var securityScopedURL: URL?
     package var externalTracks: [ExternalTrack] = []
     package var pendingExternalTracks: [ExternalTrack] = []
+    package var externalTrackRequests: [ExternalTrackRequest] = []
+    package var activeExternalTrackRequest: ExternalTrackRequest?
+    package var trackSelectionRevisions: [String: UInt64] = [:]
     package var externalSecurityScopedURLs: Set<URL> = []
     package var desiredProperties: [String: String]
     package var commandMutatedOptions: Set<String> = []
@@ -95,12 +98,12 @@ public final class MPVSession: @unchecked Sendable {
 
     package var lastTextSubtitleSnapshot = TextSubtitleSnapshot()
     package var isTextSubtitleInterceptionEnabled = false
-    package var nextSubtitleQueryID: UInt64 = 1
+    package var nextNativeCommandID: UInt64 = 1
     package var subtitleQueries: [UInt64: SubtitleQuery] = [:]
 
     // MARK: - Picture in picture
 
-    package var pendingPiPSeek: PiPSeek?
+    package var pendingSeek: SeekRequest?
     package var nativePiPCompositionRequestID: UInt64 = 0
 
     // MARK: - Diagnostics and color updates
@@ -135,12 +138,17 @@ public final class MPVSession: @unchecked Sendable {
         // This unified stream carries state and errors as well as diagnostics;
         // it must remain lossless. If logging needs backpressure in the future,
         // move logs to a separately bounded channel with explicit drop reporting.
-        let (updates, continuation) = AsyncStream<MPVEngineEmission>.makeStream()
+        let (updates, continuation) = AsyncStream<MPVEngineDelivery>.makeStream()
         updateContinuation = continuation
 
         updateDeliveryTask = Task {
             for await update in updates {
-                await sink(update)
+                switch update {
+                case let .update(emission):
+                    await sink(emission)
+                case let .barrier(continuation):
+                    continuation.resume()
+                }
             }
         }
 
@@ -156,7 +164,9 @@ public final class MPVSession: @unchecked Sendable {
         queue.setSpecific(key: queueKey, value: queueValue)
 
         eventDrainSource.setEventHandler { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                return
+            }
 
             self.lifecycleDiagnostics.engineActivity.nativeWakeups &+= Int64(truncatingIfNeeded: self.eventDrainSource.data)
             self.drainEvents()
@@ -181,6 +191,6 @@ public final class MPVSession: @unchecked Sendable {
         }
 
         updateContinuation.finish()
-        updateDeliveryTask.cancel()
+        // Drain accepted updates and delivery barriers after finishing the stream.
     }
 }

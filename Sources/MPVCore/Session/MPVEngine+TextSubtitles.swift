@@ -10,7 +10,7 @@ extension MPVSession {
 
     package struct SubtitleQuery {
 
-        let cancellation: MPVSubtitleQueryCancellation
+        let cancellation: MPVOperationCancellation
         let continuation: CheckedContinuation<[TimedTextSubtitleSnapshot], any Error>
     }
 
@@ -41,7 +41,7 @@ extension MPVSession {
     public func textSubtitleSnapshots(
         for track: MPVMediaTrackIdentifier
     ) async throws -> [TimedTextSubtitleSnapshot] {
-        let cancellation = MPVSubtitleQueryCancellation()
+        let cancellation = MPVOperationCancellation()
 
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
@@ -53,18 +53,20 @@ extension MPVSession {
                         return
                     }
                     guard let handle, isFileLoaded, track.type == .subtitle else {
-                        continuation.resume(throwing: MPVPlayerError.commandFailed(
-                            context: "Read text subtitles",
-                            code: MPV_ERROR_INVALID_PARAMETER.rawValue,
-                            message: "A loaded text subtitle track is required."
-                        ))
+                        continuation.resume(
+                            throwing: MPVPlayerError.commandFailed(
+                                context: "Read text subtitles",
+                                code: MPV_ERROR_INVALID_PARAMETER.rawValue,
+                                message: "A loaded text subtitle track is required."
+                            )
+                        )
 
                         return
                     }
 
-                    let id = nextSubtitleQueryID
+                    let id = nextNativeCommandID
 
-                    nextSubtitleQueryID &+= 1
+                    nextNativeCommandID &+= 1
 
                     subtitleQueries[id] = SubtitleQuery(
                         cancellation: cancellation,
@@ -74,7 +76,9 @@ extension MPVSession {
                     let command = ["sub-text-cues", String(track.mpvID)]
 
                     var arguments: [UnsafePointer<CChar>?] = command.map { argument in
-                        guard let duplicate = strdup(argument) else { return nil }
+                        guard let duplicate = strdup(argument) else {
+                            return nil
+                        }
 
                         return UnsafePointer(duplicate)
                     }
@@ -139,7 +143,7 @@ extension MPVSession {
         )
     }
 
-    package func cancelSubtitleQueries(matching cancellation: MPVSubtitleQueryCancellation? = nil) {
+    package func cancelSubtitleQueries(matching cancellation: MPVOperationCancellation? = nil) {
         for (id, query) in subtitleQueries where cancellation == nil || query.cancellation === cancellation {
             if let handle {
                 mpv_abort_async_command(handle, id)

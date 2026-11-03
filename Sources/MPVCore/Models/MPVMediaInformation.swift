@@ -51,6 +51,35 @@ public struct MPVMediaInformation: Equatable, Sendable {
     /// HDR source and output status.
     public let hdr: MPVHDRStatus
 
+    /// The video bounding size after pixel-aspect correction and clockwise rotation.
+    /// Returns `nil` until valid dimensions are known. Client zoom, crop, and window scaling are separate.
+    public var presentationDimensions: MPVVideoDimensions? {
+        guard let dimensions, dimensions.effectiveWidth > 0, dimensions.effectiveHeight > 0 else {
+            return nil
+        }
+
+        let width = dimensions.effectiveWidth
+        let height = dimensions.effectiveHeight
+        let angle = ((rotation % 360) + 360) % 360
+        switch angle {
+        case 0, 180:
+            return .init(width: width, height: height)
+        case 90, 270:
+            return .init(width: height, height: width)
+        default:
+            let radians = Double(angle) * .pi / 180
+            let rotatedWidth = abs(cos(radians)) * Double(width) + abs(sin(radians)) * Double(height)
+            let rotatedHeight = abs(sin(radians)) * Double(width) + abs(cos(radians)) * Double(height)
+            guard let width = Int(exactly: rotatedWidth.rounded(.up)),
+                  let height = Int(exactly: rotatedHeight.rounded(.up))
+            else {
+                return nil
+            }
+
+            return .init(width: width, height: height)
+        }
+    }
+
     /// Creates a snapshot, discarding negative durations and file sizes,
     /// and negative or non-finite frame rates.
     package init(

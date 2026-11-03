@@ -217,7 +217,8 @@ struct MPVCalibratedDisplayProfile {
         guard case let .calibratedICC(url, _) = policy,
               url.isFileURL,
               let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-              data.count >= 128, data.count <= 16 * 1024 * 1024,
+              data.count >= 128,
+              data.count <= 16 * 1024 * 1024,
               String(data: data[12 ..< 16], encoding: .ascii) == "mntr",
               String(data: data[16 ..< 20], encoding: .ascii) == "RGB ",
               let profile = CGColorSpace(iccData: data as CFData),
@@ -235,7 +236,9 @@ struct MPVCalibratedDisplayProfile {
               let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
               data.count <= 16 * 1024 * 1024,
               let text = String(data: data, encoding: .utf8)
-        else { return false }
+        else {
+            return false
+        }
 
         var size: Int?
         var entries = 0
@@ -246,7 +249,11 @@ struct MPVCalibratedDisplayProfile {
         // contract active without a calibration LUT.
         func number(_ token: Substring) -> Float? {
             guard token.allSatisfy({ "0123456789.-+e".contains($0) }),
-                  let value = Float(token), value.isFinite else { return nil }
+                  let value = Float(token),
+                  value.isFinite
+            else {
+                return nil
+            }
 
             return value
         }
@@ -263,7 +270,9 @@ struct MPVCalibratedDisplayProfile {
             }
 
             let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
-            guard let first = parts.first else { continue }
+            guard let first = parts.first else {
+                continue
+            }
 
             if first == "DOMAIN_MIN" || first == "DOMAIN_MAX" {
                 // The native parser treats DOMAIN as a table-output rescale,
@@ -271,36 +280,55 @@ struct MPVCalibratedDisplayProfile {
                 let domainParts = line.split(separator: " ", omittingEmptySubsequences: false)
                 let expected: Float = first == "DOMAIN_MIN" ? 0 : 1
 
-                guard entries == 0, domains.insert(String(first)).inserted,
-                      domainParts.count == 4, domainParts.first == first,
+                guard entries == 0,
+                      domains.insert(String(first)).inserted,
+                      domainParts.count == 4,
+                      domainParts.first == first,
                       domainParts.dropFirst().allSatisfy({ number($0) == expected })
-                else { return false }
+                else {
+                    return false
+                }
 
                 continue
             }
 
             if first == "LUT_3D_SIZE" {
-                guard entries == 0, size == nil, parts.count == 2,
-                      let value = Int(parts[1]), (2 ... 65).contains(value),
-                      line == "LUT_3D_SIZE \(value)" else { return false }
+                guard entries == 0,
+                      size == nil,
+                      parts.count == 2,
+                      let value = Int(parts[1]),
+                      (2 ... 65).contains(value),
+                      line == "LUT_3D_SIZE \(value)"
+                else {
+                    return false
+                }
 
                 size = value
                 continue
             }
 
-            guard size != nil, parts.count == 3, parts.allSatisfy({ number($0) != nil }),
-                  line.allSatisfy({ "0123456789.-+e \t".contains($0) }) else { return false }
+            guard size != nil,
+                  parts.count == 3,
+                  parts.allSatisfy({ number($0) != nil }),
+                  line.allSatisfy({ "0123456789.-+e \t".contains($0) })
+            else {
+                return false
+            }
 
             if entries == 0 {
                 // Native header parsing recognizes the first table row only
                 // when its very first byte is a digit or minus sign.
-                guard let initial = line.first, "0123456789-".contains(initial) else { return false }
+                guard let initial = line.first, "0123456789-".contains(initial) else {
+                    return false
+                }
             }
 
             entries += 1
         }
 
-        guard let size else { return false }
+        guard let size else {
+            return false
+        }
 
         return entries == size * size * size
     }

@@ -17,6 +17,9 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
     public package(set) var isPaused = true
     /// Whether playback has produced a frame for this load.
     public package(set) var hasPlaybackFrame = false
+    /// Whether the source has completed its initial playback restart, including audio-only or paused playback.
+    /// Remains true through seeks and buffering. Cleared on loading, stop, EOF, and fatal failure.
+    public package(set) var isPlaybackReady = false
     /// The current chapter index, or `nil` when no chapter is active.
     public package(set) var currentChapterIndex: Int?
     /// The playback volume in mpv's `0...100` range.
@@ -108,7 +111,15 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
                 hasPlaybackFrame = false
                 currentChapterIndex = nil
 
-            default: break
+            default:
+                break
+            }
+
+            switch value {
+            case .loading, .stopped, .idle, .ended, .failed:
+                isPlaybackReady = false
+            default:
+                break
             }
 
             if value == .stopped || value == .idle {
@@ -119,7 +130,8 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
                 error = failure
             }
 
-        case let .paused(value): isPaused = value
+        case let .paused(value):
+            isPaused = value
 
         case let .timing(value, total, seekable):
             position = value
@@ -127,13 +139,23 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
             isSeekable = seekable
             mediaInformation.duration = total > .zero ? total : nil
 
-        case let .frameRate(value): mediaInformation.framesPerSecond = value
+        case let .frameRate(value):
+            mediaInformation.framesPerSecond = value
 
-        case let .chapter(value): currentChapterIndex = value
+        case let .chapter(value):
+            currentChapterIndex = value
 
-        case let .videoFrame(value): hasPlaybackFrame = value
+        case let .videoFrame(value):
+            hasPlaybackFrame = value
 
-        case let .buffer(value): buffer = value
+        case let .playbackReady(value):
+            isPlaybackReady = value
+
+        case .seekCompleted, .externalTrackLoaded:
+            break
+
+        case let .buffer(value):
+            buffer = value
 
         case let .media(value):
             mediaInformation = value
@@ -142,18 +164,22 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
                 duration = total
             }
 
-        case let .diagnostics(value): diagnostics = value
+        case let .diagnostics(value):
+            diagnostics = value
 
-        case let .dolbyVision(value): dolbyVision = value
+        case let .dolbyVision(value):
+            dolbyVision = value
 
-        case let .color(value): color = value
+        case let .color(value):
+            color = value
 
         case let .audio(value, muted, rate):
             volume = value
             isMuted = muted
             playbackRate = rate
 
-        case let .textSubtitles(value): subtitles = value
+        case let .textSubtitles(value):
+            subtitles = value
 
         case let .error(value, fatal):
             error = value
@@ -161,10 +187,12 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
             if fatal {
                 state = .failed(value)
                 hasPlaybackFrame = false
+                isPlaybackReady = false
                 currentChapterIndex = nil
             }
 
-        case .log: break
+        case .log:
+            break
         }
     }
 }

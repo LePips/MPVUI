@@ -57,8 +57,9 @@ package extension MPVSession {
 
     func attach(to target: MPVRenderTarget) {
         queue.async { [weak self] in
-            guard let self, !self.isClosed else { return }
-            guard !self.didRejectNativeOutput else { return }
+            guard let self, !self.isClosed, !self.didRejectNativeOutput else {
+                return
+            }
 
             if self.usesAndroidOutput {
                 if let previous = self.renderTarget, previous.layerAddress == target.layerAddress {
@@ -197,11 +198,8 @@ package extension MPVSession {
     func renderOutputSize() async -> MPVRenderOutputSize? {
         await withCheckedContinuation { continuation in
             queue.async { [weak self] in
-                guard let self else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                guard let values = self.getNode("osd-dimensions")?.mapValue,
+                guard let self,
+                      let values = self.getNode("osd-dimensions")?.mapValue,
                       let widthValue = values["w"]?.integerValue,
                       let heightValue = values["h"]?.integerValue,
                       let width = Int(exactly: widthValue),

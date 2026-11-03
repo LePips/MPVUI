@@ -97,14 +97,20 @@ indirect enum CoreValue {
     static func decode(_ bytes: UnsafeBufferPointer<UInt8>) throws -> Self {
         struct InvalidRecord: Error {}
 
-        guard bytes.count <= 32 * 1024 * 1024, bytes.count >= 9,
-              Array(bytes.prefix(8)) == [77, 80, 86, 67, 1, 0, 0, 0] else { throw InvalidRecord() }
+        guard bytes.count <= 32 * 1024 * 1024,
+              bytes.count >= 9,
+              Array(bytes.prefix(8)) == [77, 80, 86, 67, 1, 0, 0, 0]
+        else {
+            throw InvalidRecord()
+        }
 
         var offset = 8
 
         func scalar<T: FixedWidthInteger>(_: T.Type) throws -> T {
             let count = MemoryLayout<T>.size
-            guard offset <= bytes.count - count else { throw InvalidRecord() }
+            guard offset <= bytes.count - count else {
+                throw InvalidRecord()
+            }
 
             var value: T = 0
 
@@ -118,22 +124,29 @@ indirect enum CoreValue {
         }
 
         func read(_ depth: Int) throws -> Self {
-            guard depth < 32, offset < bytes.count else { throw InvalidRecord() }
+            guard depth < 32, offset < bytes.count else {
+                throw InvalidRecord()
+            }
 
             let tag = bytes[offset]
 
             offset += 1
 
             switch tag {
-            case 0: return .null
+            case 0:
+                return .null
 
-            case 1, 2: return .flag(tag == 2)
+            case 1, 2:
+                return .flag(tag == 2)
 
-            case 3: return try .integer(scalar(Int64.self))
+            case 3:
+                return try .integer(scalar(Int64.self))
 
             case 4:
                 let number = try Double(bitPattern: scalar(UInt64.self))
-                guard number.isFinite else { throw InvalidRecord() }
+                guard number.isFinite else {
+                    throw InvalidRecord()
+                }
 
                 return .number(number)
 
@@ -142,7 +155,9 @@ indirect enum CoreValue {
 
                 guard length <= bytes.count - offset,
                       let string = String(bytes: bytes[offset ..< (offset + length)], encoding: .utf8)
-                else { throw InvalidRecord() }
+                else {
+                    throw InvalidRecord()
+                }
 
                 offset += length
 
@@ -150,7 +165,9 @@ indirect enum CoreValue {
 
             case 6, 7:
                 let count = try Int(scalar(UInt32.self))
-                guard count <= bytes.count - offset else { throw InvalidRecord() }
+                guard count <= bytes.count - offset else {
+                    throw InvalidRecord()
+                }
 
                 if tag == 6 {
                     return try .list((0 ..< count).map { _ in try read(depth + 1) })
@@ -159,19 +176,24 @@ indirect enum CoreValue {
                 var fields: [String: Self] = [:]
 
                 for _ in 0 ..< count {
-                    guard let key = try read(depth + 1).text, fields[key] == nil else { throw InvalidRecord() }
+                    guard let key = try read(depth + 1).text, fields[key] == nil else {
+                        throw InvalidRecord()
+                    }
 
                     fields[key] = try read(depth + 1)
                 }
 
                 return .record(fields)
 
-            default: throw InvalidRecord()
+            default:
+                throw InvalidRecord()
             }
         }
 
         let result = try read(0)
-        guard offset == bytes.count else { throw InvalidRecord() }
+        guard offset == bytes.count else {
+            throw InvalidRecord()
+        }
 
         return result
     }
@@ -313,43 +335,65 @@ extension CoreValue {
     }
 
     static func failure(_ error: MPVPlayerError?) -> Self {
-        guard let error else { return .null }
+        guard let error else {
+            return .null
+        }
 
         var fields: [String: Self] = ["message": .string(error.message)]
 
         switch error {
-        case .clientCreationFailed: fields["type"] = .string("clientCreationFailed")
+        case .clientCreationFailed:
+            fields["type"] = .string("clientCreationFailed")
 
-        case .clientUnavailable: fields["type"] = .string("clientUnavailable")
+        case .clientUnavailable:
+            fields["type"] = .string("clientUnavailable")
 
-        case let .initializationFailed(context, code, _): fields.merge([
-                "type": .string("initializationFailed"),
-                "context": .string(context),
-                "code": .integer(Int64(code))
-            ]) { _, new in new }
+        case let .initializationFailed(context, code, _):
+            fields.merge(
+                [
+                    "type": .string("initializationFailed"),
+                    "context": .string(context),
+                    "code": .integer(Int64(code))
+                ]
+            ) { _, new in new }
 
-        case let .loadFailed(code, _): fields.merge(["type": .string("loadFailed"), "code": .integer(Int64(code))]) { _, new in new }
+        case let .loadFailed(code, _):
+            fields.merge(["type": .string("loadFailed"), "code": .integer(Int64(code))]) { _, new in new }
 
-        case let .playbackFailed(code, _): fields
-            .merge(["type": .string("playbackFailed"), "code": .integer(Int64(code))]) { _, new in new }
+        case let .playbackFailed(code, _):
+            fields
+                .merge(["type": .string("playbackFailed"), "code": .integer(Int64(code))]) { _, new in new }
 
-        case let .commandFailed(context, code, _): fields.merge([
-                "type": .string("commandFailed"),
-                "context": .string(context),
-                "code": .integer(Int64(code))
-            ]) { _, new in new }
+        case let .commandFailed(context, code, _):
+            fields.merge(
+                [
+                    "type": .string("commandFailed"),
+                    "context": .string(context),
+                    "code": .integer(Int64(code))
+                ]
+            ) { _, new in new }
 
-        case .nativeVideoOutputUnavailable: fields["type"] = .string("nativeVideoOutputUnavailable")
+        case .nativeVideoOutputUnavailable:
+            fields["type"] = .string("nativeVideoOutputUnavailable")
 
-        case let .reservedProperty(name): fields["type"] = .string("reservedProperty")
+        case let .reservedProperty(name):
+            fields["type"] = .string("reservedProperty")
             fields["name"] = .string(MPVOptionOwnership.normalizedProperty(name))
 
-        case let .invalidSubtitleTrack(track): fields["type"] = .string("invalidSubtitleTrack")
+        case let .invalidSubtitleTrack(track):
+            fields["type"] = .string("invalidSubtitleTrack")
             fields["track"] = .identifier(track)
 
-        case .eventQueueOverflow: fields["type"] = .string("eventQueueOverflow")
+        case let .externalTrackFailed(source, code, _):
+            fields["type"] = .string("externalTrackFailed")
+            fields["clientID"] = .value(source.clientID)
+            fields["code"] = .integer(Int64(code))
 
-        default: fields["type"] = .string("platformFailure")
+        case .eventQueueOverflow:
+            fields["type"] = .string("eventQueueOverflow")
+
+        default:
+            fields["type"] = .string("platformFailure")
         }
 
         return .record(fields)
@@ -369,16 +413,26 @@ extension CoreValue {
         let dovi = value.dolbyVision
 
         let state: String = switch value.state {
-        case .idle: "IDLE"
-        case .loading: "LOADING"
-        case .ready: "READY"
-        case .playing: "PLAYING"
-        case .paused: "PAUSED"
-        case .buffering: "BUFFERING"
-        case .seeking: "SEEKING"
-        case .ended: "ENDED"
-        case .stopped: "STOPPED"
-        case .failed: "FAILED"
+        case .idle:
+            "IDLE"
+        case .loading:
+            "LOADING"
+        case .ready:
+            "READY"
+        case .playing:
+            "PLAYING"
+        case .paused:
+            "PAUSED"
+        case .buffering:
+            "BUFFERING"
+        case .seeking:
+            "SEEKING"
+        case .ended:
+            "ENDED"
+        case .stopped:
+            "STOPPED"
+        case .failed:
+            "FAILED"
         }
 
         var result: [String: Self] = [
@@ -388,6 +442,7 @@ extension CoreValue {
             "seekable": .flag(value.isSeekable),
             "paused": .flag(value.isPaused),
             "hasVideoFrame": .flag(value.hasVideoFrame),
+            "isPlaybackReady": .flag(value.isPlaybackReady),
             "volume": .number(value.volume),
             "muted": .flag(value.isMuted),
             "playbackRate": .number(value.playbackRate),
@@ -406,121 +461,170 @@ extension CoreValue {
 
         let dimensions = media.dimensions ?? .empty
 
-        result["dimensions"] = .record([
-            "width": .value(dimensions.width),
-            "height": .value(dimensions.height),
-            "rotation": .value(media.rotation),
-            "displayWidth": .value(dimensions.displayWidth),
-            "displayHeight": .value(dimensions.displayHeight)
-        ])
+        result["dimensions"] = .record(
+            [
+                "width": .value(dimensions.width),
+                "height": .value(dimensions.height),
+                "rotation": .value(media.rotation),
+                "displayWidth": .value(dimensions.displayWidth),
+                "displayHeight": .value(dimensions.displayHeight)
+            ]
+        )
 
-        result["tracks"] = .list(media.tracks.map { track in .record([
-            "id": .identifier(track.id),
-            "title": .value(track.title),
-            "language": .value(track.language),
-            "codec": .value(track.codec),
-            "isSelected": .flag(track.isSelected),
-            "isDefault": .flag(track.isDefault),
-            "isForced": .flag(track.isForced),
-            "isExternal": .flag(track.isExternal),
-            "requiresSubtitleRenderer": .flag(track.requiresSubtitleRenderer),
-            "subtitleRole": .value(track.subtitleRole.map { $0 == .primary ? "PRIMARY" : "SECONDARY" }),
-        ]) })
+        result["tracks"] = .list(
+            media.tracks.map { track in
+                .record(
+                    [
+                        "id": .identifier(track.id),
+                        "title": .value(track.title),
+                        "language": .value(track.language),
+                        "codec": .value(track.codec),
+                        "isSelected": .flag(track.isSelected),
+                        "isDefault": .flag(track.isDefault),
+                        "isForced": .flag(track.isForced),
+                        "isExternal": .flag(track.isExternal),
+                        "externalURL": .value(track.externalURL?.absoluteString),
+                        "clientID": .value(track.clientID),
+                        "sourceStreamIndex": .value(track.sourceStreamIndex),
+                        "sourceID": .value(track.sourceID),
+                        "isHearingImpaired": .flag(track.isHearingImpaired),
+                        "isVisualImpaired": .flag(track.isVisualImpaired),
+                        "isCommentary": .flag(track.isCommentary),
+                        "supportsLiveText": .flag(track.subtitleCapabilities?.supportsLiveText == true),
+                        "supportsTimelineQueries": .flag(track.subtitleCapabilities?.supportsTimelineQueries == true),
+                        "requiresSubtitleRenderer": .flag(track.requiresSubtitleRenderer),
+                        "subtitleRole": .value(track.subtitleRole.map { $0 == .primary ? "PRIMARY" : "SECONDARY" }),
+                    ]
+                )
+            }
+        )
 
-        result["chapters"] = .list(media.chapters.map { .record([
-            "id": .value($0.id),
-            "title": .value($0.title),
-            "startTime": .number($0.startTime.seconds),
-            "endTime": .value($0.endTime?.seconds)
-        ]) })
+        result["chapters"] = .list(
+            media.chapters.map {
+                .record(
+                    [
+                        "id": .value($0.id),
+                        "title": .value($0.title),
+                        "startTime": .number($0.startTime.seconds),
+                        "endTime": .value($0.endTime?.seconds)
+                    ]
+                )
+            }
+        )
 
-        result["buffer"] = .record([
-            "isBuffering": .flag(buffer.isBuffering),
-            "progress": .number(buffer.progress),
-            "secondsBufferedAhead": .number(buffer.bufferedDurationAhead.seconds),
-            "bufferedEnd": .value(buffer.bufferedEnd?.seconds),
-            "bytesAhead": .integer(buffer.bytesAhead),
-            "totalBytes": .value(buffer.totalBytes),
-            "inputRate": .integer(buffer.inputRate),
-            "seekableRanges": .list(buffer.seekableRanges.map { .record([
-                "start": .number($0.lowerBound.seconds),
-                "end": .number($0.upperBound.seconds)
-            ]) }),
-        ])
+        result["buffer"] = .record(
+            [
+                "isBuffering": .flag(buffer.isBuffering),
+                "progress": .number(buffer.progress),
+                "secondsBufferedAhead": .number(buffer.bufferedDurationAhead.seconds),
+                "bufferedEnd": .value(buffer.bufferedEnd?.seconds),
+                "bytesAhead": .integer(buffer.bytesAhead),
+                "totalBytes": .value(buffer.totalBytes),
+                "inputRate": .integer(buffer.inputRate),
+                "seekableRanges": .list(
+                    buffer.seekableRanges.map {
+                        .record(
+                            [
+                                "start": .number($0.lowerBound.seconds),
+                                "end": .number($0.upperBound.seconds)
+                            ]
+                        )
+                    }
+                ),
+            ]
+        )
 
-        result["dolbyVision"] = .record([
-            "requestedPolicy": .string(dovi.requestedPolicy == .strict ? "STRICT" : "PROFILE7_COMPATIBILITY"),
-            "sourceProfile": .value(dovi.sourceProfile),
-            "sourceBaseLayerCompatibilityID": .value(dovi.sourceBaseLayerCompatibilityID),
-            "effectiveProfile": .value(dovi.effectiveProfile),
-            "effectiveBaseLayerCompatibilityID": .value(dovi.effectiveBaseLayerCompatibilityID),
-            "nativeValidation": .string(dovi.nativeValidation.rawValue.uppercased()),
-            "conversion": .string(dovi.conversion == .notRequested ? "NOT_REQUESTED" : dovi.conversion.rawValue.uppercased()),
-            "enhancementLayer": .string(dovi.enhancementLayer.rawValue.uppercased()),
-            "reason": .value(dovi.reason),
-        ])
+        result["dolbyVision"] = .record(
+            [
+                "requestedPolicy": .string(dovi.requestedPolicy == .strict ? "STRICT" : "PROFILE7_COMPATIBILITY"),
+                "sourceProfile": .value(dovi.sourceProfile),
+                "sourceBaseLayerCompatibilityID": .value(dovi.sourceBaseLayerCompatibilityID),
+                "effectiveProfile": .value(dovi.effectiveProfile),
+                "effectiveBaseLayerCompatibilityID": .value(dovi.effectiveBaseLayerCompatibilityID),
+                "nativeValidation": .string(dovi.nativeValidation.rawValue.uppercased()),
+                "conversion": .string(dovi.conversion == .notRequested ? "NOT_REQUESTED" : dovi.conversion.rawValue.uppercased()),
+                "enhancementLayer": .string(dovi.enhancementLayer.rawValue.uppercased()),
+                "reason": .value(dovi.reason),
+            ]
+        )
 
         let presentation = media.hdr.presentation
 
-        result["hdr"] = .record([
-            "source": .signal(media.hdr.source),
-            "decoded": .signal(media.hdr.decoded),
-            "videoOutputInput": .signal(media.hdr.videoOutputInput),
-            "output": .signal(media.hdr.output),
-            "displayCapabilities": .record([
-                "wideGamut": .value(media.hdr.displayCapabilities.supportsWideGamut),
-                "hdr10": .value(media.hdr.displayCapabilities.supportsHDR10),
-                "hlg": .value(media.hdr.displayCapabilities.supportsHLG),
-                "dolbyVision": .value(media.hdr.displayCapabilities.supportsDolbyVision),
-                "refreshRate": .value(media.hdr.displayCapabilities.refreshRate)
-            ]),
-            "presentation": .record([
-                "requestedPolicy": .string(presentation.requestedPolicy == .disabled ? "DISABLED" : "AUTOMATIC"),
-                "backend": .string(presentation.backend == .nativeSurface ? "NATIVE_SURFACE" : "GPU"),
-                "configuredDynamicRange": .string(presentation.configuredDynamicRange == .sdr ? "SDR" : "UNKNOWN"),
-                "actualDynamicRange": .string("UNKNOWN"),
-            ]),
-        ])
+        result["hdr"] = .record(
+            [
+                "source": .signal(media.hdr.source),
+                "decoded": .signal(media.hdr.decoded),
+                "videoOutputInput": .signal(media.hdr.videoOutputInput),
+                "output": .signal(media.hdr.output),
+                "displayCapabilities": .record(
+                    [
+                        "wideGamut": .value(media.hdr.displayCapabilities.supportsWideGamut),
+                        "hdr10": .value(media.hdr.displayCapabilities.supportsHDR10),
+                        "hlg": .value(media.hdr.displayCapabilities.supportsHLG),
+                        "dolbyVision": .value(media.hdr.displayCapabilities.supportsDolbyVision),
+                        "refreshRate": .value(media.hdr.displayCapabilities.refreshRate)
+                    ]
+                ),
+                "presentation": .record(
+                    [
+                        "requestedPolicy": .string(presentation.requestedPolicy == .disabled ? "DISABLED" : "AUTOMATIC"),
+                        "backend": .string(presentation.backend == .nativeSurface ? "NATIVE_SURFACE" : "GPU"),
+                        "configuredDynamicRange": .string(presentation.configuredDynamicRange == .sdr ? "SDR" : "UNKNOWN"),
+                        "actualDynamicRange": .string("UNKNOWN"),
+                    ]
+                ),
+            ]
+        )
 
-        result["diagnostics"] = .record([
-            "videoCodec": .value(media.videoCodec),
-            "audioCodec": .value(media.audioCodec),
-            "hardwareDecoder": .value(media.hardwareDecoder),
-            "videoOutput": .value(value.nativeVideoOutput),
-            "containerFramesPerSecond": .value(diagnostics.containerFramesPerSecond ?? media.framesPerSecond),
-            "audioChannels": .value(diagnostics.audio.sourceChannels),
-            "outputChannels": .value(diagnostics.audio.outputChannels),
-            "audioOutput": .value(diagnostics.audio.output),
-            "outputFormat": .value(diagnostics.audio.outputFormat),
-            "decoderDroppedFrames": .value(diagnostics.decoderDroppedFrames),
-            "outputDroppedFrames": .value(diagnostics.outputDroppedFrames),
-            "mistimedFrames": .value(diagnostics.mistimedFrames),
-            "delayedFrames": .value(diagnostics.delayedFrames),
-            "audioVideoDriftSeconds": .value(diagnostics.audioVideoDriftSeconds),
-            "estimatedFilterFramesPerSecond": .value(diagnostics.estimatedFilterFramesPerSecond),
-            "nominalDisplayFramesPerSecond": .value(diagnostics.nominalDisplayFramesPerSecond),
-            "estimatedDisplayFramesPerSecond": .value(diagnostics.estimatedDisplayFramesPerSecond),
-            "pixelFormat": .value(diagnostics.decoder.decodedPixelFormat),
-            "interop": .value(diagnostics.decoder.interop),
-            "decoder": .value(diagnostics.decoder.selectedDecoder),
-            "deinterlaceActive": .value(diagnostics.deinterlace.isActive),
-            "interlaced": .value(diagnostics.deinterlace.isOutputFrameInterlaced),
-            "filters": .list(diagnostics.deinterlace.effectiveFilter.map { [.string($0)] } ?? []),
-            "effectiveOptions": .strings(diagnostics.renderingQuality.effectiveOptions),
-            "renderPasses": .list((diagnostics.freshRenderPasses ?? []).map { .record([
-                "name": .string($0.name),
-                "averageNanoseconds": .value($0.averageNanoseconds)
-            ]) }),
-            "startLatencySeconds": .value(diagnostics.startLatencySeconds),
-            "seekLatencySeconds": .value(diagnostics.seekLatencySeconds),
-            "fallbackReasons": .list(diagnostics.fallbackReasons.map(Self.string)),
-            "renderingPreset": .string(diagnostics.renderingQuality.resolvedPreset == .highQuality ? "HIGH_QUALITY" : diagnostics
-                .renderingQuality
-                .resolvedPreset
-                .rawValue
-                .uppercased()),
-            "unsupportedFeatures": .list(diagnostics.renderingQuality.unsupportedFeatures.map(Self.string)),
-        ])
+        result["diagnostics"] = .record(
+            [
+                "videoCodec": .value(media.videoCodec),
+                "audioCodec": .value(media.audioCodec),
+                "hardwareDecoder": .value(media.hardwareDecoder),
+                "videoOutput": .value(value.nativeVideoOutput),
+                "containerFramesPerSecond": .value(diagnostics.containerFramesPerSecond ?? media.framesPerSecond),
+                "audioChannels": .value(diagnostics.audio.sourceChannels),
+                "outputChannels": .value(diagnostics.audio.outputChannels),
+                "audioOutput": .value(diagnostics.audio.output),
+                "outputFormat": .value(diagnostics.audio.outputFormat),
+                "decoderDroppedFrames": .value(diagnostics.decoderDroppedFrames),
+                "outputDroppedFrames": .value(diagnostics.outputDroppedFrames),
+                "mistimedFrames": .value(diagnostics.mistimedFrames),
+                "delayedFrames": .value(diagnostics.delayedFrames),
+                "audioVideoDriftSeconds": .value(diagnostics.audioVideoDriftSeconds),
+                "estimatedFilterFramesPerSecond": .value(diagnostics.estimatedFilterFramesPerSecond),
+                "nominalDisplayFramesPerSecond": .value(diagnostics.nominalDisplayFramesPerSecond),
+                "estimatedDisplayFramesPerSecond": .value(diagnostics.estimatedDisplayFramesPerSecond),
+                "pixelFormat": .value(diagnostics.decoder.decodedPixelFormat),
+                "interop": .value(diagnostics.decoder.interop),
+                "decoder": .value(diagnostics.decoder.selectedDecoder),
+                "deinterlaceActive": .value(diagnostics.deinterlace.isActive),
+                "interlaced": .value(diagnostics.deinterlace.isOutputFrameInterlaced),
+                "filters": .list(diagnostics.deinterlace.effectiveFilter.map { [.string($0)] } ?? []),
+                "effectiveOptions": .strings(diagnostics.renderingQuality.effectiveOptions),
+                "renderPasses": .list(
+                    (diagnostics.freshRenderPasses ?? []).map {
+                        .record(
+                            [
+                                "name": .string($0.name),
+                                "averageNanoseconds": .value($0.averageNanoseconds)
+                            ]
+                        )
+                    }
+                ),
+                "startLatencySeconds": .value(diagnostics.startLatencySeconds),
+                "seekLatencySeconds": .value(diagnostics.seekLatencySeconds),
+                "fallbackReasons": .list(diagnostics.fallbackReasons.map(Self.string)),
+                "renderingPreset": .string(
+                    diagnostics.renderingQuality.resolvedPreset == .highQuality ? "HIGH_QUALITY" : diagnostics
+                        .renderingQuality
+                        .resolvedPreset
+                        .rawValue
+                        .uppercased()
+                ),
+                "unsupportedFeatures": .list(diagnostics.renderingQuality.unsupportedFeatures.map(Self.string)),
+            ]
+        )
 
         result["videoFeatureCapabilities"] = .capabilities(
             value.videoFeatureCapabilities,

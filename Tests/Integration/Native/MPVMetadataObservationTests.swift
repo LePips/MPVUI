@@ -270,7 +270,11 @@ struct MPVMetadataObservationTests {
 
     private func readPropertyEvent(_ handle: OpaquePointer, timeout: Double) -> NativePropertyEvent? {
         guard let event = mpv_wait_event(handle, timeout)?.pointee,
-              event.event_id == MPV_EVENT_PROPERTY_CHANGE, let data = event.data else { return nil }
+              event.event_id == MPV_EVENT_PROPERTY_CHANGE,
+              let data = event.data
+        else {
+            return nil
+        }
 
         let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
 

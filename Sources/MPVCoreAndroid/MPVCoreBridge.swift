@@ -20,14 +20,20 @@ public func coreSessionCreate(_ configuration: UnsafePointer<MPVCoreConfiguratio
     guard let value = configuration?.pointee,
           value.version == MPVCORE_ABI_VERSION,
           value.size == MemoryLayout<MPVCoreConfiguration>.size,
-          (0 ... 2).contains(value.video_output), (0 ... 2).contains(value.hardware_decoding),
-          value.volume.isFinite, value.playback_rate.isFinite,
+          (0 ... 2).contains(value.video_output),
+          (0 ... 2).contains(value.hardware_decoding),
+          value.volume.isFinite,
+          value.playback_rate.isFinite,
           let initialBuffer = Duration(mpvSeconds: value.initial_buffer_seconds),
           let networkCache = Duration(mpvSeconds: value.network_cache_seconds)
-    else { return nil }
+    else {
+        return nil
+    }
 
     let preparation = NativePreparation(context: value.platform_context, prepare: value.prepare_handle)
-    guard value.settings.length == 0 || copiedRecord(value.settings)?.isRecord == true else { return nil }
+    guard value.settings.length == 0 || copiedRecord(value.settings)?.isRecord == true else {
+        return nil
+    }
 
     let fields = copiedRecord(value.settings)?.fields ?? [:]
     let render = fields["rendering"]?.fields ?? [:]
@@ -48,10 +54,15 @@ public func coreSessionCreate(_ configuration: UnsafePointer<MPVCoreConfiguratio
     let options = fields["additionalOptions"]?.fields.compactMapValues(\.text) ?? [:]
 
     guard !options
-        .contains(where: {
-            $0.key.contains("\0") || $0.value.contains("\0") || MPVOptionOwnership.rendererProperties
-                .contains(MPVOptionOwnership.normalizedProperty($0.key))
-        }) else { return nil }
+        .contains(
+            where: {
+                $0.key.contains("\0") || $0.value.contains("\0") || MPVOptionOwnership.rendererProperties
+                    .contains(MPVOptionOwnership.normalizedProperty($0.key))
+            }
+        )
+    else {
+        return nil
+    }
 
     let settings = MPVSessionConfiguration(
         additionalOptions: options,

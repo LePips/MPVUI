@@ -137,7 +137,10 @@ struct MPVExternalPlaybackTests {
     @Test(arguments: [false, true])
     func `converted handoff preserves source time and can seek before its first segment`(_ remux: Bool) async throws {
         let fixture = PlaybackFixture()
-        defer { fixture.close() }
+        defer {
+            fixture.close()
+        }
+
         try await fixture.loadPaused(TestPaths.multitrackMedia, at: .seconds(8))
 
         let player = fixture.player
@@ -147,12 +150,14 @@ struct MPVExternalPlaybackTests {
         }
 
         let plan = try await player.externalPlayback.makePreparationPlan()
+
         #expect(plan.method == (remux ? .remuxing : .rendering))
         #expect(plan.requiresLocalHLS)
         #expect(plan.renderingReasons.contains(.subtitles) == !remux)
         #expect(player.isPaused && abs(player.position.seconds - 8) < 0.2)
         #expect(player.externalPlayback.preparationPlan == nil)
         #expect(player.externalPlayback.systemPlayer.currentItem == nil)
+
         try await player.externalPlayback.start()
 
         #expect(player.externalPlayback.preparationPlan == plan)
@@ -167,22 +172,27 @@ struct MPVExternalPlaybackTests {
             """
         )
 
-        player.seek(to: .seconds(2))
+        let seek = try await player.seekAndWait(to: .seconds(2), timeout: .seconds(30))
 
-        try await eventually("conversion restarted for earlier source time", timeout: .seconds(30)) {
-            player.externalPlayback.isPrepared && player.isPaused && abs(player.position.seconds - 2) < 0.2
-        }
+        #expect(abs(seek.position.seconds - 2) < 0.2)
+        #expect(player.externalPlayback.isPrepared && player.isPaused)
 
         player.setMuted(true)
         player.play()
-        try await eventually("converted source advances", timeout: .seconds(15)) { player.position.seconds > 2.4 }
+        try await eventually("converted source advances", timeout: .seconds(15)) {
+            player.position.seconds > 2.4
+        }
         player.pause()
 
         let position = player.position
 
         player.externalPlayback.stop()
+
         #expect(player.externalPlayback.preparationPlan == nil)
-        try await eventually("conversion handed back to mpv") { player.isPaused && abs(player.position.seconds - position.seconds) < 0.2 }
+
+        try await eventually("conversion handed back to mpv") {
+            player.isPaused && abs(player.position.seconds - position.seconds) < 0.2
+        }
     }
 
     @Test

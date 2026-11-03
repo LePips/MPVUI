@@ -67,13 +67,16 @@ struct MPVBufferObservationTests {
 
             engine.coalescingPropertySnapshots {
                 while observed.count < expected.count || !sawFullProgress || !sawResumedCache, Date() < deadline {
-                    guard let event = mpv_wait_event(handle, 0.02)?.pointee else { continue }
+                    guard let event = mpv_wait_event(handle, 0.02)?.pointee else {
+                        continue
+                    }
 
                     if event.event_id == MPV_EVENT_PROPERTY_CHANGE, let data = event.data {
                         let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
 
                         if let name = property.name.map({ String(cString: $0) }),
-                           let format = expected[name], property.format == format,
+                           let format = expected[name],
+                           property.format == format,
                            let value = property.data
                         {
                             observed.insert(name)

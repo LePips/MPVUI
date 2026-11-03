@@ -50,7 +50,9 @@ package extension MPVSession {
     }
 
     func performCommand(_ name: String, arguments: [String]) {
-        guard !name.isEmpty else { return }
+        guard !name.isEmpty else {
+            return
+        }
         guard !([name] + arguments).contains(where: { $0.contains("\0") }) else {
             queue.async { [weak self] in self?.publishCommandError(MPV_ERROR_INVALID_PARAMETER.rawValue, context: "Command") }
             return
@@ -70,11 +72,16 @@ package extension MPVSession {
             .contains(commandName)
         {
             queue.async { [weak self] in
-                self?.publish(.error(.commandFailed(
-                    context: name,
-                    code: MPV_ERROR_INVALID_PARAMETER.rawValue,
-                    message: "Use the typed load API so source identity and pending operations remain ordered."
-                ), fatal: false))
+                self?.publish(
+                    .error(
+                        .commandFailed(
+                            context: name,
+                            code: MPV_ERROR_INVALID_PARAMETER.rawValue,
+                            message: "Use the typed load API so source identity and pending operations remain ordered."
+                        ),
+                        fatal: false
+                    )
+                )
             }
 
             return
@@ -85,8 +92,10 @@ package extension MPVSession {
             return
         }
 
-        if commandName == "set", commandArguments.count == 2,
-           let property = commandArguments.first, Self.canonicalOptionName(property) == "vid",
+        if commandName == "set",
+           commandArguments.count == 2,
+           let property = commandArguments.first,
+           Self.canonicalOptionName(property) == "vid",
            let value = commandArguments.last
         {
             setProperty(property, to: value)
@@ -97,7 +106,9 @@ package extension MPVSession {
     }
 
     func recordPersistentCommandMutation(_ arguments: [String]) {
-        guard let name = arguments.first else { return }
+        guard let name = arguments.first else {
+            return
+        }
 
         let (command, arguments) = MPVOptionOwnership.commandComponents(name, arguments: Array(arguments.dropFirst()))
         let property: String
@@ -116,7 +127,8 @@ package extension MPVSession {
         // File-local values, timeline actions, and renderer ownership must not
         // become configuration for a replacement client. Only real options are
         // read below; properties such as chapter and time-pos are not options.
-        guard !property.isEmpty, !property.contains("/"),
+        guard !property.isEmpty,
+              !property.contains("/"),
               !MPVOptionOwnership.reservedProperties.contains(property),
               ![
                   "start",
@@ -130,9 +142,17 @@ package extension MPVSession {
                   "playlist-pos-1",
                   "playlist-playing-pos"
               ].contains(property)
-        else { return }
+        else {
+            return
+        }
 
         commandMutatedOptions.insert(property)
+        if ["vid", "aid", "sid", "secondary-sid"].contains(property) {
+            trackSelectionRevisions[property, default: 0] &+= 1
+            if let value = getString(property) {
+                desiredProperties[property] = value
+            }
+        }
         renderingOptionsDirty = true
     }
 
@@ -214,7 +234,20 @@ package extension MPVSession {
 
     func command(_ arguments: [String], allowsStoppedClient: Bool = false) {
         queue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                return
+            }
+
+            if let name = arguments.first {
+                let (command, values) = MPVOptionOwnership.commandComponents(name, arguments: Array(arguments.dropFirst()))
+                if ["seek", "frame-step", "frame-back-step", "revert-seek"].contains(command)
+                    ||
+                    (["set", "add", "cycle"].contains(command) && values.first
+                        .map { ["time-pos", "percent-pos", "chapter"].contains($0) } == true)
+                {
+                    self.cancelPendingSeek()
+                }
+            }
 
             if allowsStoppedClient {
                 self.createStoppedClientForExplicitCommandIfNeeded()
@@ -297,6 +330,10 @@ package extension MPVSession {
         }
 
         desiredProperties[Self.canonicalOptionName(name)] = value
+
+        if ["vid", "aid", "sid", "secondary-sid"].contains(Self.canonicalOptionName(name)) {
+            trackSelectionRevisions[Self.canonicalOptionName(name), default: 0] &+= 1
+        }
 
         let audioSetting = ["volume", "mute", "speed"].contains(Self.canonicalOptionName(name))
 
@@ -418,8 +455,13 @@ package extension MPVSession {
     private func createStoppedClientForExplicitCommandIfNeeded() {
         dispatchPrecondition(condition: .onQueue(queue))
 
-        guard handle == nil, isStoppedForResourceRelease,
-              !needsSourceLoad, !playbackRequestIsActive else { return }
+        guard handle == nil,
+              isStoppedForResourceRelease,
+              !needsSourceLoad,
+              !playbackRequestIsActive
+        else {
+            return
+        }
 
         // Explicit raw commands retain native option and command ordering even
         // after stop retired the old session. This idle client does not reopen

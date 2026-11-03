@@ -104,7 +104,6 @@ public enum ExampleMediaBridge {
 
 extension View {
 
-    @ViewBuilder
     func exampleFileImporter(isPresented: Binding<Bool>, model: PlayerModel) -> some View {
         #if os(Android)
         self

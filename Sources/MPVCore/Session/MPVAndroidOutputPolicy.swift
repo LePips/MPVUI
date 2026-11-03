@@ -69,8 +69,13 @@ package extension MPVSession {
 
     @discardableResult
     func fallbackFromAndroidNative(reason: String, decoderFailed: Bool) -> Bool {
-        guard configuration.videoOutput == .automaticAndroid, videoOutput == .nativeSurface,
-              !didFallbackFromAndroidNative, sourceURL != nil else { return false }
+        guard configuration.videoOutput == .automaticAndroid,
+              videoOutput == .nativeSurface,
+              !didFallbackFromAndroidNative,
+              sourceURL != nil
+        else {
+            return false
+        }
 
         let videoSelection = desiredProperties["vid"]
 
@@ -95,12 +100,21 @@ package extension MPVSession {
 
     @discardableResult
     func checkAndroidVideoPresentation() -> Bool {
-        guard usesAndroidOutput, videoOutput == .nativeSurface, isFileLoaded, hasPlaybackStarted,
-              renderTarget != nil, desiredProperties["vid"] != "no", configuration.additionalOptions["vid"] != "no" else { return false }
+        guard usesAndroidOutput,
+              videoOutput == .nativeSurface,
+              isFileLoaded,
+              hasPlaybackStarted,
+              renderTarget != nil,
+              desiredProperties["vid"] != "no",
+              configuration.additionalOptions["vid"] != "no"
+        else {
+            return false
+        }
 
         let tracks = latestSnapshot.mediaInformation.tracks
 
-        if getString("current-vo") == nil, tracks.contains(where: { $0.type == .video }),
+        if getString("current-vo") == nil,
+           tracks.contains(where: { $0.type == .video }),
            !tracks.contains(where: { $0.type == .video && $0.isSelected })
         {
             if !fallbackFromAndroidNative(reason: "Native video decoder unavailable; continuing with GPU output", decoderFailed: true) {
@@ -109,45 +123,11 @@ package extension MPVSession {
 
             return true
         } else if configuration.nativeVideoFeaturePolicy == .preferFeatures,
-                  tracks.contains(where: { $0.type == .subtitle && $0.isSelected && !$0.isSemanticTextSubtitle })
+                  tracks.contains(where: { $0.isSelected && $0.requiresSubtitleRenderer })
         {
             return fallbackFromAndroidNative(reason: "Selected subtitles require GPU composition", decoderFailed: false)
         }
 
         return false
-    }
-}
-
-package extension MPVMediaTrack {
-
-    var isSemanticTextSubtitle: Bool {
-        type == .subtitle && [
-            "subrip",
-            "srt",
-            "text",
-            "webvtt",
-            "mov_text",
-            "ttml",
-            "microdvd",
-            "subviewer",
-            "subviewer1",
-            "sami",
-            "realtext",
-            "jacosub",
-            "mpl2",
-            "vplayer",
-            "pjs",
-            "stl",
-            "scc",
-            "eia_608"
-        ].contains(codec?.lowercased() ?? "")
-    }
-}
-
-public extension MPVMediaTrack {
-
-    /// Whether this subtitle format requires composition in the native renderer.
-    var requiresSubtitleRenderer: Bool {
-        type == .subtitle && !isSemanticTextSubtitle
     }
 }

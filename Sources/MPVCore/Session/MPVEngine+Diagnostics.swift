@@ -62,7 +62,9 @@ package extension MPVSession {
     }
 
     func handleLogMessage(_ event: mpv_event) {
-        guard let data = event.data else { return }
+        guard let data = event.data else {
+            return
+        }
 
         let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
         let prefix = message.prefix.map { String(cString: $0) } ?? "mpv"
@@ -70,13 +72,17 @@ package extension MPVSession {
 
         // Internal capability logs remain subscribed even with public logging
         // disabled. Unrelated messages need neither a payload copy nor parsing.
-        guard configuration.logLevel != .none || carriesNativeDiagnostics else { return }
+        guard configuration.logLevel != .none || carriesNativeDiagnostics else {
+            return
+        }
 
         let level = message.level.flatMap {
             MPVSessionConfiguration.LogLevel(rawValue: String(cString: $0))
         } ?? .info
         let shouldPublish = level.diagnosticPriority > 0 && level.diagnosticPriority <= configuration.logLevel.diagnosticPriority
-        guard shouldPublish || carriesNativeDiagnostics else { return }
+        guard shouldPublish || carriesNativeDiagnostics else {
+            return
+        }
 
         // Copy before retiring a rejected native handle invalidates event data.
         let log = MPVLogMessage(
@@ -101,7 +107,8 @@ package extension MPVSession {
             refreshMediaInformation()
         }
 
-        if videoOutput == .sampleBuffer, !didRejectNativeOutput,
+        if videoOutput == .sampleBuffer,
+           !didRejectNativeOutput,
            let reason = Self.nativeOutputRejectionReason(log),
            Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID),
            sourceURL != nil

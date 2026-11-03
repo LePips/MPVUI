@@ -181,12 +181,19 @@ struct MPVNativeSubtitleLayerTests {
                   CVPixelBufferGetPlaneCount(buffer) == 2,
                   let rpu = CVBufferCopyAttachment(buffer, "DolbyVisionRPUData" as CFString, nil) as? Data,
                   !rpu.isEmpty,
-                  CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { throw ReadbackError.unavailable }
+                  CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess
+        else {
+            throw ReadbackError.unavailable
+        }
 
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        defer {
+            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+        }
         var result = [rpu]
         for plane in 0 ..< 2 {
-            guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, plane) else { throw ReadbackError.unavailable }
+            guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, plane) else {
+                throw ReadbackError.unavailable
+            }
 
             let rowBytes = CVPixelBufferGetWidthOfPlane(buffer, plane) * (plane == 0 ? 2 : 4)
             let height = CVPixelBufferGetHeightOfPlane(buffer, plane)

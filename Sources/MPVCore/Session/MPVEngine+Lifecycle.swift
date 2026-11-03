@@ -217,9 +217,13 @@ package extension MPVSession {
     func destroyHandle(preservePlayback: Bool, alreadyShuttingDown: Bool = false) {
         dispatchPrecondition(condition: .onQueue(queue))
         cancelSubtitleQueries()
+        cancelExternalTrackRequests(discardingNativeRequest: true)
+        for index in externalTracks.indices {
+            externalTracks[index].isLoaded = false
+        }
         diagnosticsTimer?.cancel()
         diagnosticsTimer = nil
-        completePiPSeek(false)
+        cancelPendingSeek()
 
         // A deferred load has no native session to retire. Preserve its
         // pending state across surface changes, but fully clear it on shutdown.
@@ -266,6 +270,12 @@ package extension MPVSession {
             }
 
             lifecycleDiagnostics.handlesDestroyed &+= 1
+        }
+
+        // Canceled async readers may hold security-scoped resources until the
+        // native handle has joined its command workers above.
+        for url in externalSecurityScopedURLs {
+            releaseUnusedExternalAccess(for: url)
         }
 
         clearTextSubtitleSnapshot()

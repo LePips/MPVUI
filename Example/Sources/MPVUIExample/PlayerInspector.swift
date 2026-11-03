@@ -1,10 +1,10 @@
 import Foundation
+import SwiftUI
 #if os(Android)
 import MPVCore
 #else
 import MPVUI
 #endif
-import SwiftUI
 
 @MainActor
 struct PlayerInspector: View {
@@ -136,7 +136,6 @@ struct PlayerInspector: View {
         .onDisappear { player.setDiagnosticsEnabled(false) }
     }
 
-    @ViewBuilder
     private var sourceSection: some View {
         Section("Media") {
             InspectorRow("Title", value: model.selectedName)
@@ -794,7 +793,6 @@ struct InspectorTrackRows: View {
 
 fileprivate extension View {
 
-    @ViewBuilder
     func inspectorSheetPresentation() -> some View {
         #if os(macOS)
         // The default macOS Form is a non-scrolling columns layout. Grouped
@@ -807,7 +805,6 @@ fileprivate extension View {
         #endif
     }
 
-    @ViewBuilder
     func inspectorTextSelectionEnabled() -> some View {
         #if os(tvOS) || os(Android)
         self

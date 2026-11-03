@@ -1,9 +1,77 @@
 import CMPV
+import Foundation
 import MPVCore
 import Testing
 
 @Suite(.tags(.unit))
 struct MPVPlaybackParsingTests {
+
+    @Test
+    func `track source indices are independent of selection IDs and retain accessibility dispositions`() {
+        let values = MPVSession.parseTracks(
+            .array(
+                [
+                    .map(
+                        [
+                            "id": .integer(7),
+                            "type": .string("audio"),
+                            "ff-index": .integer(2),
+                            "src-id": .integer(257),
+                            "hearing-impaired": .bool(true),
+                            "visual-impaired": .bool(true),
+                            "commentary": .bool(true)
+                        ]
+                    ),
+                    .map(["id": .integer(1), "type": .string("sub"), "ff-index": .integer(-1), "src-id": .integer(-1)]),
+                    .map(
+                        [
+                            "id": .integer(2),
+                            "type": .string("sub"),
+                            "external": .bool(true),
+                            "external-filename": .string("/tmp/captions.srt"),
+                            "ff-index": .integer(0)
+                        ]
+                    )
+                ]
+            )
+        )
+
+        #expect(values.count == 3)
+        #expect(values[0].mpvID == 7 && values[0].sourceStreamIndex == 2 && values[0].sourceID == 257)
+        #expect(values[0].isHearingImpaired && values[0].isVisualImpaired && values[0].isCommentary)
+        #expect(values[1].sourceStreamIndex == nil && values[1].sourceID == nil)
+        #expect(!values[1].isHearingImpaired && !values[1].isVisualImpaired && !values[1].isCommentary)
+        #expect(values[2].externalURL == URL(fileURLWithPath: "/tmp/captions.srt") && values[2].sourceStreamIndex == 0)
+    }
+
+    @Test(arguments: ["subrip", "SRT", "webvtt", "webvtt-webm", "ttml", "mov_text", "text"])
+    func `query formats also support live semantic text`(codec: String) {
+        let capabilities = MPVMediaTrack(id: 1, type: .subtitle, codec: codec).subtitleCapabilities
+
+        #expect(capabilities?.supportsTimelineQueries == true)
+        #expect(capabilities?.supportsLiveText == true)
+        #expect(capabilities?.requiresNativeComposition == false)
+    }
+
+    @Test
+    func `legacy text queries and native subtitle composition remain distinct`() {
+        let legacy = MPVMediaTrack(id: 1, type: .subtitle, codec: "microdvd")
+
+        #expect(legacy.subtitleCapabilities?.supportsLiveText == true)
+        #expect(legacy.subtitleCapabilities?.supportsTimelineQueries == false)
+        #expect(!legacy.requiresSubtitleRenderer)
+
+        for codec in ["ass", "ssa", "hdmv_pgs_subtitle", "dvd_subtitle", "unknown"] {
+            let track = MPVMediaTrack(id: 1, type: .subtitle, codec: codec)
+
+            #expect(track.requiresSubtitleRenderer)
+            #expect(track.subtitleCapabilities?.supportsLiveText == false)
+            #expect(track.subtitleCapabilities?.supportsTimelineQueries == false)
+        }
+        let audio = MPVMediaTrack(id: 1, type: .audio, codec: "aac")
+
+        #expect(audio.subtitleCapabilities == nil && !audio.requiresSubtitleRenderer)
+    }
 
     @Test
     func `display suspension composes with user playback intent`() {

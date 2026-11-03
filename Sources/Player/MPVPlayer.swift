@@ -35,6 +35,10 @@ public final class MPVPlayer {
     /// Whether playback is intended to remain paused, including while seeking or buffering.
     public private(set) var isPaused = true
 
+    /// Whether the source completed its initial playback restart, including audio-only and paused playback.
+    /// Remains true during seeks and buffering. Loading, stop, EOF, and fatal failure clear it.
+    public private(set) var isPlaybackReady = false
+
     /// Current chapter index, or `nil` when no chapter is active.
     public private(set) var currentChapterIndex: Int?
 
@@ -104,10 +108,17 @@ public final class MPVPlayer {
     private var engine: MPVSession?
     @ObservationIgnored
     private var activeRenderSurfaceToken: UUID?
-    @ObservationIgnored
     private var playbackGeneration: UInt64 = 0
 
     private let textSubtitleSnapshots = TextSubtitleSnapshotBroadcaster()
+    @ObservationIgnored
+    private let playbackEvents = MPVPlaybackEventBroadcaster()
+
+    /// Identity of the active playback generation. Loading and stopping invalidate older work,
+    /// even when the same URL is loaded again. Values are local to this player instance.
+    public var generation: UInt64 {
+        playbackGeneration
+    }
 
     /// Whether the current item has produced a video frame.
     public var hasVideoFrame: Bool {
@@ -192,6 +203,7 @@ public final class MPVPlayer {
         dolbyVisionStatus = MPVDolbyVisionStatus(requestedPolicy: configuration.dolbyVisionPolicy)
         volume = configuration.volume
         playbackRate = configuration.playbackRate
+        playbackEvents.reset(makePlaybackSnapshot())
 
         engine = MPVSession(configuration: configuration) { [weak self] emission in
             self?.apply(emission)
@@ -211,7 +223,22 @@ public final class MPVPlayer {
         storedExternalPlayback?.invalidate(restore: false)
         storedPictureInPicture?.invalidate()
         textSubtitleSnapshots.terminate()
+        playbackEvents.terminate()
         engine?.shutdownSynchronously()
+    }
+
+    /// Ordered lifecycle and operation events from this player's existing session.
+    /// Replays a snapshot on subscription. Buffers without dropping events until consumed
+    /// or canceled, and finishes when the player is released. Position ticks, diagnostics,
+    /// subtitles, and logs use their own APIs. Events are enqueued after observable state updates.
+    public func makeEventStream() -> AsyncStream<MPVPlaybackEvent> {
+        playbackEvents.subscribe()
+    }
+
+    /// Replays the current timeline, then buffers only the newest update for each subscriber.
+    /// Slow consumers may skip positions. Lifecycle and terminal events remain in ``makeEventStream()``.
+    public func makeTimingStream() -> AsyncStream<MPVPlaybackTiming> {
+        playbackEvents.subscribeToTiming()
     }
 
     /// Loads new media. Audio-only media plays without a video view.
@@ -252,6 +279,8 @@ public final class MPVPlayer {
         dolbyVisionStatus = MPVDolbyVisionStatus(requestedPolicy: configuration.dolbyVisionPolicy)
         requestedVideoFeatures = []
         videoFeatureRequestResult = nil
+        isPlaybackReady = false
+        playbackEvents.reset(makePlaybackSnapshot())
 
         engine?.load(
             url,
@@ -305,6 +334,13 @@ public final class MPVPlayer {
         storedPictureInPicture?.stop()
         playbackGeneration &+= 1
 
+        isPlaybackReady = false
+        state = .stopped
+        isPaused = true
+        position = .zero
+        hasPlaybackFrame = false
+        playbackEvents.reset(makePlaybackSnapshot())
+
         if isTextSubtitleInterceptionEnabled {
             textSubtitleSnapshots.clear()
         }
@@ -336,6 +372,43 @@ public final class MPVPlayer {
         }
 
         engine?.seek(by: offset)
+    }
+
+    /// Seeks and returns the native destination after playback restarts, preserving play/pause intent.
+    /// Requests during loading wait for readiness. Seeking back from EOF reopens the same source.
+    /// A newer seek, stop, source replacement, or task cancellation cancels the wait.
+    /// Canceling does not undo an already accepted seek. The timeout includes waiting for readiness.
+    ///
+    /// - Throws: `MPVPlayerError` on unavailability, failure, or timeout, or `CancellationError`.
+    public func seekAndWait(to time: Duration, timeout: Duration = .seconds(8)) async throws -> MPVSeekResult {
+        if isUsingExternalPlayback, let storedExternalPlayback {
+            let result = try await storedExternalPlayback.seekAndWait(to: time, timeout: timeout)
+            playbackEvents.publish(.seekCompleted(result))
+            return result
+        }
+        guard let engine else {
+            throw MPVPlayerError.clientUnavailable
+        }
+
+        let generation = playbackGeneration
+        let result: Result<MPVSeekResult, any Error>
+        do {
+            result = try await .success(engine.seekAndWait(to: time, timeout: timeout))
+        } catch {
+            result = .failure(error)
+        }
+        await engine.synchronizeUpdates()
+        try Task.checkCancellation()
+        guard generation == playbackGeneration else {
+            throw CancellationError()
+        }
+
+        return try result.get()
+    }
+
+    /// Seeks relative to the current position and waits for the resolved destination.
+    public func seekAndWait(by offset: Duration, timeout: Duration = .seconds(8)) async throws -> MPVSeekResult {
+        try await seekAndWait(to: position + offset, timeout: timeout)
     }
 
     /// Advances one decoded frame and pauses playback.
@@ -454,6 +527,39 @@ public final class MPVPlayer {
         guard allowLocalPlaybackOperation("External tracks") else { return }
 
         engine?.loadExternalTrack(url, type: type, select: select)
+    }
+
+    /// Imports an external resource and returns its tracks after native loading finishes.
+    ///
+    /// Call after loading a source. Requests made before media readiness wait for it.
+    /// Repeated loads of the same URL and category reuse the existing tracks. A client
+    /// identity cannot describe different URLs within the same source load.
+    /// Canceling the task, stopping, or replacing the source cancels an outstanding request.
+    /// Newer track selections take precedence over the descriptor's selection.
+    ///
+    /// - Throws: `MPVPlayerError` on loading failure, or `CancellationError` on cancellation.
+    public func loadExternalTrack(_ source: MPVExternalTrack) async throws -> MPVExternalTrackLoadResult {
+        guard !isUsingExternalPlayback else {
+            throw MPVPlayerError.externalPlaybackFailed("External tracks can be changed after returning to local playback.")
+        }
+        guard let engine else {
+            throw MPVPlayerError.clientUnavailable
+        }
+
+        let generation = playbackGeneration
+        let result: Result<MPVExternalTrackLoadResult, any Error>
+        do {
+            result = try await .success(engine.loadExternalTrack(source))
+        } catch {
+            result = .failure(error)
+        }
+        await engine.synchronizeUpdates()
+        try Task.checkCancellation()
+        guard generation == playbackGeneration else {
+            throw CancellationError()
+        }
+
+        return try result.get()
     }
 
     /// Loads an external subtitle file and selects its first track in the given
@@ -589,16 +695,22 @@ public final class MPVPlayer {
     /// properties it manages for rendering or playback and reports them through ``lastError``.
     /// - Note: Renderer-specific properties have no effect on outputs that do not support them.
     public func setProperty(_ name: String, to value: String) {
-        guard allowLocalPlaybackOperation("mpv properties") else { return }
+        guard allowLocalPlaybackOperation("mpv properties") else {
+            return
+        }
 
         let property = MPVOptionOwnership.normalizedProperty(name)
 
         if ["video-zoom", "video-pan-x", "video-pan-y"].contains(property),
-           let amount = Double(value), amount.isFinite, amount != 0
+           let amount = Double(value),
+           amount.isFinite,
+           amount != 0
         {
             requestVideoFeatures([.zoomAndPan])
         } else if ["video-scale-x", "video-scale-y"].contains(property),
-                  let amount = Double(value), amount.isFinite, amount != 1
+                  let amount = Double(value),
+                  amount.isFinite,
+                  amount != 1
         {
             requestVideoFeatures([.zoomAndPan])
         }
@@ -721,12 +833,16 @@ extension MPVPlayer {
         playbackGeneration &+= 1
         isPaused = paused
         state = paused ? .paused : .loading
+        isPlaybackReady = false
+        playbackEvents.reset(makePlaybackSnapshot())
         engine?.resumeAfterHandoff(at: position, paused: paused, generation: playbackGeneration)
         storedPictureInPicture?.refreshPlaybackState()
     }
 
     func updateExternalPlayback(position: Duration, duration: Duration, seekable: Bool, paused: Bool, state: MPVPlaybackState) {
-        guard isUsingExternalPlayback else { return }
+        guard isUsingExternalPlayback else {
+            return
+        }
 
         self.position = position
         self.duration = duration
@@ -734,6 +850,8 @@ extension MPVPlayer {
         isPaused = paused
         self.state = state
         bufferStatus = .empty
+        isPlaybackReady = storedExternalPlayback?.isPrepared == true && state != .ended && state.error == nil
+        playbackEvents.update(makePlaybackSnapshot(), features: videoFeatureCapabilities)
     }
 
     func attachSampleBufferOutput() {
@@ -853,8 +971,11 @@ extension MPVPlayer {
     }
 
     func activateRenderSurface(token: UUID) {
-        guard pictureInPictureSurfaceToken == nil || pictureInPictureSurfaceToken == token else { return }
-        guard activeRenderSurfaceToken != token else { return }
+        guard pictureInPictureSurfaceToken == nil || pictureInPictureSurfaceToken == token,
+              activeRenderSurfaceToken != token
+        else {
+            return
+        }
 
         // Ownership can move to a surface whose geometry is not attachable yet.
         // Retire the previous native target synchronously so neither that new
@@ -995,10 +1116,7 @@ extension MPVPlayer {
     }
 
     private func subtitleUsesNativeComposition(codec: String?) -> Bool {
-        guard let codec = codec?.lowercased() else { return false }
-
-        let intercepted = ["subrip", "srt", "webvtt", "webvtt-webm", "ttml", "mov_text", "text"].contains(codec)
-        return !isTextSubtitleInterceptionEnabled || !intercepted
+        !isTextSubtitleInterceptionEnabled || MPVSubtitleCapabilities(codec: codec).requiresNativeComposition
     }
 
     private func resolveRequestedVideoFeatures() -> MPVVideoFeatureRequestResult {
@@ -1037,6 +1155,7 @@ extension MPVPlayer {
         }
 
         var refreshPictureInPicture = false
+        isPlaybackReady = snapshot.isPlaybackReady
 
         switch update {
         case let .paused(paused):
@@ -1077,6 +1196,9 @@ extension MPVPlayer {
             refreshPictureInPicture = hasPlaybackFrame != available
             hasPlaybackFrame = available
 
+        case .playbackReady, .seekCompleted, .externalTrackLoaded:
+            break
+
         case let .buffer(status):
             bufferStatus = status
 
@@ -1101,7 +1223,9 @@ extension MPVPlayer {
             playbackRate = rate
 
         case let .textSubtitles(snapshot):
-            guard isTextSubtitleInterceptionEnabled else { return }
+            guard isTextSubtitleInterceptionEnabled else {
+                return
+            }
 
             textSubtitleSnapshots.publish(snapshot)
 
@@ -1122,5 +1246,42 @@ extension MPVPlayer {
         if refreshPictureInPicture {
             storedPictureInPicture?.refreshPlaybackState()
         }
+
+        playbackEvents.update(snapshot, features: videoFeatureCapabilities)
+        switch update {
+        case let .seekCompleted(result):
+            playbackEvents.publish(.seekCompleted(result))
+        case let .externalTrackLoaded(result):
+            playbackEvents.publish(.externalTrackLoaded(result))
+        case let .error(error, fatal):
+            playbackEvents.publish(.error(error, fatal: fatal))
+        default:
+            break
+        }
+    }
+
+    private func makePlaybackSnapshot() -> MPVSessionSnapshot {
+        var snapshot = MPVSessionSnapshot()
+        snapshot.generation = playbackGeneration
+        snapshot.state = state
+        snapshot.position = position
+        snapshot.duration = duration
+        snapshot.isSeekable = isSeekable
+        snapshot.isPaused = isPaused
+        snapshot.isPlaybackReady = isPlaybackReady
+        snapshot.hasPlaybackFrame = hasPlaybackFrame
+        snapshot.currentChapterIndex = currentChapterIndex
+        snapshot.volume = volume
+        snapshot.isMuted = isMuted
+        snapshot.playbackRate = playbackRate
+        snapshot.mediaInformation = mediaInformation
+        snapshot.buffer = bufferStatus
+        snapshot.diagnostics = playbackDiagnostics
+        snapshot.isDiagnosticsEnabled = isDiagnosticsEnabled
+        snapshot.color = renderColorStatus
+        snapshot.dolbyVision = dolbyVisionStatus
+        snapshot.interceptsTextSubtitles = isTextSubtitleInterceptionEnabled
+        snapshot.error = lastError
+        return snapshot
     }
 }

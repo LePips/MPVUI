@@ -229,7 +229,9 @@ final class MPVHLSStream {
     }
 
     private func publishMasterPlaylist() throws {
-        guard let info = packagingInfo else { throw MPVHTTPMediaServer.ServerError("Missing packaging information.") }
+        guard let info = packagingInfo else {
+            throw MPVHTTPMediaServer.ServerError("Missing packaging information.")
+        }
 
         var text = try String(contentsOf: directory.appendingPathComponent("master.m3u8"), encoding: .utf8)
 
@@ -278,7 +280,8 @@ final class MPVHLSStream {
         for line in media.components(separatedBy: "\n") {
             if line.hasPrefix("#EXTINF:") {
                 duration = Double(line.dropFirst(8).split(separator: ",")[0]) ?? 0
-            } else if line.hasSuffix(".m4s"), duration > 0,
+            } else if line.hasSuffix(".m4s"),
+                      duration > 0,
                       let size = try FileManager.default
                           .attributesOfItem(atPath: directory.appendingPathComponent(line).path)[.size] as? Int
             {

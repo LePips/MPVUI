@@ -20,7 +20,7 @@ struct MPVStoppedResourceTests {
         let engine = MPVSession(configuration: .init()) { _ in }
         let source = TestPaths.baselineMedia
         let subtitle = URL(fileURLWithPath: "/tmp/deferred-shutdown.srt")
-        let cancellation = MPVSubtitleQueryCancellation()
+        let cancellation = MPVOperationCancellation()
 
         do {
             let _: [TimedTextSubtitleSnapshot] = try await withCheckedThrowingContinuation { continuation in
@@ -68,6 +68,7 @@ struct MPVStoppedResourceTests {
             #expect(engine.lastPosition == .zero && engine.lastDuration == .zero && !engine.lastSeekable)
             #expect(engine.isStoppedForResourceRelease && engine.isPaused && engine.lastState == .stopped)
             #expect(engine.lifecycleDiagnostics.handlesDestroyed == 0)
+
             engine.destroyHandle(preservePlayback: false)
 
             #expect(engine.lifecycleDiagnostics.handlesDestroyed == 0)

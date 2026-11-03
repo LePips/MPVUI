@@ -306,33 +306,42 @@ struct MPVNativeVideoFormatTests {
     func `subtitle and OSD groups remain visible together on paused frame`(repetition: Int) async throws {
         let media = try TestPaths.testMedia("subtitles.mkv")
 
-        let fixture = NativeFormatFixture(options: [
-            "vf": "format=fmt=nv12",
-            "sid": "1",
-            "sub-visibility": "no",
-            "osd-duration": "0",
-            "osd-level": "1",
-            "osd-align-x": "left",
-            "osd-align-y": "top",
-        ])
-        defer { fixture.close() }
+        let fixture = NativeFormatFixture(
+            options: [
+                "vf": "format=fmt=nv12",
+                "sid": "1",
+                "sub-visibility": "no",
+                "osd-duration": "0",
+                "osd-level": "1",
+                "osd-align-x": "left",
+                "osd-align-y": "top",
+            ]
+        )
+        defer {
+            fixture.close()
+        }
 
         let player = fixture.player
         player.setDiagnosticsEnabled(true)
         player.load(media, playAutomatically: false, startTime: .seconds(1))
 
         try await eventually("subtitle fixture initial frame") {
-            guard player.state == .paused, fixture.buffer != nil,
+            guard player.state == .paused,
+                  fixture.buffer != nil,
                   fixture.layer.isReadyForDisplay,
                   fixture.pausedClockMatches(position: 1)
-            else { return false }
+            else {
+                return false
+            }
 
             return player.mediaInformation.tracks.contains { $0.type == .subtitle && $0.codec == "ass" }
         }
 
-        let selectedTrack = try #require(player.mediaInformation.tracks.first {
-            $0.type == .subtitle && $0.isSelected
-        })
+        let selectedTrack = try #require(
+            player.mediaInformation.tracks.first {
+                $0.type == .subtitle && $0.isSelected
+            }
+        )
         try #require(selectedTrack.codec == "ass")
 
         let source = try fixture.snapshot()
@@ -344,12 +353,14 @@ struct MPVNativeVideoFormatTests {
                 let latest = try? fixture.snapshot()
                 let clock = fixture.layer.controlTimebase
 
-                print("Native paused OSD iteration \(repetition), stage \(stage): "
-                    + "clock=\(clock.map { CMTimebaseGetTime($0).seconds } ?? -.infinity), "
-                    + "rate=\(clock.map(CMTimebaseGetRate) ?? -.infinity), "
-                    + "upper restored=\(latest?.upperBand == source.upperBand), "
-                    + "lower restored=\(latest?.lowerBand == source.lowerBand), "
-                    + "all pixels restored=\(latest?.luma == source.luma)")
+                print(
+                    "Native paused OSD iteration \(repetition), stage \(stage): "
+                        + "clock=\(clock.map { CMTimebaseGetTime($0).seconds } ?? -.infinity), "
+                        + "rate=\(clock.map(CMTimebaseGetRate) ?? -.infinity), "
+                        + "upper restored=\(latest?.upperBand == source.upperBand), "
+                        + "lower restored=\(latest?.lowerBand == source.lowerBand), "
+                        + "all pixels restored=\(latest?.luma == source.luma)"
+                )
 
                 for message in fixture.nativeLogs {
                     print("Native paused OSD: \(message)")
@@ -362,7 +373,9 @@ struct MPVNativeVideoFormatTests {
         // video frame and invalidate byte-for-byte comparisons of source pixels.
         player.setProperty("sub-visibility", to: "yes")
         stage = "subtitle add"
-        try await eventually("selected ASS subtitle redraw") { (try? fixture.snapshot().lowerBand).map { $0 != source.lowerBand } ?? false }
+        try await eventually("selected ASS subtitle redraw") {
+            (try? fixture.snapshot().lowerBand).map { $0 != source.lowerBand } ?? false
+        }
 
         let subtitleOnly = try fixture.snapshot()
 
@@ -383,7 +396,9 @@ struct MPVNativeVideoFormatTests {
 
         player.setProperty("sub-visibility", to: "no")
         stage = "subtitle removal"
-        try await eventually("subtitle removal preserving OSD") { (try? fixture.snapshot().lowerBand) == source.lowerBand }
+        try await eventually("subtitle removal preserving OSD") {
+            (try? fixture.snapshot().lowerBand) == source.lowerBand
+        }
 
         let osdOnly = try fixture.snapshot()
 
@@ -392,7 +407,9 @@ struct MPVNativeVideoFormatTests {
 
         player.executeCommand("show-text", arguments: ["", "0", "1"])
         stage = "OSD clear"
-        try await eventually("OSD clear restoring source pixels") { (try? fixture.snapshot().luma) == source.luma }
+        try await eventually("OSD clear restoring source pixels") {
+            (try? fixture.snapshot().luma) == source.luma
+        }
         restoredSource = true
 
         #expect(player.isPaused)
@@ -581,8 +598,12 @@ private final class NativeFormatFixture {
     }
 
     func pausedClockMatches(position: Double) -> Bool {
-        guard player.isPaused, abs(player.position.seconds - position) < 0.15,
-              let clock = layer.controlTimebase else { return false }
+        guard player.isPaused,
+              abs(player.position.seconds - position) < 0.15,
+              let clock = layer.controlTimebase
+        else {
+            return false
+        }
 
         #if os(tvOS)
         // Host time keeps advancing while the displayed frame is held.

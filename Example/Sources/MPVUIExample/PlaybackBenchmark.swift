@@ -104,7 +104,8 @@ private struct PlaybackBenchmarkSettings {
     static var failureOutput: URL {
         let arguments = ProcessInfo.processInfo.arguments
 
-        if let index = arguments.firstIndex(of: "--benchmark-output"), index + 1 < arguments.count,
+        if let index = arguments.firstIndex(of: "--benchmark-output"),
+           index + 1 < arguments.count,
            let output = try? outputURL(filename: arguments[index + 1])
         {
             return output
@@ -362,7 +363,9 @@ private final class PlaybackBenchmark {
     }
 
     func run() async {
-        guard !hasRun else { return }
+        guard !hasRun else {
+            return
+        }
 
         hasRun = true
         beginUptime = ProcessInfo.processInfo.systemUptime
@@ -421,11 +424,17 @@ private final class PlaybackBenchmark {
             }
 
             // The first startup memory sample precedes engine, decoder and renderer allocation.
-            try await measure("startup", timeout: 30, action: { self
-                    .createPlayer(parsed)
-            }, until: {
-                self.isPlaying && self.position > 0.2
-            })
+            try await measure(
+                "startup",
+                timeout: 30,
+                action: {
+                    self
+                        .createPlayer(parsed)
+                },
+                until: {
+                    self.isPlaying && self.position > 0.2
+                }
+            )
 
             guard duration.isFinite, duration > parsed.warmup + parsed.seconds + 8 else {
                 throw BenchmarkFailure(message: "Use seekable VOD at least warmup + sample + 8 seconds long; observed duration \(duration)")
@@ -444,7 +453,8 @@ private final class PlaybackBenchmark {
 
             guard let steadyPhase = phases["steady"] as? [String: Any],
                   let steadyWallSeconds = steadyPhase["wallSeconds"] as? Double,
-                  steadyWallSeconds.isFinite, steadyWallSeconds > 0
+                  steadyWallSeconds.isFinite,
+                  steadyWallSeconds > 0
             else {
                 throw BenchmarkFailure(message: "Steady phase wall time is unavailable")
             }
@@ -458,9 +468,15 @@ private final class PlaybackBenchmark {
 
             diagnostics["steadyEnd"] = diagnosticSnapshot()
 
-            try await measure("pausing", timeout: 5, action: { self
-                    .pause()
-            }, until: { self.isPaused })
+            try await measure(
+                "pausing",
+                timeout: 5,
+                action: {
+                    self
+                        .pause()
+                },
+                until: { self.isPaused }
+            )
 
             // Allow the last published mpv position and hardware audio clock to settle.
             try await measure("pauseSettling", seconds: 0.5)
@@ -471,27 +487,41 @@ private final class PlaybackBenchmark {
 
             let pauseMovement = abs(position - pausedPosition)
             validation["pausePositionDeltaSeconds"] = pauseMovement
-            guard isPaused, pauseMovement < 0.15 else { throw BenchmarkFailure(message: "Playback advanced while paused") }
+            guard isPaused, pauseMovement < 0.15 else {
+                throw BenchmarkFailure(message: "Playback advanced while paused")
+            }
 
             let target = duration * 0.25
             validation["seekTargetSeconds"] = target
 
-            try await measure("seek", timeout: 10, action: { self
-                    .seek(to: target)
-            }, until: {
-                self.isPaused && abs(self.position - target) < 0.15
-            })
+            try await measure(
+                "seek",
+                timeout: 10,
+                action: {
+                    self
+                        .seek(to: target)
+                },
+                until: {
+                    self.isPaused && abs(self.position - target) < 0.15
+                }
+            )
 
             validation["seekPositionSeconds"] = position
             diagnostics["seekCompleted"] = diagnosticSnapshot()
 
             let resumedPosition = position
 
-            try await measure("resuming", timeout: 10, action: { self
-                    .play()
-            }, until: {
-                self.isPlaying && self.position > resumedPosition + 0.2
-            })
+            try await measure(
+                "resuming",
+                timeout: 10,
+                action: {
+                    self
+                        .play()
+                },
+                until: {
+                    self.isPlaying && self.position > resumedPosition + 0.2
+                }
+            )
 
             let resumeStart = position
 
@@ -499,13 +529,21 @@ private final class PlaybackBenchmark {
             validation["resumeProgressSeconds"] = position - resumeStart
 
             guard position - resumeStart > 2.4
-            else { throw BenchmarkFailure(message: "Playback failed to advance after seeking and resuming") }
+            else {
+                throw BenchmarkFailure(message: "Playback failed to advance after seeking and resuming")
+            }
 
             diagnostics["beforeStop"] = diagnosticSnapshot()
 
-            try await measure("stopping", timeout: 5, action: { self
-                    .stop()
-            }, until: { self.isStopped })
+            try await measure(
+                "stopping",
+                timeout: 5,
+                action: {
+                    self
+                        .stop()
+                },
+                until: { self.isStopped }
+            )
 
             try await measure("stopped", seconds: 5)
             releasePlayers()
@@ -581,7 +619,9 @@ private final class PlaybackBenchmark {
         }
 
         for (name, value) in phases {
-            guard let phase = value as? [String: Any] else { continue }
+            guard let phase = value as? [String: Any] else {
+                continue
+            }
 
             metrics[name + "MaximumAbsoluteAudioVideoDriftSeconds"] = phase["audioVideoDriftMaxAbsoluteSeconds"]
             metrics[name + "MeanAbsoluteAudioVideoDriftSeconds"] = phase["audioVideoDriftMeanAbsoluteSeconds"]

@@ -160,7 +160,9 @@ package extension MPVSession {
 
         switch event.event_id {
         case MPV_EVENT_HOOK:
-            guard let handle, let data = event.data else { return }
+            guard let handle, let data = event.data else {
+                return
+            }
 
             let hook = data.assumingMemoryBound(to: mpv_event_hook.self).pointee
 
@@ -174,16 +176,24 @@ package extension MPVSession {
             }
 
         case MPV_EVENT_COMMAND_REPLY:
-            guard let query = subtitleQueries.removeValue(forKey: event.reply_userdata) else { return }
+            if let request = activeExternalTrackRequest, request.id == event.reply_userdata {
+                finishExternalTrackRequest(request, status: event.error)
+                return
+            }
+            guard let query = subtitleQueries.removeValue(forKey: event.reply_userdata) else {
+                return
+            }
 
             if query.cancellation.isCancelled {
                 query.continuation.resume(throwing: CancellationError())
             } else if event.error < 0 {
                 query.continuation.resume(throwing: subtitleQueryError(event.error))
             } else if let data = event.data,
-                      let snapshots = MPVTextSubtitleTimeline.snapshots(from: MPVNodeValue(
-                          copying: data.assumingMemoryBound(to: mpv_event_command.self).pointee.result
-                      ))
+                      let snapshots = MPVTextSubtitleTimeline.snapshots(
+                          from: MPVNodeValue(
+                              copying: data.assumingMemoryBound(to: mpv_event_command.self).pointee.result
+                          )
+                      )
             {
                 query.continuation.resume(returning: snapshots)
             } else {
@@ -192,8 +202,9 @@ package extension MPVSession {
 
         case MPV_EVENT_START_FILE:
             lifecycleDiagnostics.startFileEvents &+= 1
-            guard playbackRequestIsActive else { return }
-            guard let data = event.data else { return }
+            guard playbackRequestIsActive, let data = event.data else {
+                return
+            }
 
             let startEvent = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee
             let entryID = startEvent.playlist_entry_id
@@ -222,12 +233,15 @@ package extension MPVSession {
             publishState(.loading)
 
         case MPV_EVENT_FILE_LOADED:
-            guard isRequestedPlaylistEntryActive else { return }
+            guard isRequestedPlaylistEntryActive else {
+                return
+            }
 
             isLoading = false
             isFileLoaded = true
             isIdle = false
             refreshTiming()
+            preparePendingSeekAfterLoad()
             applyPendingSeekAfterLoad()
             refreshBuffer()
             refreshAudioState()
@@ -237,16 +251,20 @@ package extension MPVSession {
             publishState(isPaused ? .paused : .ready)
 
         case MPV_EVENT_SEEK:
-            guard isRequestedPlaylistEntryActive else { return }
+            guard isRequestedPlaylistEntryActive else {
+                return
+            }
 
             clearTextSubtitleSnapshot()
-            pendingPiPSeek?.sawSeek = true
+            pendingSeek?.sawSeek = true
             seekUptime = DispatchTime.now().uptimeNanoseconds
             isSeeking = true
             publishState(.seeking)
 
         case MPV_EVENT_PLAYBACK_RESTART:
-            guard isRequestedPlaylistEntryActive else { return }
+            guard isRequestedPlaylistEntryActive else {
+                return
+            }
 
             let now = DispatchTime.now().uptimeNanoseconds
 
@@ -283,16 +301,21 @@ package extension MPVSession {
             refreshTextSubtitleSnapshot()
             refreshState()
 
+            publish(.playbackReady(true))
+
             // FILE_LOADED can publish .paused before a frame exists. A restart
             // also occurs for paused playback after its first frame is ready.
-            if let request = pendingPiPSeek, request.sawSeek,
+            if let request = pendingSeek,
+               request.sawSeek,
                abs((lastPosition - request.target).seconds) < 1
             {
-                completePiPSeek(true)
+                completePendingSeek(at: lastPosition)
             }
 
         case MPV_EVENT_VIDEO_RECONFIG, MPV_EVENT_AUDIO_RECONFIG:
-            guard isRequestedPlaylistEntryActive else { return }
+            guard isRequestedPlaylistEntryActive else {
+                return
+            }
 
             refreshMediaInformation()
 
@@ -301,8 +324,9 @@ package extension MPVSession {
             }
 
         case MPV_EVENT_PROPERTY_CHANGE:
-            guard isRequestedPlaylistEntryActive else { return }
-            guard let data = event.data else { return }
+            guard isRequestedPlaylistEntryActive, let data = event.data else {
+                return
+            }
 
             let property = data.assumingMemoryBound(to: mpv_event_property.self).pointee
             let propertyName: String
@@ -334,6 +358,9 @@ package extension MPVSession {
 
         case MPV_EVENT_QUEUE_OVERFLOW:
             cancelSubtitleQueries()
+            failPendingSeek(MPVPlayerError.eventQueueOverflow)
+            // Native command replies have reserved queue slots even during overflow.
+            cancelExternalTrackRequests()
 
             publish(
                 .error(
@@ -505,9 +532,11 @@ package extension MPVSession {
     }
 
     private func handleEndFile(_ event: mpv_event) {
-        guard playbackRequestIsActive else { return }
+        guard playbackRequestIsActive else {
+            return
+        }
         guard let data = event.data else {
-            completePiPSeek(false)
+            cancelPendingSeek()
             playbackRequestIsActive = false
             publishState(.ended)
 
@@ -529,7 +558,7 @@ package extension MPVSession {
         }
 
         if endEvent.reason == MPV_END_FILE_REASON_REDIRECT {
-            completePiPSeek(false)
+            cancelPendingSeek()
 
             // A playlist-like source replaces itself with new entries. The
             // next START_FILE identifies the actual selected item.
@@ -566,6 +595,8 @@ package extension MPVSession {
 
         let failedDuringLoad = !isFileLoaded
 
+        cancelExternalTrackRequests()
+
         playbackRequestIsActive = false
         clearTextSubtitleSnapshot()
         requestedPlaylistEntryID = nil
@@ -586,18 +617,20 @@ package extension MPVSession {
 
             // An exact seek to the endpoint can retire the VO without a
             // playback-restart event. The terminal timeline is authoritative.
-            let reachedRequestedEnd = pendingPiPSeek.map {
+            let reachedRequestedEnd = pendingSeek.map {
                 lastDuration > .zero && $0.target >= lastDuration - .milliseconds(1)
             } ?? false
-            completePiPSeek(reachedRequestedEnd)
+            if reachedRequestedEnd {
+                completePendingSeek(at: lastPosition)
+            } else {
+                failPendingSeek(MPVPlayerError.seekUnavailable)
+            }
 
         case MPV_END_FILE_REASON_STOP, MPV_END_FILE_REASON_QUIT:
-            completePiPSeek(false)
+            cancelPendingSeek()
             publishState(.stopped)
 
         case MPV_END_FILE_REASON_ERROR:
-            completePiPSeek(false)
-
             let code = endEvent.error
 
             publishFatalError(

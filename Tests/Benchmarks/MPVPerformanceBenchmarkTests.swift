@@ -304,17 +304,19 @@ struct MPVPerformanceBenchmarkTests {
             options["sid"] = "no"
         }
 
-        let player = MPVPlayer(configuration: .init(
-            additionalOptions: options,
-            automaticallyPlays: true,
-            hardwareDecoding: settings.decoder == "software" ? .disabled : .videoToolbox,
-            hdrPolicy: .disabled,
-            logLevel: .none,
-            isLoopingEnabled: true,
-            renderingQuality: .init(preset: settings.renderingPreset),
-            sdrOutput: settings.sdrOutput,
-            videoOutput: backend
-        ))
+        let player = MPVPlayer(
+            configuration: .init(
+                additionalOptions: options,
+                automaticallyPlays: true,
+                hardwareDecoding: settings.decoder == "software" ? .disabled : .videoToolbox,
+                hdrPolicy: .disabled,
+                logLevel: .none,
+                isLoopingEnabled: true,
+                renderingQuality: .init(preset: settings.renderingPreset),
+                sdrOutput: settings.sdrOutput,
+                videoOutput: backend
+            )
+        )
 
         let surface = MPVPlatformVideoPlayer(player: player)
 
@@ -440,30 +442,33 @@ struct MPVPerformanceBenchmarkTests {
 
         try #require(progress > 0, "Playback did not advance during the measurement interval.")
 
-        var sample = PlaybackSample(parameters: [
-            "sourceWidth": dimensions.width,
-            "outputFramesPerSecond": player.mediaInformation.framesPerSecond.map { $0 as Any } ?? "unknown",
-            "sourceHeight": dimensions.height,
-            "sourceDurationSeconds": duration,
-            "surfaceWidthPoints": surface.bounds.width,
-            "surfaceHeightPoints": surface.bounds.height,
-            "backingScaleFactor": window.backingScaleFactor,
-            "effectiveBackend": player.videoOutput.rawValue,
-            "decodedPixelFormat": after.decoder.decodedPixelFormat ?? "unknown",
-        ], observation: [
-            "repetition": repetition,
-            "positionStartSeconds": initialPosition,
-            "positionEndSeconds": position,
-            "loopWraps": wraps,
-            "counterResets": resetCount,
-            "countersStart": diagnosticCounters(before),
-            "countersEnd": diagnosticCounters(after),
-            "intervalSamples": observations,
-            "windowPresentationStart": presentationStart,
-            "windowPresentationEnd": presentationEnd,
-            "windowPresentationWaitSeconds": windowPresentationWaitSeconds,
-            "startLatencySeconds": after.startLatencySeconds.map { $0 as Any } ?? NSNull(),
-        ])
+        var sample = PlaybackSample(
+            parameters: [
+                "sourceWidth": dimensions.width,
+                "outputFramesPerSecond": player.mediaInformation.framesPerSecond.map { $0 as Any } ?? "unknown",
+                "sourceHeight": dimensions.height,
+                "sourceDurationSeconds": duration,
+                "surfaceWidthPoints": surface.bounds.width,
+                "surfaceHeightPoints": surface.bounds.height,
+                "backingScaleFactor": window.backingScaleFactor,
+                "effectiveBackend": player.videoOutput.rawValue,
+                "decodedPixelFormat": after.decoder.decodedPixelFormat ?? "unknown",
+            ],
+            observation: [
+                "repetition": repetition,
+                "positionStartSeconds": initialPosition,
+                "positionEndSeconds": position,
+                "loopWraps": wraps,
+                "counterResets": resetCount,
+                "countersStart": diagnosticCounters(before),
+                "countersEnd": diagnosticCounters(after),
+                "intervalSamples": observations,
+                "windowPresentationStart": presentationStart,
+                "windowPresentationEnd": presentationEnd,
+                "windowPresentationWaitSeconds": windowPresentationWaitSeconds,
+                "startLatencySeconds": after.startLatencySeconds.map { $0 as Any } ?? NSNull(),
+            ]
+        )
 
         try #require(window.screen === screen, "Playback display changed during the measurement interval.")
 
@@ -555,8 +560,12 @@ struct MPVPerformanceBenchmarkTests {
             }
         }
 
-        if backend == .sampleBuffer, settings.nativeOSD == "composite", settings.decoder == "videotoolbox",
-           counterDeltasEligible, wraps == 0, resetCount == 0
+        if backend == .sampleBuffer,
+           settings.nativeOSD == "composite",
+           settings.decoder == "videotoolbox",
+           counterDeltasEligible,
+           wraps == 0,
+           resetCount == 0
         {
             // Hardware buffers must be copied before composition. Software
             // uploads can be composited in place and do not share this proof.
@@ -826,8 +835,10 @@ struct MPVPerformanceBenchmarkTests {
             try #require(player.lastError == nil, "Native output failed while preparing pixel readback.")
             try #require(layer.sampleBufferRenderer.status != .failed)
 
-            if player.isPaused, layer.isReadyForDisplay,
-               let timebase = layer.controlTimebase, CMTimebaseGetRate(timebase) == 0,
+            if player.isPaused,
+               layer.isReadyForDisplay,
+               let timebase = layer.controlTimebase,
+               CMTimebaseGetRate(timebase) == 0,
                let buffer = layer.sampleBufferRenderer.displayedPixelBuffer()
             {
                 return buffer
@@ -859,7 +870,8 @@ struct MPVPerformanceBenchmarkTests {
                 break
             }
 
-            if player.state == .playing, player.position.seconds > 0,
+            if player.state == .playing,
+               player.position.seconds > 0,
                settings.matchesDecoder(player.playbackDiagnostics.decoder),
                backend == .metal ||
                (player.sampleBufferDisplayLayer.isReadyForDisplay && player.subtitleTracks.contains(where: \.isSelected))

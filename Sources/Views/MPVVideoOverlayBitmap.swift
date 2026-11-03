@@ -15,11 +15,17 @@ extension MPVVideoOverlayBitmap {
         let pixelWidth = ceil(size.width * scale)
         let pixelHeight = ceil(size.height * scale)
 
-        guard pixelWidth.isFinite, pixelHeight.isFinite, scale > 0,
-              pixelWidth > 0, pixelHeight > 0,
-              pixelWidth <= 2048, pixelHeight <= 2048,
+        guard pixelWidth.isFinite,
+              pixelHeight.isFinite,
+              scale > 0,
+              pixelWidth > 0,
+              pixelHeight > 0,
+              pixelWidth <= 2048,
+              pixelHeight <= 2048,
               let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
-        else { return nil }
+        else {
+            return nil
+        }
 
         let width = Int(pixelWidth)
         let height = Int(pixelHeight)
@@ -35,7 +41,9 @@ extension MPVVideoOverlayBitmap {
                 space: colorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                     | CGBitmapInfo.byteOrder32Little.rawValue
-            ) else { return false }
+            ) else {
+                return false
+            }
 
             context.scaleBy(x: scale, y: scale)
             draw(context)
@@ -43,7 +51,9 @@ extension MPVVideoOverlayBitmap {
             return true
         }
 
-        guard rendered else { return nil }
+        guard rendered else {
+            return nil
+        }
 
         self.init(width: width, height: height, bytes: data)
     }

@@ -293,12 +293,14 @@ struct MPVSampleBufferPictureInPictureControllerTests {
 
     @Test
     func `native skip completes only after the display clock reaches a paused seek`() async throws {
-        let player = MPVPlayer(configuration: .init(
-            additionalOptions: ["ao": "null"],
-            automaticallyPlays: false,
-            hardwareDecoding: .disabled,
-            videoOutput: .sampleBuffer
-        ))
+        let player = MPVPlayer(
+            configuration: .init(
+                additionalOptions: ["ao": "null"],
+                automaticallyPlays: false,
+                hardwareDecoding: .disabled,
+                videoOutput: .sampleBuffer
+            )
+        )
 
         let frame = CGRect(x: 0, y: 0, width: 320, height: 180)
         let surface = MPVPlatformVideoPlayer(player: player)
@@ -340,8 +342,11 @@ struct MPVSampleBufferPictureInPictureControllerTests {
         player.load(TestPaths.baselineMedia, playAutomatically: false)
 
         for _ in 0 ..< 250 {
-            if player.isPaused, player.isSeekable, layer.isReadyForDisplay,
-               let timebase = layer.controlTimebase, CMTimebaseGetRate(timebase) == 0
+            if player.isPaused,
+               player.isSeekable,
+               layer.isReadyForDisplay,
+               let timebase = layer.controlTimebase,
+               CMTimebaseGetRate(timebase) == 0
             {
                 break
             }

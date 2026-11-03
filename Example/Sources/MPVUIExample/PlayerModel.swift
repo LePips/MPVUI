@@ -1,12 +1,12 @@
 import Foundation
 import Observation
-#if !os(Android)
-import MPVUI
-#endif
-import SwiftUI
 
 // Skip's observation registrar forwards native Swift changes into Compose.
 import SkipFuse
+import SwiftUI
+#if !os(Android)
+import MPVUI
+#endif
 
 /// Owns one player for the lifetime of the shared screen.
 @MainActor
@@ -114,7 +114,8 @@ final class PlayerModel {
 
     func openNetworkURL(_ input: String) {
         guard let url = URL(string: input.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil
         else {
             selectionError = "Enter an HTTP or HTTPS media URL."
             return

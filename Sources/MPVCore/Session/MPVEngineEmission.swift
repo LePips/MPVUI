@@ -10,3 +10,9 @@ package struct MPVEngineEmission: Sendable {
         self.snapshot = snapshot
     }
 }
+
+package enum MPVEngineDelivery: Sendable {
+
+    case update(MPVEngineEmission)
+    case barrier(CheckedContinuation<Void, Never>)
+}

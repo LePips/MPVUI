@@ -119,7 +119,9 @@ final class MPVHTTPMediaServer: @unchecked Sendable {
             return (Data(header.utf8), head ? Data() : body)
         }
 
-        guard let text = String(data: request, encoding: .utf8) else { return response("400 Bad Request") }
+        guard let text = String(data: request, encoding: .utf8) else {
+            return response("400 Bad Request")
+        }
 
         let lines = text.components(separatedBy: "\r\n")
         let first = (lines.first ?? "").split(separator: " ")
@@ -131,7 +133,9 @@ final class MPVHTTPMediaServer: @unchecked Sendable {
         let head = first[0] == "HEAD"
         let path = String(first[1]).components(separatedBy: "?")[0]
         let prefix = "/\(token)/"
-        guard path.hasPrefix(prefix) else { return response("404 Not Found", head: head) }
+        guard path.hasPrefix(prefix) else {
+            return response("404 Not Found", head: head)
+        }
 
         let filename = String(path.dropFirst(prefix.count))
 
@@ -146,8 +150,12 @@ final class MPVHTTPMediaServer: @unchecked Sendable {
 
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? Int, size <= 512 * 1024 * 1024,
-              let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return response("404 Not Found", head: head) }
+              let size = attributes[.size] as? Int,
+              size <= 512 * 1024 * 1024,
+              let data = try? Data(contentsOf: file, options: .mappedIfSafe)
+        else {
+            return response("404 Not Found", head: head)
+        }
 
         var headers = [
             "Content-Type": filename.hasSuffix("m3u8") ? "application/vnd.apple.mpegurl" : filename

@@ -50,7 +50,9 @@ struct MPVSessionContractTests {
     @Test
     func `typed controls retain settings and external tracks before native playback exists`() throws {
         let player = session()
-        defer { player.close() }
+        defer {
+            player.close()
+        }
 
         let audio = MPVMediaTrackIdentifier(type: .audio, mpvID: 3)
         let source = URL(fileURLWithPath: "/queued-audio.mka")
@@ -70,6 +72,7 @@ struct MPVSessionContractTests {
         }
 
         let snapshot = player.snapshot
+
         #expect(snapshot.volume == 42 && snapshot.isMuted && snapshot.playbackRate == 1.25)
         #expect(snapshot.interceptsTextSubtitles && snapshot.isDiagnosticsEnabled)
 
@@ -78,24 +81,29 @@ struct MPVSessionContractTests {
             #expect(player.desiredProperties["aid"] == "3")
             #expect(player.desiredProperties["vid"] == "no")
             #expect(player.desiredProperties["secondary-sid"] == "no")
-            #expect(player.pendingExternalTracks.count == 1)
+            #expect(player.externalTrackRequests.count == 1)
         }
 
         try player.send(.stepBackward)
 
         guard case let .commandFailed(_, code, _) = player.snapshot.error else {
             Issue.record("Frame stepping without a client must report unavailability")
+
             return
         }
 
         #expect(code == MPV_ERROR_UNINITIALIZED.rawValue)
+
         try player.send(.clearLastError)
         try player.send(.executeCommand(""))
         try player.send(.setProperty(" \n", to: "unused"))
+
         #expect(player.snapshot.error == nil)
         #expect(player.snapshot.generation == 0)
+
         player.close()
         _ = player.requestVideoFeatures([.inlineOverlays])
+
         #expect(player.snapshot.isClosed && player.snapshot.requestedVideoFeatures == nil)
     }
 
@@ -323,7 +331,7 @@ struct MPVSessionContractTests {
             #expect(MPVDisplayCapabilities(refreshRate: rate).refreshRate == nil)
         }
 
-        #expect(!MPVMediaTrack(id: 1, type: .subtitle).isSemanticTextSubtitle)
+        #expect(MPVMediaTrack(id: 1, type: .subtitle).subtitleCapabilities?.supportsLiveText == false)
     }
 
     @Test

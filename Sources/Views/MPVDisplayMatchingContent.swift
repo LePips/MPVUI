@@ -40,10 +40,13 @@ struct MPVDisplayMatchingContent {
             guard status.nativeValidation == .validated,
                   let profile = status.effectiveProfile,
                   let compatibilityID = status.effectiveBaseLayerCompatibilityID,
-                  let level, (1 ... 15).contains(level),
+                  let level,
+                  (1 ... 15).contains(level),
                   (profile == 5 && compatibilityID == 0)
                   || (profile == 8 && [1, 4].contains(compatibilityID))
-            else { return nil }
+            else {
+                return nil
+            }
 
             self.profile = profile
             self.level = level
@@ -69,11 +72,15 @@ struct MPVDisplayMatchingContent {
         let selectedCodec = media.tracks.first { $0.type == .video && $0.isSelected }?.codec
 
         guard let dimensions = media.dimensions,
-              let width = Int32(exactly: dimensions.width), width > 0,
-              let height = Int32(exactly: dimensions.height), height > 0,
+              let width = Int32(exactly: dimensions.width),
+              width > 0,
+              let height = Int32(exactly: dimensions.height),
+              height > 0,
               let refreshRate = Self.refreshRate(for: media.framesPerSecond, playbackRate: playbackRate),
               let codec = Self.codecType(for: selectedCodec ?? media.videoCodec)
-        else { return nil }
+        else {
+            return nil
+        }
 
         self.width = width
         self.height = height
@@ -97,10 +104,15 @@ struct MPVDisplayMatchingContent {
     /// Preserve the NTSC rational families, including when mpv reports their
     /// common three-decimal spelling. In particular, never round 23.976 to 24.
     static func refreshRate(for framesPerSecond: Double?, playbackRate: Double = 1) -> Float? {
-        guard let value = framesPerSecond, value.isFinite,
-              value > 0, value <= 1000,
-              playbackRate.isFinite, playbackRate > 0
-        else { return nil }
+        guard let value = framesPerSecond,
+              value.isFinite,
+              value > 0,
+              value <= 1000,
+              playbackRate.isFinite,
+              playbackRate > 0
+        else {
+            return nil
+        }
 
         let standardRates = [
             24000.0 / 1001,
@@ -122,7 +134,9 @@ struct MPVDisplayMatchingContent {
         // 23.976 fps at 1.001x aligned with the exact 24 Hz family.
         let sourceRate = standardRates.first { abs($0 - value) < 0.001 } ?? value
         let effectiveRate = sourceRate * playbackRate
-        guard effectiveRate.isFinite, effectiveRate > 0, effectiveRate <= 240 else { return nil }
+        guard effectiveRate.isFinite, effectiveRate > 0, effectiveRate <= 240 else {
+            return nil
+        }
 
         let rate = standardRates.first { abs($0 - effectiveRate) < 0.001 } ?? effectiveRate
 
@@ -220,19 +234,24 @@ struct MPVDisplayMatchingContent {
             if signal.transferFunction.isHDR,
                let maxCLL = signal.maxContentLightLevel,
                let maxFALL = signal.maxFrameAverageLightLevel,
-               maxCLL.isFinite, maxFALL.isFinite,
-               maxCLL >= 0, maxFALL >= 0,
-               maxCLL <= Double(UInt16.max), maxFALL <= Double(UInt16.max)
+               maxCLL.isFinite,
+               maxFALL.isFinite,
+               maxCLL >= 0,
+               maxFALL >= 0,
+               maxCLL <= Double(UInt16.max),
+               maxFALL <= Double(UInt16.max)
             {
                 let cll = UInt16(maxCLL.rounded())
                 let fall = UInt16(maxFALL.rounded())
 
-                extensions[kCMFormatDescriptionExtension_ContentLightLevelInfo as String] = Data([
-                    UInt8(cll >> 8),
-                    UInt8(cll & 0xFF),
-                    UInt8(fall >> 8),
-                    UInt8(fall & 0xFF),
-                ])
+                extensions[kCMFormatDescriptionExtension_ContentLightLevelInfo as String] = Data(
+                    [
+                        UInt8(cll >> 8),
+                        UInt8(cll & 0xFF),
+                        UInt8(fall >> 8),
+                        UInt8(fall & 0xFF),
+                    ]
+                )
             }
         }
 
@@ -254,11 +273,15 @@ struct MPVDisplayMatchingContent {
 extension MPVDisplayMatchingContent: Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        guard lhs.width == rhs.width, lhs.height == rhs.height,
-              lhs.refreshRate == rhs.refreshRate, lhs.codec == rhs.codec,
+        guard lhs.width == rhs.width,
+              lhs.height == rhs.height,
+              lhs.refreshRate == rhs.refreshRate,
+              lhs.codec == rhs.codec,
               lhs.convertsHDRToSDR == rhs.convertsHDRToSDR,
               lhs.dolbyVision == rhs.dolbyVision
-        else { return false }
+        else {
+            return false
+        }
 
         if lhs.convertsHDRToSDR {
             return true

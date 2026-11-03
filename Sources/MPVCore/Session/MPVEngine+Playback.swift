@@ -46,9 +46,12 @@ package extension MPVSession {
         generation: UInt64
     ) {
         queue.async { [weak self] in
-            guard let self, !self.isClosed else { return }
+            guard let self, !self.isClosed else {
+                return
+            }
 
             self.cancelSubtitleQueries()
+            self.cancelExternalTrackRequests()
 
             if self.usesAndroidOutput {
                 self.didFallbackFromAndroidNative = false
@@ -87,7 +90,7 @@ package extension MPVSession {
             self.seekUptime = nil
             self.dolbyVisionResolver.reset()
             self.videoToolboxSessionUsesHardware = nil
-            self.completePiPSeek(false)
+            self.cancelPendingSeek()
             self.clearTextSubtitleSnapshot()
             self.stopSecurityScopedAccess()
             self.stopExternalSecurityScopedAccess()
@@ -218,11 +221,14 @@ package extension MPVSession {
 
     func stop(generation: UInt64? = nil) {
         queue.async { [weak self] in
-            guard let self, !self.isClosed else { return }
+            guard let self, !self.isClosed else {
+                return
+            }
 
             self.latestSnapshot.requestedVideoFeatures = nil
             self.cancelSubtitleQueries()
-            self.completePiPSeek(false)
+            self.cancelExternalTrackRequests()
+            self.cancelPendingSeek()
 
             // Snapshot before stop unloads the file and track selections.
             self.snapshotRuntimeProperties()
@@ -284,9 +290,11 @@ package extension MPVSession {
         let target = time.clampPositiveOrZero
 
         queue.async { [weak self] in
-            guard let self, !self.isClosed else { return }
+            guard let self, !self.isClosed else {
+                return
+            }
 
-            self.completePiPSeek(false)
+            self.cancelPendingSeek()
 
             if self.handle == nil || !self.isFileLoaded {
                 if self.handle != nil, self.isLoading, !self.needsSourceLoad {
@@ -309,9 +317,11 @@ package extension MPVSession {
 
     func seek(by offset: Duration) {
         queue.async { [weak self] in
-            guard let self, !self.isClosed else { return }
+            guard let self, !self.isClosed else {
+                return
+            }
 
-            self.completePiPSeek(false)
+            self.cancelPendingSeek()
 
             if self.handle == nil || !self.isFileLoaded {
                 let pendingPosition =
@@ -507,7 +517,9 @@ package extension MPVSession {
 
     func applyPendingSeekAfterLoad() {
         dispatchPrecondition(condition: .onQueue(queue))
-        guard let target = pendingSeekAfterLoad else { return }
+        guard let target = pendingSeekAfterLoad else {
+            return
+        }
 
         pendingSeekAfterLoad = nil
 
@@ -515,6 +527,7 @@ package extension MPVSession {
 
         if status < 0 {
             publishCommandError(status, context: "Seek")
+            failPendingSeek(MPVPlayerError.seekFailed(code: status, message: mpvErrorMessage(status)))
             return
         }
 
@@ -523,8 +536,9 @@ package extension MPVSession {
     }
 
     func startSecurityScopedAccessIfNeeded(for url: URL) {
-        guard securityScopedURL == nil else { return }
-        guard platform.beginSourceAccess(url) else { return }
+        guard securityScopedURL == nil, platform.beginSourceAccess(url) else {
+            return
+        }
 
         securityScopedURL = url
     }

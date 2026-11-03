@@ -44,16 +44,24 @@ struct MPVEngineEventTests {
     }
 
     @Test(arguments: [true, false], [29.0, 29.9995, 30.0])
-    func `EOF completes only picture in picture seeks that reached the requested endpoint`(knownDuration: Bool, target: Double) async {
+    func `EOF completes only seeks that reached the requested endpoint`(knownDuration: Bool, target: Double) async {
         let engine = MPVSession(configuration: .init()) { _ in }
-        defer { engine.close() }
+        defer {
+            engine.close()
+        }
 
-        let result = await withCheckedContinuation { continuation in
+        let result: MPVSeekResult? = try? await withCheckedThrowingContinuation { continuation in
             engine.queue.async {
                 engine.playbackRequestIsActive = true
                 engine.isFileLoaded = true
                 engine.lastDuration = knownDuration ? .seconds(30) : .zero
-                engine.pendingPiPSeek = .init(id: UUID(), target: .seconds(target), continuation: continuation)
+                engine.pendingSeek = .init(
+                    id: UUID(),
+                    generation: engine.currentGeneration,
+                    target: .seconds(target),
+                    cancellation: .init(),
+                    continuation: continuation
+                )
 
                 var end = mpv_event_end_file()
                 end.reason = MPV_END_FILE_REASON_EOF
@@ -66,9 +74,10 @@ struct MPVEngineEventTests {
                 }
             }
         }
-        #expect(result == (knownDuration && target >= 29.999))
+
+        #expect((result != nil) == (knownDuration && target >= 29.999))
         #expect(engine.snapshot.state == .ended && engine.snapshot.position == (knownDuration ? .seconds(30) : .zero))
-        #expect(engine.queue.sync { engine.pendingPiPSeek == nil })
+        #expect(engine.queue.sync { engine.pendingSeek == nil })
     }
 
     @Test
@@ -564,7 +573,7 @@ struct MPVEngineEventTests {
     @Test(arguments: ["cancelled", "native-error", "missing-result", "empty-timeline"])
     func `subtitle command replies complete and remove exactly their pending query`(outcome: String) async {
         let engine = MPVSession(configuration: .init()) { _ in }
-        let cancellation = MPVSubtitleQueryCancellation()
+        let cancellation = MPVOperationCancellation()
 
         if outcome == "cancelled" {
             cancellation.cancel()

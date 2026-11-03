@@ -413,13 +413,19 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
 
     func swiftUISourceWasDismantled() {
         #if os(macOS) && !targetEnvironment(macCatalyst)
-        guard isRetainedForPictureInPicture else { return }
+        guard isRetainedForPictureInPicture else {
+            return
+        }
 
         // SwiftUI retires the source graph after dismantle returns. Refresh the
         // independent PiP host on the next turn so it keeps scheduling updates.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isRetainedForPictureInPicture,
-                  let host = self.videoOverlayHost else { return }
+            guard let self,
+                  self.isRetainedForPictureInPicture,
+                  let host = self.videoOverlayHost
+            else {
+                return
+            }
 
             host.needsLayout = true
             host.layoutSubtreeIfNeeded()
@@ -910,8 +916,13 @@ private extension MPVPlatformVideoPlayer {
     }
 
     func startTrackingPresentationGeometry() {
-        guard player.videoOutput == .metal, isActiveRenderingSurface, window != nil,
-              geometryDisplayLink == nil else { return }
+        guard player.videoOutput == .metal,
+              isActiveRenderingSurface,
+              window != nil,
+              geometryDisplayLink == nil
+        else {
+            return
+        }
 
         geometryTrackingStartedAt = CACurrentMediaTime()
         synchronizeRenderTargetAfterGeometryChange(kind: .animatedTransition)

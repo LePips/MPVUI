@@ -53,19 +53,11 @@ struct PlayerScreen: View {
 
     #if !os(Android)
     private var subtitleVideoSize: CGSize? {
-        guard let dimensions = model.player.mediaInformation.dimensions else { return nil }
-
-        var width = CGFloat(dimensions.effectiveWidth)
-        var height = CGFloat(dimensions.effectiveHeight)
-        guard width > 0, height > 0 else { return nil }
-
-        let rotation = ((model.player.mediaInformation.rotation % 360) + 360) % 360
-
-        if rotation == 90 || rotation == 270 {
-            swap(&width, &height)
+        guard let dimensions = model.player.mediaInformation.presentationDimensions else {
+            return nil
         }
 
-        return CGSize(width: width, height: height)
+        return CGSize(width: dimensions.width, height: dimensions.height)
     }
     #endif
 

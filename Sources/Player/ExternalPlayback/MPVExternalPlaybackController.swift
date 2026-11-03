@@ -32,6 +32,15 @@ import Observation
 @Observable
 public final class MPVExternalPlaybackController {
 
+    private struct SeekRequest {
+
+        let id: UUID
+        let generation: UInt64
+        let target: Duration
+        let continuation: CheckedContinuation<MPVSeekResult, any Error>
+        var timeout: Task<Void, Never>?
+    }
+
     /// Whether media is being prepared for system playback.
     public private(set) var isPreparing = false
     /// Whether the system player is ready to play, even if no AirPlay destination is selected.
@@ -71,6 +80,9 @@ public final class MPVExternalPlaybackController {
     private var isSeeking = false
     @ObservationIgnored
     private var seekID = UUID()
+    @ObservationIgnored
+    private var pendingSeek: SeekRequest?
+
     @ObservationIgnored
     private var routePreparation: Task<Void, Never>?
     @ObservationIgnored
@@ -283,14 +295,22 @@ public final class MPVExternalPlaybackController {
 
             return
         }
-        guard changed || retry, !controlsPlayback, routePreparation == nil,
-              let source = player?.mediaInformation.sourceURL, player?.mediaInformation.tracks.isEmpty == false else { return }
+        guard changed || retry,
+              !controlsPlayback,
+              routePreparation == nil,
+              let source = player?.mediaInformation.sourceURL,
+              player?.mediaInformation.tracks.isEmpty == false
+        else {
+            return
+        }
 
         let id = UUID()
         routeRequestID = id
 
         routePreparation = Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                return
+            }
 
             defer {
                 if self.routeRequestID == id {
@@ -298,17 +318,27 @@ public final class MPVExternalPlaybackController {
                 }
             }
 
-            guard !Task.isCancelled, self.routeRequestID == id,
-                  self.player?.mediaInformation.sourceURL == source else { return }
+            guard !Task.isCancelled,
+                  self.routeRequestID == id,
+                  self.player?.mediaInformation.sourceURL == source
+            else {
+                return
+            }
 
-            do { try await self.start() } catch {
+            do {
+                try await self.start()
+            } catch {
                 // start() already records the error and restores local playback.
             }
         }
     }
 
-    func invalidate(restore: Bool) {
+    func invalidate(restore: Bool, preservingSeek: Bool = false) {
         let wasControlling = controlsPlayback
+
+        if !preservingSeek {
+            finishSeek(throwing: CancellationError())
+        }
 
         requestID = UUID()
         seekID = UUID()
@@ -320,7 +350,9 @@ public final class MPVExternalPlaybackController {
         systemPlayer.replaceCurrentItem(with: nil)
 
         if let stream {
-            Task { await stream.stop() }
+            Task {
+                await stream.stop()
+            }
         }
 
         stream = nil
@@ -372,8 +404,60 @@ public final class MPVExternalPlaybackController {
         }
     }
 
-    func seek(to position: Duration) {
-        guard let player, sourceIsSeekable else { return }
+    func seekAndWait(to position: Duration, timeout: Duration) async throws -> MPVSeekResult {
+        try Task.checkCancellation()
+        guard let player, controlsPlayback, sourceIsSeekable else {
+            throw MPVPlayerError.seekUnavailable
+        }
+        guard timeout > .zero else {
+            throw MPVPlayerError.seekTimedOut
+        }
+
+        finishSeek(throwing: CancellationError())
+        let id = UUID()
+        let generation = player.mediaGeneration
+        let target = sourceDuration > .zero ? clamped(position, to: .zero ... sourceDuration) : position.clampPositiveOrZero
+        let result = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                pendingSeek = SeekRequest(id: id, generation: generation, target: target, continuation: continuation)
+                pendingSeek?.timeout = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    guard self?.pendingSeek?.id == id else {
+                        return
+                    }
+
+                    self?.finishSeek(throwing: MPVPlayerError.seekTimedOut)
+                }
+                seek(to: target, preservingWait: true)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard self?.pendingSeek?.id == id else {
+                    return
+                }
+
+                self?.finishSeek(throwing: CancellationError())
+            }
+        }
+        try Task.checkCancellation()
+        guard player.mediaGeneration == generation else {
+            throw CancellationError()
+        }
+
+        return result
+    }
+
+    func seek(to position: Duration, preservingWait: Bool = false) {
+        if !preservingWait {
+            finishSeek(throwing: CancellationError())
+        }
+        guard let player, sourceIsSeekable else {
+            return
+        }
 
         let target = sourceDuration > .zero ? clamped(position, to: .zero ... sourceDuration) : position.clampPositiveOrZero
         let seconds = target.seconds - (stream?.startTime.seconds ?? 0) + timelineOrigin
@@ -407,7 +491,9 @@ public final class MPVExternalPlaybackController {
                 toleranceAfter: .zero
             ) { [weak self] finished in
                 Task { @MainActor in
-                    guard let self, self.seekID == id, self.isPrepared else { return }
+                    guard let self, self.seekID == id, self.isPrepared else {
+                        return
+                    }
 
                     self.isSeeking = false
 
@@ -416,14 +502,31 @@ public final class MPVExternalPlaybackController {
                     }
 
                     self.setPlaying(!self.desiredPaused)
+                    self.finishSeek(throwing: finished ? nil : self.lastError)
                 }
             }
+    }
+
+    private func finishSeek(throwing error: (any Error)? = nil) {
+        guard let request = pendingSeek else {
+            return
+        }
+
+        pendingSeek = nil
+        request.timeout?.cancel()
+        if let error {
+            request.continuation.resume(throwing: error)
+        } else if let player, player.mediaGeneration == request.generation {
+            request.continuation.resume(returning: .init(generation: request.generation, target: request.target, position: player.position))
+        } else {
+            request.continuation.resume(throwing: CancellationError())
+        }
     }
 
     private func restart(at position: Duration) {
         let paused = desiredPaused
 
-        invalidate(restore: false)
+        invalidate(restore: false, preservingSeek: true)
         desiredPaused = paused
         isPreparing = true
 
@@ -438,7 +541,9 @@ public final class MPVExternalPlaybackController {
         )
 
         preparation = Task { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                return
+            }
 
             do {
                 try await self.prepare(at: position, request: id)
@@ -447,17 +552,22 @@ public final class MPVExternalPlaybackController {
                     self.preparation = nil
                 }
             } catch {
-                guard self.requestID == id else { return }
+                guard self.requestID == id else {
+                    return
+                }
 
                 let description = (error as? MPVHTTPMediaServer.ServerError)?.message ?? error.localizedDescription
                 self.lastError = (error as? MPVPlayerError) ?? .externalPlaybackFailed(description)
+                self.finishSeek(throwing: self.lastError)
                 self.invalidate(restore: true)
             }
         }
     }
 
     private func prepare(at position: Duration, request id: UUID) async throws {
-        guard let player, let originalURL = player.mediaInformation.sourceURL else { throw CancellationError() }
+        guard let player, let originalURL = player.mediaInformation.sourceURL else {
+            throw CancellationError()
+        }
 
         await player.pauseForExternalPlayback()
         try validate(id)
@@ -514,7 +624,9 @@ public final class MPVExternalPlaybackController {
                 packaging: options,
                 toneMapHDR: player.mediaInformation.hdr.isHDRContent || player.dolbyVisionStatus.sourceProfile != nil,
                 onPreparation: { [weak self] plan in
-                    guard let self, self.requestID == id else { return }
+                    guard let self, self.requestID == id else {
+                        return
+                    }
 
                     self.preparationPlan = plan
                 }
@@ -534,7 +646,9 @@ public final class MPVExternalPlaybackController {
             try validate(id)
 
             guard ContinuousClock.now < deadline
-            else { throw MPVPlayerError.externalPlaybackFailed("System playback preparation timed out.") }
+            else {
+                throw MPVPlayerError.externalPlaybackFailed("System playback preparation timed out.")
+            }
 
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -565,10 +679,16 @@ public final class MPVExternalPlaybackController {
 
         if target > 0 || stream != nil {
             let timeout = Task {
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    return
+                }
                 item.cancelPendingSeeks()
             }
-            defer { timeout.cancel() }
+            defer {
+                timeout.cancel()
+            }
 
             let finished = await withTaskCancellationHandler {
                 await systemPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -577,19 +697,26 @@ public final class MPVExternalPlaybackController {
             }
 
             try validate(id)
-            guard finished else { throw MPVPlayerError.externalPlaybackFailed("The system player could not reach the requested position.") }
+            guard finished else {
+                throw MPVPlayerError.externalPlaybackFailed("The system player could not reach the requested position.")
+            }
         }
 
         try validate(id)
         isPreparing = false
         isPrepared = true
         setPlaying(!desiredPaused)
+        finishSeek()
 
         monitoring = Task { [weak self] in
             while !Task.isCancelled {
                 self?.refresh()
 
-                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch {
+                    return
+                }
             }
         }
     }

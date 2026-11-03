@@ -37,7 +37,7 @@ public struct MPVVideoDimensions: Equatable, Hashable, Sendable {
         width == 0 || height == 0
     }
 
-    /// Clamps negative encoded dimensions to zero and discards negative display dimensions.
+    /// Clamps negative encoded dimensions to zero and discards nonpositive display dimensions.
     package init(
         width: Int,
         height: Int,
@@ -46,7 +46,7 @@ public struct MPVVideoDimensions: Equatable, Hashable, Sendable {
     ) {
         self.width = max(0, width)
         self.height = max(0, height)
-        self.displayWidth = displayWidth.flatMap { $0 >= 0 ? $0 : nil }
-        self.displayHeight = displayHeight.flatMap { $0 >= 0 ? $0 : nil }
+        self.displayWidth = displayWidth.flatMap { $0 > 0 ? $0 : nil }
+        self.displayHeight = displayHeight.flatMap { $0 > 0 ? $0 : nil }
     }
 }

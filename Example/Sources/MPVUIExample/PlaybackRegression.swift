@@ -65,7 +65,8 @@ private struct RegressionSettings {
     static var failureOutput: URL {
         let arguments = ProcessInfo.processInfo.arguments
 
-        if let index = arguments.firstIndex(of: "--regression-output"), index + 1 < arguments.count,
+        if let index = arguments.firstIndex(of: "--regression-output"),
+           index + 1 < arguments.count,
            let url = try? outputURL(arguments[index + 1])
         {
             return url
@@ -587,14 +588,19 @@ private final class PlaybackRegression {
 
         func collectDrift() {
             guard let diagnostics = player?.playbackDiagnostics,
-                  lastDriftSnapshot != diagnostics.engineActivity.diagnosticsSnapshots else { return }
+                  lastDriftSnapshot != diagnostics.engineActivity.diagnosticsSnapshots
+            else {
+                return
+            }
 
             lastDriftSnapshot = diagnostics.engineActivity.diagnosticsSnapshots
 
-            driftSamples.append([
-                "elapsedSeconds": ProcessInfo.processInfo.systemUptime - segmentStart,
-                "seconds": regressionFinite(diagnostics.audioVideoDriftSeconds)
-            ])
+            driftSamples.append(
+                [
+                    "elapsedSeconds": ProcessInfo.processInfo.systemUptime - segmentStart,
+                    "seconds": regressionFinite(diagnostics.audioVideoDriftSeconds)
+                ]
+            )
         }
 
         collectDrift()
@@ -660,8 +666,10 @@ private final class PlaybackRegression {
 
         try require(decoderMatchesExpectation, "Decoder changed during settled playback")
 
-        guard let firstDecoder = before?.decoderDroppedFrames, let lastDecoder = after?.decoderDroppedFrames,
-              let firstOutput = before?.outputDroppedFrames, let lastOutput = after?.outputDroppedFrames
+        guard let firstDecoder = before?.decoderDroppedFrames,
+              let lastDecoder = after?.decoderDroppedFrames,
+              let firstOutput = before?.outputDroppedFrames,
+              let lastOutput = after?.outputDroppedFrames
         else {
             throw RegressionFailure(message: "\(stage): decoder/output drop counters are unavailable")
         }
