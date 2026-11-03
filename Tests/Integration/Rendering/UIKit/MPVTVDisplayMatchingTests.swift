@@ -81,6 +81,26 @@ struct MPVTVDisplayMatchingTests {
     }
 
     @Test
+    func `shared display notifications release the window display pause`() {
+        let manager = DisplayManager()
+        let sharedDisplaySender = NSObject()
+        let coordinator = MPVDisplayMatchingCoordinator()
+        var switches: [Bool] = []
+        coordinator.displayModeSwitchDidChange = { switches.append($0) }
+        defer { coordinator.detach() }
+        update(coordinator, manager: manager)
+        manager.switching = true
+        // A media refresh can observe the switch even when its start notification
+        // came from a shared display object rather than the window's manager.
+        update(coordinator, manager: manager, fps: 60)
+        #expect(switches == [true])
+        manager.switching = false
+        NotificationCenter.default.post(name: .AVDisplayManagerModeSwitchEnd, object: sharedDisplaySender)
+        #expect(switches == [true, false])
+        #expect(manager.assignments.count == 2)
+    }
+
+    @Test
     func `surface handoff retains criteria until the current owner stops`() {
         let manager = DisplayManager()
         let old = MPVDisplayMatchingCoordinator()
