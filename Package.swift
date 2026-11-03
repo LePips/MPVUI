@@ -10,8 +10,8 @@ let android = (Context.environment["TARGET_OS_ANDROID"] ?? "0") != "0"
 private let binaryTargets: [Target] = android ? [] : [
     .binaryTarget(
         name: "Libmpv-GPL",
-        url: "https://github.com/LePips/MPVUI/releases/download/0.9.0/Libmpv.xcframework.zip",
-        checksum: "0192519e1318bdf892e8d166b220da01a901baf19471d20286b3af1b4e88ffbf"
+        url: "https://github.com/LePips/MPVUI/releases/download/0.10.0/Libmpv.xcframework.zip",
+        checksum: "ce83f59ab85894607f35a0598a4f3d873e4636a8b997a4c8c19a5275cf9f3e74"
     ),
 ]
 // MPVBUILD_BINARY_TARGETS_END
