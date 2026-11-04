@@ -82,7 +82,7 @@ extension MPVTVDisplayMatchingTarget: MPVDisplayMatchingTarget {
             NSNotification.Name.AVDisplayManagerModeSwitchEnd,
             NSNotification.Name.AVDisplayManagerModeSwitchSettingsChanged,
         ].map { name in
-            NotificationCenter.default.addObserver(forName: name, object: manager, queue: .main) { _ in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { onChange() }
             }
         }
