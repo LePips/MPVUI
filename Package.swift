@@ -42,7 +42,13 @@ let package = Package(
             publicHeadersPath: "include",
             linkerSettings: android ? [.linkedLibrary("mpv")] : []
         ),
-        .target(name: "MPVCore", dependencies: ["CMPV"], path: "Sources/MPVCore"),
+        .target(
+            name: "MPVCore",
+            dependencies: ["CMPV"],
+            path: "Sources/MPVCore",
+            exclude: android ? ["PrivacyInfo.xcprivacy"] : [],
+            resources: android ? [] : [.process("PrivacyInfo.xcprivacy")]
+        ),
         .testTarget(name: "MPVCoreTests", dependencies: ["MPVCore", "CMPV"] + (android ? ["MPVCoreAndroid"] : []), path: "Tests/Core"),
     ] + (android ? [.target(name: "MPVCoreAndroid", dependencies: ["MPVCore", "CMPV"], path: "Sources/MPVCoreAndroid")] : []) +
         (android ? [] : [
@@ -56,6 +62,7 @@ let package = Package(
                 path: "Sources",
                 exclude: ["MPVCore", "MPVCoreAndroid", "CMPV", "Player/PictureInPicture/_MPVUIPictureInPicture"],
                 sources: ["Engine", "Models", "Player", "Views", "MPVCoreExports.swift"],
+                resources: [.process("PrivacyInfo.xcprivacy")],
                 linkerSettings: [
                     .linkedFramework("AVFoundation"),
                     .linkedFramework("AVKit"),

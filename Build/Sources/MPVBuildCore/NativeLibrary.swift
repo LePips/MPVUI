@@ -118,5 +118,17 @@ enum NativeLibrary {
             actual == exports,
             "Native interface mismatch; missing: \(exports.subtracting(actual).sorted()), leaked: \(actual.subtracting(exports).sorted())"
         )
+
+        let references = try Set(runner.run("/usr/bin/nm", ["-uj", binary.path]).split(separator: "\n").map(String.init))
+        try verifyPrivacyAPIReferences(references)
+    }
+
+    static func verifyPrivacyAPIReferences(_ references: Set<String>) throws {
+        // The native manifest declares no disk-space use. Catch regressions,
+        // including the INODE64 variants referenced by Intel Catalyst binaries.
+        let diskSpaceAPIs: Set<String> = ["_statfs", "_fstatfs", "_statvfs", "_fstatvfs"]
+        let symbols = Set(references.map { String($0.prefix { $0 != "$" }) })
+        let undeclared = symbols.intersection(diskSpaceAPIs)
+        try require(undeclared.isEmpty, "Undeclared disk-space APIs in native library: \(undeclared.sorted())")
     }
 }

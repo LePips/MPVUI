@@ -1,0 +1,52 @@
+Subject: [PATCH] Query Apple volume locality without disk-space APIs
+
+Use the volume locality resource property to identify network-backed media.
+The previous fstatfs call accessed a required-reason API whose approved
+reasons do not cover filesystem type detection.
+
+diff --git a/stream/stream_file.c b/stream/stream_file.c
+--- a/stream/stream_file.c
++++ b/stream/stream_file.c
+@@ -38,7 +38,10 @@
+ #include "options/m_option.h"
+ #include "options/path.h"
+ 
+-#if HAVE_BSD_FSTATFS
++#if defined(__APPLE__)
++#include <CoreFoundation/CoreFoundation.h>
++#include <limits.h>
++#elif HAVE_BSD_FSTATFS
+ #include <sys/param.h>
+ #include <sys/mount.h>
+ #endif
+@@ -198,7 +201,29 @@
+     }
+ }
+ 
+-#if HAVE_BSD_FSTATFS
++#if defined(__APPLE__)
++static bool check_stream_network(int fd)
++{
++    // Query locality without retrieving disk capacity through fstatfs.
++    char path[PATH_MAX];
++    if (fcntl(fd, F_GETPATH, path) < 0)
++        return false;
++
++    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
++        NULL, (const UInt8 *)path, strlen(path), false);
++    if (!url)
++        return false;
++
++    CFBooleanRef local = NULL;
++    bool network = CFURLCopyResourcePropertyForKey(
++        url, kCFURLVolumeIsLocalKey, &local, NULL) &&
++        local && !CFBooleanGetValue(local);
++    if (local)
++        CFRelease(local);
++    CFRelease(url);
++    return network;
++}
++#elif HAVE_BSD_FSTATFS
+ static bool check_stream_network(int fd)
+ {
+     struct statfs fs;

@@ -197,7 +197,7 @@ def test_arguments(args):
         platform="device",
         device_id=args.device,
         result_bundle=args.output / "test.xcresult",
-        only_testing=SUITE,
+        only_testing=[SUITE],
     )
 
 

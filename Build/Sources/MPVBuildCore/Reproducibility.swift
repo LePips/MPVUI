@@ -194,6 +194,7 @@ struct Reproducibility {
             "Build/Patches",
             "Build/Android/Patches",
             "Build/Support",
+            "Build/PrivacyInfo.xcprivacy",
             "Build/RECIPE_LICENSE",
             "Sources",
             "Tests",

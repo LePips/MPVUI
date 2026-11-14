@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the iOS test project, run it on a device or simulator, and retain its result bundle."""
+"""Generate an Apple test project, run it on a device or simulator, and retain its result bundle."""
 
 import argparse
 from datetime import datetime, timezone
@@ -19,10 +19,12 @@ from validation import publish_evidence
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_command(*, project, derived_data, platform, device_id, result_bundle, only_testing=None):
+def test_command(*, project, derived_data, platform, device_id, result_bundle, only_testing=None, operating_system="iOS"):
     if platform not in ("device", "simulator") or not device_id:
         raise ValueError("Choose a device or simulator and provide its identifier")
-    destination = "platform=iOS" if platform == "device" else "platform=iOS Simulator"
+    if operating_system not in ("iOS", "tvOS"):
+        raise ValueError("Test operating system must be iOS or tvOS")
+    destination = f"platform={operating_system}" + (" Simulator" if platform == "simulator" else "")
     command = [
         "xcodebuild",
         "-project",
@@ -47,8 +49,7 @@ def test_command(*, project, derived_data, platform, device_id, result_bundle, o
         # A test run targets one simulator; local native candidates may contain
         # only that simulator's architecture.
         command.append("ONLY_ACTIVE_ARCH=YES")
-    if only_testing:
-        command.append("-only-testing:" + only_testing)
+    command.extend("-only-testing:" + identifier for identifier in only_testing or [])
     return command + ["test"]
 
 
@@ -68,27 +69,41 @@ def result_summary(result_bundle):
 
 
 def simulators():
-    """Return available simulator names by identifier."""
+    """Return available iOS and tvOS simulator names and platforms by identifier."""
     listing = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"], check=True, capture_output=True, text=True)
-    return {device["udid"]: device["name"] for devices in json.loads(listing.stdout)["devices"].values() for device in devices}
+    return {
+        device["udid"]: {"name": device["name"], "os": platform}
+        for runtime, devices in json.loads(listing.stdout)["devices"].items()
+        for platform in ("iOS", "tvOS")
+        if f".{platform}-" in runtime
+        for device in devices
+    }
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", help="Device or simulator identifier. Omit it to list both")
+    parser.add_argument("--os", choices=("iOS", "tvOS"), help="Device platform. Inferred for simulators, otherwise defaults to iOS")
     add_team_argument(parser)
-    parser.add_argument("--only-testing", help="Xcode test identifier to select")
+    parser.add_argument("--only-testing", action="append", help="Xcode test identifier to select. Repeat to select multiple suites")
     args = parser.parse_args(argv)
     available = simulators()
     if not args.device:
         subprocess.run(["xcrun", "devicectl", "list", "devices"])
         print(
             "Simulators:\n"
-            + "\n".join(f"  {name}: {identifier}" for identifier, name in sorted(available.items(), key=lambda item: item[1]))
+            + "\n".join(
+                f"  {device['name']} ({device['os']}): {identifier}"
+                for identifier, device in sorted(available.items(), key=lambda item: item[1]["name"])
+            )
         )
         parser.error("Choose a device or simulator identifier")
-    output = ROOT / ".build/device-tests"
-    project = generate(ROOT, output, args.team)
+    simulator = available.get(args.device)
+    operating_system = simulator["os"] if simulator else args.os or "iOS"
+    if simulator and args.os and args.os != operating_system:
+        parser.error(f"Simulator runs {operating_system}, not {args.os}")
+    output = ROOT / ".build/device-tests" / operating_system.lower()
+    project = generate(ROOT, output, args.team, operating_system)
     prepare(output / "GeneratedMedia")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     bundle = ROOT / ".build/device-tests/Results" / (stamp + ".xcresult")
@@ -100,6 +115,7 @@ def main(argv=None):
         device_id=args.device,
         result_bundle=bundle,
         only_testing=args.only_testing,
+        operating_system=operating_system,
     )
     completed = subprocess.run(keep_awake(command))
     if not bundle.exists():

@@ -107,7 +107,16 @@ import SwiftUI
 }
 """)
         subprocess.run(["swift", "run", "--package-path", consumer, "-c", "release", "Consumer"], check=True)
-        publish_evidence(summary={"independentAppleConsumer": "passed", "nativeSelection": binary})
+        products = Path(
+            subprocess.check_output(["swift", "build", "--package-path", consumer, "-c", "release", "--show-bin-path"], text=True).strip()
+        )
+        for target, source in (("MPVUI", "Sources"), ("MPVCore", "Sources/MPVCore")):
+            resources = list((products / f"MPVUI_{target}.bundle").rglob("PrivacyInfo.xcprivacy"))
+            if len(resources) != 1 or resources[0].read_bytes() != (ROOT / source / "PrivacyInfo.xcprivacy").read_bytes():
+                raise RuntimeError(f"Missing or changed privacy manifest in {target}'s resource bundle")
+        publish_evidence(
+            summary={"independentAppleConsumer": "passed", "nativeSelection": binary, "privacyManifestTargets": ["MPVCore", "MPVUI"]}
+        )
 
 
 if __name__ == "__main__":

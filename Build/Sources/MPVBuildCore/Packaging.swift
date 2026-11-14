@@ -119,9 +119,23 @@ struct Packager {
             try fm.createSymbolicLink(atPath: root.appendingPathComponent(name).path, withDestinationPath: "Versions/Current/" + name)
         }
 
-        try fm.moveItem(at: root.appendingPathComponent("Info.plist"), to: version.appendingPathComponent("Resources/Info.plist"))
+        for name in ["Info.plist", "PrivacyInfo.xcprivacy"] {
+            try fm.moveItem(at: root.appendingPathComponent(name), to: version.appendingPathComponent("Resources/" + name))
+        }
+
         try fm.createSymbolicLink(atPath: root.appendingPathComponent("Versions/Current").path, withDestinationPath: "A")
         try fm.createSymbolicLink(atPath: root.appendingPathComponent("Resources").path, withDestinationPath: "Versions/Current/Resources")
+    }
+
+    static func verifyPrivacyManifest(_ framework: URL, slice: Slice, expected: Data) throws {
+        let resource = slice.id == "macos" || slice.variant == "maccatalyst"
+            ? "Versions/A/Resources/PrivacyInfo.xcprivacy"
+            : "PrivacyInfo.xcprivacy"
+
+        try require(
+            (try? Data(contentsOf: framework.appendingPathComponent(resource))) == expected,
+            "Missing or changed privacy manifest for \(slice.id)"
+        )
     }
 
     static func excludedHeaders(_ framework: String) -> [String] {
@@ -153,6 +167,7 @@ struct Packager {
             let lock: NativeLock.ResolvedAppleInputs
             let code: [String: String]
             let support: [String: String]
+            let privacyManifest: String
         }
 
         let code = try tree(graph.codeRoot).filter { !BuildGraph.operationalFiles.contains($0.key) }
@@ -160,7 +175,8 @@ struct Packager {
         return try fingerprint(Identity(
             lock: graph.native.appleBuildInputs,
             code: code,
-            support: tree(graph.root.appendingPathComponent("Build/Support"))
+            support: tree(graph.root.appendingPathComponent("Build/Support")),
+            privacyManifest: digest(graph.root.appendingPathComponent("Build/PrivacyInfo.xcprivacy"))
         ))
     }
 
@@ -177,6 +193,8 @@ struct Packager {
         let release = try Generator.releaseID(native: graph.native, fingerprint: nativeID, tag: tag)
         let notices = try ReleaseManager(graph: graph).sourceNotices()
         let license = try Data(contentsOf: graph.root.appendingPathComponent("Build/RECIPE_LICENSE"))
+        let privacyManifest = try Data(contentsOf: graph.root.appendingPathComponent("Build/PrivacyInfo.xcprivacy"))
+        _ = try PropertyListSerialization.propertyList(from: privacyManifest, format: nil)
 
         let key = try fingerprint(PackagingKey(
             products: products
@@ -280,7 +298,9 @@ struct Packager {
                         framework.appendingPathComponent("Info.plist")
                     )
 
-                    if slice.id == "macos" {
+                    try put(privacyManifest, framework.appendingPathComponent("PrivacyInfo.xcprivacy"))
+
+                    if slice.id == "macos" || slice.variant == "maccatalyst" {
                         try Self.versionFramework(framework, binary: product.framework)
                     }
 
@@ -375,6 +395,7 @@ struct Packager {
                 "public-headers",
                 "compiled-contracts",
                 "isolated-native-symbols",
+                "bundled-privacy-manifests",
                 "ZIP-round-trip"
             ]
         }
@@ -429,6 +450,7 @@ struct Packager {
 
     func verify(_ xcf: URL, product: ProductDefinition, slices: [Slice]) throws {
         let libraries = try XCFLibrary.all(xcf)
+        let privacyManifest = try Data(contentsOf: graph.root.appendingPathComponent("Build/PrivacyInfo.xcprivacy"))
 
         try require(
             Set(libraries.map(\.identifier)) == Set(slices.map(\.identifier)) && libraries.count == slices.count,
@@ -442,6 +464,7 @@ struct Packager {
             try require(Set(library.architectures) == Set(slice.architectures), "Final architecture inventory mismatch")
 
             let binary = library.binary(xcf)
+            try Self.verifyPrivacyManifest(binary.deletingLastPathComponent(), slice: slice, expected: privacyManifest)
             try MachO.validate(binary, slice: slice)
 
             for arch in slice.architectures {

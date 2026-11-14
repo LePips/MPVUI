@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a real iOS test bundle for the package without editing its manifest."""
+"""Generate an iOS or tvOS test bundle for the package without editing its manifest."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import shutil
 import subprocess
 
@@ -50,10 +49,14 @@ extension Bundle {
 """
 
 
-def project_spec(repository: Path, output: Path, team: str | None) -> dict:
+def project_spec(repository: Path, output: Path, team: str | None, platform: str = "iOS") -> dict:
+    if platform not in ("iOS", "tvOS"):
+        raise ValueError("Test platform must be iOS or tvOS")
+    television = platform == "tvOS"
+    simulator_sdk, device_sdk = ("appletvsimulator", "appletvos") if television else ("iphonesimulator", "iphoneos")
     signing = {
-        "CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]": "NO",
-        "CODE_SIGNING_ALLOWED[sdk=iphoneos*]": "YES" if team else "NO",
+        f"CODE_SIGNING_ALLOWED[sdk={simulator_sdk}*]": "NO",
+        f"CODE_SIGNING_ALLOWED[sdk={device_sdk}*]": "YES" if team else "NO",
     }
     if team:
         signing.update({"CODE_SIGN_STYLE": "Automatic", "DEVELOPMENT_TEAM": team})
@@ -64,13 +67,13 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
             "base": {
                 "SWIFT_VERSION": "6.0",
                 "ENABLE_TESTABILITY": "YES",
-                "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+                "TVOS_DEPLOYMENT_TARGET" if television else "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
             }
         },
         "targets": {
             HOST_TARGET: {
                 "type": "application",
-                "platform": "iOS",
+                "platform": platform,
                 "sources": [{"path": str(output / "TestHost.swift")}],
                 "info": {
                     "path": str(output / "TestHost-Info.plist"),
@@ -90,14 +93,14 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
                             "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown "
                             "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
                         ),
-                        "TARGETED_DEVICE_FAMILY": "1,2",
+                        "TARGETED_DEVICE_FAMILY": "3" if television else "1,2",
                         **signing,
                     }
                 },
             },
             "MPVUITests": {
                 "type": "bundle.unit-test",
-                "platform": "iOS",
+                "platform": platform,
                 "sources": [
                     {"path": str(repository / "Tests"), "excludes": ["Core"]},
                     {"path": str(output / "TestBundle.swift")},
@@ -110,7 +113,8 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
                         "GENERATE_INFOPLIST_FILE": "YES",
                         "TEST_HOST": f"$(BUILT_PRODUCTS_DIR)/{HOST_TARGET}.app/{HOST_TARGET}",
                         "BUNDLE_LOADER": "$(TEST_HOST)",
-                        "OTHER_SWIFT_FLAGS": f"$(inherited) -package-name {shlex.quote(repository.name.lower())}",
+                        "MPVUI_PACKAGE_ID": repository.name.removesuffix(".git").lower(),
+                        "OTHER_SWIFT_FLAGS": "$(inherited) -package-name $(MPVUI_PACKAGE_ID:c99extidentifier)",
                         **signing,
                     }
                 },
@@ -119,7 +123,18 @@ def project_spec(repository: Path, output: Path, team: str | None) -> dict:
         "schemes": {
             SCHEME: {
                 "build": {"targets": {HOST_TARGET: ["test"], "MPVUITests": ["test"]}},
-                "test": {"targets": ["MPVUITests"], "parallelizable": False},
+                "test": {
+                    "targets": ["MPVUITests"],
+                    "parallelizable": False,
+                    "environmentVariables": {
+                        "MPVUI_RUN_NATIVE_AUDIO_TESTS": os.environ.get("MPVUI_RUN_NATIVE_AUDIO_TESTS", "0"),
+                        **(
+                            {"MPVUI_DOLBY_AUDIO_REFERENCE": os.environ["MPVUI_DOLBY_AUDIO_REFERENCE"]}
+                            if "MPVUI_DOLBY_AUDIO_REFERENCE" in os.environ
+                            else {}
+                        ),
+                    },
+                },
             }
         },
     }
@@ -134,7 +149,7 @@ def add_team_argument(parser):
     )
 
 
-def generate(repository: Path, output: Path, team: str | None = None) -> Path:
+def generate(repository: Path, output: Path, team: str | None = None, platform: str = "iOS") -> Path:
     repository, output = repository.resolve(), output.resolve()
     generated_root = repository / ".build"
     if output == generated_root or not output.is_relative_to(generated_root):
@@ -151,7 +166,18 @@ def generate(repository: Path, output: Path, team: str | None = None) -> Path:
     (output / "TestBundle.swift").write_text(BUNDLE_ACCESSOR)
     (output / "TestHost.swift").write_text(HOST_SOURCE)
     spec = output / "project.json"
-    spec.write_text(json.dumps(project_spec(repository, output, team), indent=2) + "\n")
+    specification = project_spec(repository, output, team, platform)
+    environment = specification["schemes"][SCHEME]["test"]["environmentVariables"]
+    reference = environment.get("MPVUI_DOLBY_AUDIO_REFERENCE")
+    if reference and Path(reference).is_absolute():
+        source = Path(reference).resolve()
+        if not source.is_file():
+            raise ValueError(f"Dolby audio reference does not exist: {source}")
+        destination = output / "GeneratedMedia" / f"dolby-audio-reference{source.suffix}"
+        if source != destination.resolve():
+            shutil.copy2(source, destination)
+        environment["MPVUI_DOLBY_AUDIO_REFERENCE"] = destination.name
+    spec.write_text(json.dumps(specification, indent=2) + "\n")
     subprocess.run([xcodegen, "generate", "--spec", str(spec), "--project", str(output)], check=True)
     return output / f"{SCHEME}.xcodeproj"
 
@@ -160,12 +186,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--output", type=Path, help="Build-owned output; default: .build/device-tests")
+    parser.add_argument("--os", choices=("iOS", "tvOS"), default="iOS", help="Apple test platform")
     add_team_argument(parser)
     args = parser.parse_args()
     repository = args.repository.resolve()
     output = (args.output or repository / ".build/device-tests").resolve()
     try:
-        project = generate(repository, output, args.team)
+        project = generate(repository, output, args.team, args.os)
     except (ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"{error}\n")
     print(

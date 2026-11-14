@@ -1,5 +1,4 @@
 import json
-import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -47,6 +46,26 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(team([], {project.TEAM_ENVIRONMENT: "ENVTEAM001"}), "ENVTEAM001")
         self.assertEqual(team(["--team", "FLAGTEAM01"], {project.TEAM_ENVIRONMENT: "ENVTEAM001"}), "FLAGTEAM01")
 
+    def test_audio_system_opt_in_reaches_the_test_process(self):
+        for enabled in ("0", "1"):
+            with patch.dict(project.os.environ, {"MPVUI_RUN_NATIVE_AUDIO_TESTS": enabled}):
+                spec = project.project_spec(self.repository, self.output, None, "tvOS")
+            self.assertEqual(spec["schemes"][project.SCHEME]["test"]["environmentVariables"]["MPVUI_RUN_NATIVE_AUDIO_TESTS"], enabled)
+
+    def test_local_audio_reference_is_bundled_for_the_device(self):
+        reference = self.repository / "reference.mkv"
+        reference.write_bytes(b"reference audio")
+        with (
+            patch.dict(project.os.environ, {"MPVUI_DOLBY_AUDIO_REFERENCE": str(reference)}),
+            patch.object(project.shutil, "which", return_value="/bin/xcodegen"),
+            patch.object(project.subprocess, "run"),
+        ):
+            project.generate(self.repository, self.output, platform="tvOS")
+        spec = json.loads((self.output / "project.json").read_text())
+        bundled = spec["schemes"][project.SCHEME]["test"]["environmentVariables"]["MPVUI_DOLBY_AUDIO_REFERENCE"]
+        self.assertFalse(Path(bundled).is_absolute())
+        self.assertEqual((self.output / "GeneratedMedia" / bundled).read_bytes(), reference.read_bytes())
+
     def test_device_test_bundle_has_an_application_host_and_matching_signing(self):
         with patch.object(project.shutil, "which", return_value="/bin/xcodegen"), patch.object(project.subprocess, "run"):
             project.generate(self.repository, self.output, "ABC123DE45")
@@ -76,11 +95,12 @@ class DeviceTestProjectTests(unittest.TestCase):
         self.assertEqual(info["properties"]["NSAppTransportSecurity"], {"NSAllowsLocalNetworking": True})
         self.assertNotIn("info", spec["targets"]["MPVUITests"])
 
-    def test_package_access_uses_the_checkout_identity_as_one_compiler_argument(self):
-        repository = self.repository / "MPVUI Shared Core"
-        spec = project.project_spec(repository, self.output, None)
-        flags = spec["targets"]["MPVUITests"]["settings"]["base"]["OTHER_SWIFT_FLAGS"]
-        self.assertEqual(shlex.split(flags), ["$(inherited)", "-package-name", "mpvui shared core"])
+    def test_package_access_uses_the_normalized_checkout_identity(self):
+        for name, identity in (("MPVUI Shared Core", "mpvui shared core"), ("mobile-review.git", "mobile-review")):
+            spec = project.project_spec(self.repository / name, self.output, None)
+            settings = spec["targets"]["MPVUITests"]["settings"]["base"]
+            self.assertEqual(settings["MPVUI_PACKAGE_ID"], identity)
+            self.assertEqual(settings["OTHER_SWIFT_FLAGS"], "$(inherited) -package-name $(MPVUI_PACKAGE_ID:c99extidentifier)")
 
     def test_foreground_host_retains_and_restores_prior_idle_timer_state(self):
         # The generated host prevents lock only while active. SDK typechecking
@@ -109,6 +129,18 @@ class DeviceTestProjectTests(unittest.TestCase):
         settings = project.project_spec(self.repository, self.output, None)["targets"]["MPVUITests"]["settings"]["base"]
         self.assertEqual(settings["CODE_SIGNING_ALLOWED[sdk=iphoneos*]"], "NO")
         self.assertNotIn("DEVELOPMENT_TEAM", settings)
+
+    def test_tvos_host_and_test_bundle_use_television_sdk_and_deployment_target(self):
+        spec = project.project_spec(self.repository, self.output, "ABC123DE45", "tvOS")
+        self.assertEqual(spec["settings"]["base"]["TVOS_DEPLOYMENT_TARGET"], "18.0")
+        self.assertNotIn("IPHONEOS_DEPLOYMENT_TARGET", spec["settings"]["base"])
+        for target in spec["targets"].values():
+            self.assertEqual(target["platform"], "tvOS")
+            settings = target["settings"]["base"]
+            self.assertEqual(settings["CODE_SIGNING_ALLOWED[sdk=appletvsimulator*]"], "NO")
+            self.assertEqual(settings["CODE_SIGNING_ALLOWED[sdk=appletvos*]"], "YES")
+            self.assertNotIn("CODE_SIGNING_ALLOWED[sdk=iphoneos*]", settings)
+        self.assertEqual(spec["targets"][project.HOST_TARGET]["settings"]["base"]["TARGETED_DEVICE_FAMILY"], "3")
 
 
 if __name__ == "__main__":
