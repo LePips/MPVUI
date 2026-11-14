@@ -7,6 +7,7 @@ package enum MPVEngineUpdate: Sendable {
     case chapter(Int?)
     case videoFrame(Bool)
     case playbackReady(Bool)
+    case prepareDisplayForAutoplay
     case seekCompleted(MPVSeekResult)
     case externalTrackLoaded(MPVExternalTrackLoadResult)
     case buffer(MPVBufferStatus)

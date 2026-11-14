@@ -122,7 +122,7 @@ struct MPVVideoOutputStabilityTests {
             player.state == .playing && player.position > .milliseconds(100)
         }
 
-        player.setDisplaySwitchInProgress(true)
+        player.setDisplaySwitchInProgress(true, for: host.surface.surfaceToken)
         _ = await player.lifecycleDiagnostics()
         try await Task.sleep(for: .milliseconds(50))
 
@@ -134,7 +134,7 @@ struct MPVVideoOutputStabilityTests {
         #expect(abs((player.position - position).seconds) < 0.05)
         player.pause()
         _ = await player.lifecycleDiagnostics()
-        player.setDisplaySwitchInProgress(false)
+        player.setDisplaySwitchInProgress(false, for: host.surface.surfaceToken)
         try await waitUntil("user pause survives display recovery") { player.state == .paused }
 
         #expect(player.isPaused)

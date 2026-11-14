@@ -1217,6 +1217,14 @@
             "apple"
           ],
           "sha256": "16384869e4998ecd6ebc40c8c78ed21d57cb3c984308e9df5255ef6c7c846e16"
+        },
+        {
+          "id": "0023-playback-rate-synchronization",
+          "path": "Build/Patches/mpv/0023-playback-rate-synchronization.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "1aa8a32d50106fece910048c4a1230852361f63549b4afbe51fc0685ae2fe79f"
         }
       ],
       "ref": "v0.41.0",

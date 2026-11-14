@@ -7,5 +7,5 @@
 *.zip binary
 
 # Unified patches contain space-only context lines by design.
-Build/Patches/**/*.patch whitespace=-blank-at-eol
+Build/Patches/**/*.patch whitespace=-blank-at-eol,-blank-at-eof
 Build/Android/Patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

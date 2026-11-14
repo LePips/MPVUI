@@ -12,8 +12,8 @@ package extension MPVSession {
             ?? "auto"
     }
 
-    static func pauseValue(playing: Bool, displaySwitching: Bool) -> String {
-        playing && !displaySwitching ? "no" : "yes"
+    static func pauseValue(playing: Bool, heldForDisplay: Bool) -> String {
+        playing && !heldForDisplay ? "no" : "yes"
     }
 
     /// Track discovery is authoritative only at on_preloaded. An empty track
@@ -43,7 +43,8 @@ package extension MPVSession {
         _ url: URL,
         playAutomatically: Bool?,
         startTime: Duration?,
-        generation: UInt64
+        generation: UInt64,
+        waitForDisplayMatching: Bool = false
     ) {
         queue.async { [weak self] in
             guard let self, !self.isClosed else {
@@ -105,6 +106,7 @@ package extension MPVSession {
             self.pendingSeekAfterLoad = nil
             self.needsSourceLoad = true
             self.shouldAutoPlay = playAutomatically ?? self.configuration.automaticallyPlays
+            self.isWaitingForDisplayPreparation = waitForDisplayMatching && self.shouldAutoPlay
             self.isPaused = !self.shouldAutoPlay
             self.didReachEnd = false
             self.hasPlaybackStarted = false
@@ -174,6 +176,7 @@ package extension MPVSession {
 
             self.drainEvents()
             self.currentGeneration = generation
+            self.isWaitingForDisplayPreparation = false
 
             if self.handle != nil, self.isFileLoaded {
                 let result = self.runCommand(["seek", Self.format(position), "absolute+exact"])
@@ -206,16 +209,15 @@ package extension MPVSession {
             guard let self, self.isDisplaySwitchInProgress != switching else { return }
 
             self.isDisplaySwitchInProgress = switching
-            guard self.handle != nil else { return }
+            self.applyDisplayPause()
+        }
+    }
 
-            let status = self.setPropertyImmediately(
-                "pause",
-                to: Self.pauseValue(playing: self.shouldAutoPlay, displaySwitching: switching)
-            )
+    func finishDisplayPreparation(generation: UInt64) {
+        queue.async { [weak self] in
+            guard let self, self.currentGeneration == generation, self.isWaitingForDisplayPreparation else { return }
 
-            if status < 0 {
-                self.publishCommandError(status, context: "Suspend playback for display switch")
-            }
+            self.releaseDisplayPreparation()
         }
     }
 
@@ -239,6 +241,7 @@ package extension MPVSession {
 
             self.clearTextSubtitleSnapshot()
             self.shouldAutoPlay = false
+            self.isWaitingForDisplayPreparation = false
             self.needsSourceLoad = false
             self.pendingStartTime = nil
             self.pendingSeekAfterLoad = nil
@@ -399,10 +402,7 @@ package extension MPVSession {
 
         // Apply the transport state before mpv can start the new file, including
         // replacements on a client that was previously playing.
-        let pauseStatus = setPropertyImmediately(
-            "pause",
-            to: Self.pauseValue(playing: shouldAutoPlay, displaySwitching: isDisplaySwitchInProgress)
-        )
+        let pauseStatus = applyNativePause()
 
         guard pauseStatus >= 0 else {
             isLoading = false
@@ -481,6 +481,15 @@ package extension MPVSession {
         }
 
         applyBufferingPolicy(initial: true)
+        if isWaitingForDisplayPreparation {
+            if renderTarget != nil, Self.requiresVideoSurface(tracks: getNode("track-list"), selection: selection) {
+                // Continue decoding while the clock is held so Dolby Vision and
+                // frame-rate metadata can refine the display criteria.
+                publish(.prepareDisplayForAutoplay)
+            } else {
+                releaseDisplayPreparation()
+            }
+        }
         releasePendingPreload()
     }
 
@@ -551,6 +560,27 @@ package extension MPVSession {
         securityScopedURL = nil
     }
 
+    private func releaseDisplayPreparation() {
+        isWaitingForDisplayPreparation = false
+        guard playbackRequestIsActive, fatalPlaybackError == nil else { return }
+
+        applyDisplayPause()
+        refreshState()
+    }
+
+    private func applyDisplayPause() {
+        guard handle != nil else { return }
+
+        let status = applyNativePause()
+        if status < 0 {
+            publishCommandError(status, context: "Apply playback intent during display matching")
+        }
+    }
+
+    private func applyNativePause() -> Int32 {
+        setPropertyImmediately("pause", to: Self.pauseValue(playing: shouldAutoPlay, heldForDisplay: isPlaybackHeldForDisplay))
+    }
+
     private func setPlayingImmediately(_ playing: Bool) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !isClosed else { return }
@@ -586,10 +616,7 @@ package extension MPVSession {
         publish(.paused(isPaused))
         guard handle != nil else { return }
 
-        let status = setPropertyImmediately(
-            "pause",
-            to: Self.pauseValue(playing: playing, displaySwitching: isDisplaySwitchInProgress)
-        )
+        let status = applyNativePause()
 
         publish(.paused(isPaused))
         refreshState()

@@ -240,7 +240,7 @@ package extension MPVSession {
             pendingStartTime = lastPosition
             pendingSeekAfterLoad = nil
 
-            if !isDisplaySwitchInProgress {
+            if !isPlaybackHeldForDisplay {
                 shouldAutoPlay = !(getFlag("pause") ?? isPaused)
             }
 
@@ -298,6 +298,7 @@ package extension MPVSession {
             isStoppedForResourceRelease = true
             isPaused = true
             shouldAutoPlay = false
+            isWaitingForDisplayPreparation = false
             didReachEnd = false
             sourceURL = nil
             pendingStartTime = nil

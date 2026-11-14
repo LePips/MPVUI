@@ -188,7 +188,7 @@ package extension MPVSession {
                 sourceURL == nil ? .idle : .stopped
             } else if isPaused {
                 .paused
-            } else if isFileLoaded, hasPlaybackStarted {
+            } else if isFileLoaded, hasPlaybackStarted, !isWaitingForDisplayPreparation {
                 .playing
             } else if isFileLoaded {
                 .ready

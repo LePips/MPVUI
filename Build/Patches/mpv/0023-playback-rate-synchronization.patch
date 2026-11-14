@@ -1,0 +1,245 @@
+Subject: [PATCH] Synchronize buffered playback and presentation rates
+
+diff --git a/player/command.c b/player/command.c
+--- a/player/command.c
++++ b/player/command.c
+@@ -8268,6 +8268,16 @@
+ 
+     if (opt_ptr == &opts->playback_speed || opt_ptr == &opts->playback_pitch ||
+         opt_ptr == &opts->pitch_correction) {
++        // Queued audio and video still use the old rate. Refill both from the
++        // current position before interpreting their delays with the new rate.
++        // Refresh seeks preserve pause state and queued/in-progress user seeks.
++        if (opt_ptr == &opts->playback_speed && mpctx->playback_initialized &&
++            mpctx->demuxer && mpctx->demuxer->seekable &&
++            mpctx->audio_speed != opts->playback_speed * mpctx->speed_factor_a)
++        {
++            issue_refresh_seek(mpctx, MPSEEK_EXACT);
++        }
++
+         update_playback_speed(mpctx);
+         mp_wakeup_core(mpctx);
+     }
+diff --git a/player/video.c b/player/video.c
+--- a/player/video.c
++++ b/player/video.c
+@@ -1268,6 +1268,7 @@
+     shift_frames(mpctx);
+ 
+     schedule_frame(mpctx, frame);
++    frame->playback_rate = mpctx->video_speed;
+ 
+     mpctx->osd_force_update = true;
+     update_osd_msg(mpctx);
+diff --git a/video/out/vo.h b/video/out/vo.h
+--- a/video/out/vo.h
++++ b/video/out/vo.h
+@@ -251,6 +251,9 @@
+     int64_t pts;
+     // Approximate frame duration, in ns.
+     double duration;
++    // Effective media/host rate used by the scheduler for this frame.
++    // Travels with the frame so queued frames retain their original timing.
++    double playback_rate;
+     // Realtime of estimated distance between 2 vsync events.
+     double vsync_interval;
+     // "ideal" display time within the vsync
+diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+--- a/video/out/vo_avfoundation.m
++++ b/video/out/vo_avfoundation.m
+@@ -113,122 +113,6 @@
+ // Integral constant = 4x horizon: critical damping, poles (s + 1/(2T))^2.
+ // Larger absorbs mismatch slower; smaller rings.
+ #define AVF_SERVO_INTEGRAL_NS  (4 * AVF_SERVO_HORIZON_NS)
+-// Average timestamp quantization over frame time. Denominator: mpv's
+-// speed-adjusted frame duration. Host deadlines include audio-clock jitter,
+-// stalls, and A/V corrections unrelated to playback speed.
+-#define AVF_RATE_WINDOW_NS        MP_TIME_MS_TO_NS(500)
+-#define AVF_RATE_MIN              0.05
+-#define AVF_RATE_MAX              8.0
+-#define AVF_RATE_CHANGE_FRACTION  0.01
+-#define AVF_RATE_FAST_FRACTION    0.04
+-#define AVF_RATE_FAST_SAMPLES     2
+-
+-// Compare media deltas with speed-adjusted frame durations; ignore scheduling
+-// jitter.
+-struct avf_rate_est {
+-    int64_t last_media_pts_ns;
+-    int64_t last_frame_duration_ns;
+-    bool last_sample_valid;
+-    // Steady-state drift window.
+-    int64_t media_span_ns;
+-    int64_t real_span_ns;
+-    // Large-change confirmation window.
+-    int64_t fast_media_span_ns;
+-    int64_t fast_real_span_ns;
+-    int fast_sample_count;
+-};
+-
+-// Discard partial windows; keep last-sample pair.
+-static void avf_rate_reset_windows(struct avf_rate_est *e)
+-{
+-    e->media_span_ns = 0;
+-    e->real_span_ns = 0;
+-    e->fast_media_span_ns = 0;
+-    e->fast_real_span_ns = 0;
+-    e->fast_sample_count = 0;
+-}
+-
+-static bool avf_rate_sample(struct avf_rate_est *e, int64_t media_pts_ns,
+-                            int64_t frame_duration_ns, double current_rate,
+-                            double *rate)
+-{
+-    if (frame_duration_ns <= 0)
+-        return false;
+-
+-    if (!e->last_sample_valid) {
+-        e->last_media_pts_ns = media_pts_ns;
+-        e->last_frame_duration_ns = frame_duration_ns;
+-        e->last_sample_valid = true;
+-        return false;
+-    }
+-
+-    int64_t media_delta = media_pts_ns - e->last_media_pts_ns;
+-    int64_t previous_duration = e->last_frame_duration_ns;
+-
+-    if (media_delta == 0)
+-        return false;
+-
+-    e->last_media_pts_ns = media_pts_ns;
+-    e->last_frame_duration_ns = frame_duration_ns;
+-
+-    // Duration step usually means speed change. Discard partial old-rate
+-    // window to avoid false intermediate rate; also resets VFR estimation
+-    // safely.
+-    int64_t duration_gate = MPMAX(MP_TIME_US_TO_NS(250),
+-                                  llabs(previous_duration) / 100);
+-    if (media_delta < 0 ||
+-        llabs(frame_duration_ns - previous_duration) > duration_gate) {
+-        avf_rate_reset_windows(e);
+-        return false;
+-    }
+-
+-    double instant = (double)media_delta / (double)previous_duration;
+-    if (instant < AVF_RATE_MIN || instant > AVF_RATE_MAX) {
+-        avf_rate_reset_windows(e);
+-        return false;
+-    }
+-
+-    // Large speed changes cannot wait: 2x schedule would drift 0.25s. Require
+-    // two consecutive duration samples to reject quantization and single VFR
+-    // transitions.
+-    if (fabs(instant - current_rate) >
+-            AVF_RATE_FAST_FRACTION * current_rate) {
+-        if (e->fast_sample_count > 0) {
+-            double fast_rate = (double)e->fast_media_span_ns /
+-                               (double)e->fast_real_span_ns;
+-            if (fabs(instant - fast_rate) >
+-                    AVF_RATE_FAST_FRACTION * fast_rate) {
+-                e->fast_media_span_ns = 0;
+-                e->fast_real_span_ns = 0;
+-                e->fast_sample_count = 0;
+-            }
+-        }
+-        e->fast_media_span_ns += media_delta;
+-        e->fast_real_span_ns += previous_duration;
+-        e->fast_sample_count++;
+-        if (e->fast_sample_count >= AVF_RATE_FAST_SAMPLES) {
+-            *rate = (double)e->fast_media_span_ns /
+-                    (double)e->fast_real_span_ns;
+-            avf_rate_reset_windows(e);
+-            return *rate >= AVF_RATE_MIN && *rate <= AVF_RATE_MAX;
+-        }
+-    } else {
+-        e->fast_media_span_ns = 0;
+-        e->fast_real_span_ns = 0;
+-        e->fast_sample_count = 0;
+-    }
+-
+-    e->media_span_ns += media_delta;
+-    e->real_span_ns += previous_duration;
+-    if (e->real_span_ns < AVF_RATE_WINDOW_NS)
+-        return false;
+-
+-    *rate = (double)e->media_span_ns / (double)e->real_span_ns;
+-    e->media_span_ns = 0;
+-    e->real_span_ns = 0;
+-    return *rate >= AVF_RATE_MIN && *rate <= AVF_RATE_MAX;
+-}
+-
+ // Ignore implausible steps: stalls, first sample.
+ #define AVF_SERVO_MAX_DT_NS    MP_TIME_MS_TO_NS(500)
+ 
+@@ -376,7 +260,6 @@
+     // PI state; zero on hard anchor.
+     double servo_integral;
+     int64_t last_servo_eval_ns;
+-    struct avf_rate_est rate_est;
+ 
+     // Pacing diagnostics, ~5s intervals.
+     int64_t diag_window_start_ns;
+@@ -610,7 +493,6 @@
+     p->last_rate_update_ns = 0;
+     p->servo_integral = 0.0;
+     p->last_servo_eval_ns = 0;
+-    p->rate_est = (struct avf_rate_est){0};
+ }
+ 
+ static void update_media_timebase_for_frame(struct vo *vo)
+@@ -627,12 +509,11 @@
+ 
+     double rate = p->timebase_rate > 0.0 ? p->timebase_rate : 1.0;
+     bool rate_changed = false;
+-    if (p->next_timebase_rate_valid && !p->playback_paused &&
+-        fabs(p->next_timebase_rate - rate) >
+-            AVF_RATE_CHANGE_FRACTION * rate) {
++    if (p->next_timebase_rate_valid && p->next_timebase_rate != rate) {
+         MP_VERBOSE(vo, "Playback rate changed from %.6f to %.6f\n",
+                    rate, p->next_timebase_rate);
+         rate = p->next_timebase_rate;
++        p->timebase_rate = rate;
+         rate_changed = true;
+     }
+     if (p->playback_paused)
+@@ -668,7 +549,7 @@
+             MP_VERBOSE(vo, "Timebase %.1f ms off schedule; re-anchoring\n",
+                        error_ns / 1e6);
+             // Keep nominal rate. Scheduling discontinuity says nothing about
+-            // speed; frame-duration estimator owns it.
++            // speed; the frame carries the nominal rate.
+         } else if (update_rate) {
+             CMTimebaseSetRate(p->timebase, servo);
+             p->timebase_applied_rate = servo;
+@@ -3846,20 +3727,18 @@
+     p->next_media_pts_ns = p->next_media_pts_valid
+         ? media_pts_to_ns(pts)
+         : current_media_time_ns(p);
+-    p->next_timebase_rate_valid = false;
+-    if (p->next_media_pts_valid) {
+-        int64_t frame_duration_ns = frame->display_synced &&
+-                                    frame->ideal_frame_duration > 0.0
+-            ? MP_TIME_S_TO_NS(frame->ideal_frame_duration)
+-            : frame->duration > 0.0 ? (int64_t)llrint(frame->duration) : 0;
+-        // Preserve the last scheduled interval for paused redraws and seeks.
+-        if (frame_duration_ns > 0)
+-            p->pool_frame_duration_ns = frame_duration_ns;
+-        p->next_timebase_rate_valid = avf_rate_sample(
+-            &p->rate_est, p->next_media_pts_ns, frame_duration_ns,
+-            p->timebase_rate > 0.0 ? p->timebase_rate : 1.0,
+-            &p->next_timebase_rate);
+-    }
++    // The scheduler owns playback speed. Inferring it from timestamp deltas
++    // delays changes and mistakes variable cadence or dropped frames for speed.
++    p->next_timebase_rate = frame->playback_rate;
++    p->next_timebase_rate_valid = isfinite(frame->playback_rate) &&
++                                  frame->playback_rate > 0.0;
++    int64_t frame_duration_ns = frame->display_synced &&
++                                frame->ideal_frame_duration > 0.0
++        ? MP_TIME_S_TO_NS(frame->ideal_frame_duration)
++        : frame->duration > 0.0 ? (int64_t)llrint(frame->duration) : 0;
++    // Preserve the last scheduled interval for paused redraws and seeks.
++    if (frame_duration_ns > 0)
++        p->pool_frame_duration_ns = frame_duration_ns;
+     return true;
+ }
+ 

@@ -17,6 +17,77 @@ import AVKit
 @MainActor
 struct MPVDisplayMatchingPlaybackTests {
 
+    #if os(tvOS) && !targetEnvironment(simulator)
+    @Test(arguments: ["baseline.mp4", "color-hdr10.mkv", "dolby-vision-p84.mp4"])
+    func `ordinary autoplay settles the TV display before advancing`(file: String) async throws {
+        let fixture = PlaybackFixture(configuration: .init(volume: 0))
+        defer { fixture.close() }
+        let player = fixture.player
+        let manager = fixture.window.avDisplayManager
+        var lastSwitch: ContinuousClock.Instant?
+        let began = ContinuousClock.now
+        try player.load(TestPaths.testMedia(file))
+        try await eventually("autoplay begins", timeout: .seconds(25)) {
+            if manager.isDisplayModeSwitchInProgress {
+                lastSwitch = .now
+            }
+            return player.state == .playing || player.position > .milliseconds(150)
+        }
+        if manager.isDisplayCriteriaMatchingEnabled {
+            #expect(manager.preferredDisplayCriteria != nil)
+            #expect(!manager.isDisplayModeSwitchInProgress)
+            if let lastSwitch {
+                #expect(lastSwitch.duration(to: .now) >= .milliseconds(500))
+            }
+        }
+        print(
+            "Display autoplay \(file): matching=\(manager.isDisplayCriteriaMatchingEnabled) switched=\(lastSwitch != nil) start=\(began.duration(to: .now))"
+        )
+        try await eventually("autoplay advances") { !player.isPaused && player.position > .milliseconds(500) }
+    }
+
+    @Test(arguments: ["video-hevc-8bit.mkv", "color-hdr10.mkv", "dolby-vision-p84.mp4"])
+    func `physical TV prepares paused media before the caller starts playback`(file: String) async throws {
+        let fixture = PlaybackFixture()
+        defer { fixture.close() }
+        let player = fixture.player
+        try player.load(TestPaths.testMedia(file), playAutomatically: false)
+        let began = ContinuousClock.now
+        let result = await player.prepareDisplayMatching(timeout: .seconds(20))
+        let manager = fixture.window.avDisplayManager
+        let report: [String: Any] = [
+            "fixture": file,
+            "result": String(describing: result),
+            "elapsedSeconds": began.duration(to: .now).seconds,
+            "matchingEnabled": manager.isDisplayCriteriaMatchingEnabled,
+            "switching": manager.isDisplayModeSwitchInProgress,
+            "paused": player.isPaused,
+            "positionSeconds": player.position.seconds,
+            "refreshRate": fixture.surface.displayMatchingContent?.refreshRate as Any? ?? NSNull(),
+            "dolbyVisionValidation": String(describing: player.dolbyVisionStatus.nativeValidation),
+            "audioPorts": AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType.rawValue),
+            "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        print("DISPLAY_PREPARATION_RESULT: \(String(decoding: data, as: UTF8.self))")
+        #expect(player.isPaused)
+        #expect(player.position < .milliseconds(200))
+        if manager.isDisplayCriteriaMatchingEnabled {
+            #expect(result == .switchCompleted || result == .noSwitchObserved)
+            #expect(manager.preferredDisplayCriteria != nil)
+            #expect(!player.isDisplayModeSwitchInProgress)
+        } else {
+            #expect(result == .disabled)
+        }
+        player.play()
+        try await eventually("physical playback resumes after preparation", timeout: .seconds(20)) {
+            player.position > .milliseconds(500) && !player.isPaused
+        }
+        fixture.surface.detach()
+        #expect(manager.preferredDisplayCriteria == nil)
+    }
+    #endif
+
     @Test(.enabled(
         if: VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC),
         "Requires a hardware Dolby Vision HEVC decoder."

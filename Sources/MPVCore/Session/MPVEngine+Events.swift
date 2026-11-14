@@ -448,7 +448,7 @@ package extension MPVSession {
 
         switch name {
         case "pause":
-            isPaused = isDisplaySwitchInProgress ? !shouldAutoPlay : (getFlag(name) ?? isPaused)
+            isPaused = isPlaybackHeldForDisplay ? !shouldAutoPlay : (getFlag(name) ?? isPaused)
             refreshState()
 
         case "core-idle", "idle-active":

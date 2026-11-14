@@ -198,7 +198,7 @@ final class MPVRenderSurfaceResizeCoordinator {
         self.emitDiagnostic = emitDiagnostic
     }
 
-    isolated deinit {
+    nonisolated deinit {
         schedulingTask?.cancel()
         animatedFallbackTask?.cancel()
         continuousFinalTask?.cancel()

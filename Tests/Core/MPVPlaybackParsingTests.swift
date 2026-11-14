@@ -75,10 +75,10 @@ struct MPVPlaybackParsingTests {
 
     @Test
     func `display suspension composes with user playback intent`() {
-        #expect(MPVSession.pauseValue(playing: true, displaySwitching: true) == "yes")
-        #expect(MPVSession.pauseValue(playing: false, displaySwitching: true) == "yes")
-        #expect(MPVSession.pauseValue(playing: false, displaySwitching: false) == "yes")
-        #expect(MPVSession.pauseValue(playing: true, displaySwitching: false) == "no")
+        #expect(MPVSession.pauseValue(playing: true, heldForDisplay: true) == "yes")
+        #expect(MPVSession.pauseValue(playing: false, heldForDisplay: true) == "yes")
+        #expect(MPVSession.pauseValue(playing: false, heldForDisplay: false) == "yes")
+        #expect(MPVSession.pauseValue(playing: true, heldForDisplay: false) == "no")
     }
 
     @Test

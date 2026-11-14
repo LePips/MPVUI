@@ -14,7 +14,28 @@ struct MPVTVDisplayMatchingTests {
 
         var matchingEnabled = true
         var switching = false
+        var startsSwitchOnAssignment = false
         var assignments: [AVDisplayCriteria?] = []
+    }
+
+    @Test
+    func `paused preparation uses real AVKit criteria and notification adapters`() async throws {
+        let manager = DisplayManager()
+        manager.startsSwitchOnAssignment = true
+        let coordinator = MPVDisplayMatchingCoordinator(settlingInterval: .milliseconds(10))
+        defer { coordinator.detach() }
+        update(coordinator, manager: manager, state: .loading, isPaused: true)
+        #expect(manager.assignments.isEmpty)
+        let wait = Task { await coordinator.prepare(timeout: .seconds(3)) }
+        try await eventually("pre-playback AVKit criteria") { manager.preferredDisplayCriteria != nil }
+        manager.switching = true
+        NotificationCenter.default.post(name: .AVDisplayManagerModeSwitchStart, object: manager)
+        #expect(coordinator.isDisplayModeSwitchInProgress)
+        manager.switching = false
+        NotificationCenter.default.post(name: .AVDisplayManagerModeSwitchEnd, object: manager)
+        #expect(await wait.value == .switchCompleted)
+        update(coordinator, manager: manager, state: .paused)
+        #expect(manager.assignments.count == 1)
     }
 
     @Test
@@ -127,6 +148,7 @@ struct MPVTVDisplayMatchingTests {
         manager: any MPVAVDisplayManaging,
         fps: Double = 24000.0 / 1001,
         state: MPVPlaybackState = .playing,
+        isPaused: Bool? = nil,
         dolbyVision: MPVDolbyVisionStatus = .unknown
     ) {
         coordinator.update(
@@ -149,7 +171,8 @@ struct MPVTVDisplayMatchingTests {
             isActive: true,
             outputUsesHDR: true,
             videoOutput: .sampleBuffer,
-            dolbyVisionStatus: dolbyVision
+            dolbyVisionStatus: dolbyVision,
+            isPaused: isPaused
         )
     }
 }
@@ -166,7 +189,12 @@ extension MPVTVDisplayMatchingTests.DisplayManager: MPVAVDisplayManaging {
 
     var preferredDisplayCriteria: AVDisplayCriteria? {
         get { assignments.last ?? nil }
-        set { assignments.append(newValue) }
+        set {
+            assignments.append(newValue)
+            if newValue != nil, startsSwitchOnAssignment {
+                switching = true
+            }
+        }
     }
 }
 #endif

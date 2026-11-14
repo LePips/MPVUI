@@ -27,7 +27,8 @@ struct MPVDisplayMatchingState {
         matchingEnabled: Bool,
         isActive: Bool,
         modeSwitchInProgress: Bool,
-        hasUnsupportedCadence: Bool = false
+        hasUnsupportedCadence: Bool = false,
+        isPreparing: Bool = false
     ) -> Action {
         guard isActive,
               matchingEnabled,
@@ -40,9 +41,9 @@ struct MPVDisplayMatchingState {
         // The display can be blank for seconds. Do not restart a mode switch,
         // or momentarily restore the UI mode for seeks or next-item loading.
         guard !modeSwitchInProgress,
-              playbackState != .loading,
+              isPreparing || playbackState != .loading,
               playbackState != .seeking,
-              playbackState != .buffering
+              isPreparing || playbackState != .buffering
         else {
             return .keep
         }
@@ -113,23 +114,75 @@ final class MPVDisplayMatchingCoordinator {
         let outputUsesHDR: Bool
         let videoOutput: MPVPlayerConfiguration.VideoOutput
         let dolbyVisionStatus: MPVDolbyVisionStatus
+        let isPaused: Bool
     }
 
-    private static var owners: [ObjectIdentifier: WeakBox<MPVDisplayMatchingCoordinator>] = [:]
+    private struct Owner {
 
+        let id: UUID
+        weak var value: MPVDisplayMatchingCoordinator?
+    }
+
+    private final class Preparation {
+
+        let id: UUID
+        let generation: UInt64
+        let forAutoplay: Bool
+        let continuation: CheckedContinuation<MPVDisplayMatchingPreparationResult, Never>
+        var timeoutTask: Task<Void, Never>?
+        var settlingTask: Task<Void, Never>?
+        var settlingContent: MPVDisplayMatchingContent?
+        var observedSwitch = false
+        var deadlinePassed = false
+
+        init(
+            id: UUID,
+            generation: UInt64,
+            forAutoplay: Bool,
+            continuation: CheckedContinuation<MPVDisplayMatchingPreparationResult, Never>
+        ) {
+            self.id = id
+            self.generation = generation
+            self.forAutoplay = forAutoplay
+            self.continuation = continuation
+        }
+    }
+
+    private static var owners: [ObjectIdentifier: Owner] = [:]
     private(set) var isDisplayModeSwitchInProgress = false
-    var displayModeSwitchDidChange: ((Bool) -> Void)?
+    var displayModeSwitchDidChange: (@MainActor (Bool) -> Void)?
+    private let ownershipID = UUID()
+
+    @MPVMainActorResource
     private var target: (any MPVDisplayMatchingTarget)?
     private var cancelObservation: (@MainActor () -> Void)?
     private var matchingState = MPVDisplayMatchingState()
     private var latestInput: Input?
+    private var preparation: Preparation?
+    private let settlingInterval: Duration
 
     var content: MPVDisplayMatchingContent? {
         matchingState.content
     }
 
-    isolated deinit {
-        detach()
+    init(settlingInterval: Duration = .milliseconds(500)) {
+        self.settlingInterval = settlingInterval
+    }
+
+    nonisolated deinit {
+        performMainActorCleanup { [_target, ownershipID, cancelObservation, isDisplayModeSwitchInProgress, displayModeSwitchDidChange] in
+            // Weak references are already nil during deinit. A stable ownership
+            // token also prevents deferred cleanup from clearing a successor.
+            if let target = _target.wrappedValue, Self.owners[target.identity]?.id == ownershipID {
+                Self.owners.removeValue(forKey: target.identity)
+                target.apply(nil)
+            }
+            cancelObservation?()
+            if isDisplayModeSwitchInProgress {
+                displayModeSwitchDidChange?(false)
+            }
+            _target.release()
+        }
     }
 
     func update(
@@ -141,7 +194,8 @@ final class MPVDisplayMatchingCoordinator {
         isActive: Bool,
         outputUsesHDR: Bool,
         videoOutput: MPVPlayerConfiguration.VideoOutput,
-        dolbyVisionStatus: MPVDolbyVisionStatus
+        dolbyVisionStatus: MPVDolbyVisionStatus,
+        isPaused: Bool? = nil
     ) {
         guard isActive, let target else {
             detach()
@@ -157,13 +211,15 @@ final class MPVDisplayMatchingCoordinator {
             state: state,
             outputUsesHDR: outputUsesHDR,
             videoOutput: videoOutput,
-            dolbyVisionStatus: dolbyVisionStatus
+            dolbyVisionStatus: dolbyVisionStatus,
+            isPaused: isPaused ?? (state == .paused)
         )
 
         refresh()
     }
 
     func detach() {
+        finishPreparation(.cancelled)
         if let target, Self.owners[target.identity]?.value === self {
             Self.owners.removeValue(forKey: target.identity)
             target.apply(nil)
@@ -174,6 +230,46 @@ final class MPVDisplayMatchingCoordinator {
         matchingState = MPVDisplayMatchingState()
         latestInput = nil
         setModeSwitchInProgress(false)
+    }
+
+    /// Waits without changing playback intent. Loading metadata may supply the
+    /// initial hint even while the normal lifecycle still reports buffering.
+    func prepare(timeout: Duration, forAutoplay: Bool = false) async -> MPVDisplayMatchingPreparationResult {
+        guard !Task.isCancelled else { return .cancelled }
+        guard let target, let input = latestInput,
+              input.state != .idle, !input.state.isTerminal
+        else { return .unavailable }
+        guard target.isMatchingEnabled else { return .disabled }
+        guard forAutoplay || input.isPaused else { return .requiresPausedPlayback }
+        guard timeout > .zero else { return .timedOut }
+
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                finishPreparation(.cancelled)
+                let pending = Preparation(id: id, generation: input.mediaGeneration, forAutoplay: forAutoplay, continuation: continuation)
+                preparation = pending
+                pending.timeoutTask = Task { [weak self] in
+                    do { try await Task.sleep(for: timeout) } catch { return }
+                    guard let self, let pending = self.preparation, pending.id == id else { return }
+
+                    // Missing metadata must not stall autoplay indefinitely.
+                    // A reported HDMI switch still has to end and settle.
+                    if pending.forAutoplay, self.isDisplayModeSwitchInProgress || pending.settlingTask != nil {
+                        pending.deadlinePassed = true
+                    } else {
+                        self.finishPreparation(.timedOut)
+                    }
+                }
+                refresh()
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard self?.preparation?.id == id else { return }
+
+                self?.finishPreparation(.cancelled)
+            }
+        }
     }
 
     private func attach(to target: any MPVDisplayMatchingTarget) {
@@ -188,6 +284,7 @@ final class MPVDisplayMatchingCoordinator {
         // Relinquish the retiring owner's notifications without clearing the
         // active criteria. This prevents an unnecessary intermediate blackout.
         if let previous = Self.owners[key]?.value {
+            previous.finishPreparation(.cancelled)
             previous.releaseObservations()
             previous.target = nil
             previous.latestInput = nil
@@ -198,7 +295,7 @@ final class MPVDisplayMatchingCoordinator {
         }
 
         self.target = target
-        Self.owners[key] = WeakBox(self)
+        Self.owners[key] = Owner(id: ownershipID, value: self)
 
         cancelObservation = target.observeChanges { [weak self] in
             self?.refresh()
@@ -215,6 +312,16 @@ final class MPVDisplayMatchingCoordinator {
 
         setModeSwitchInProgress(target.isModeSwitchInProgress)
 
+        if let preparation {
+            if input.mediaGeneration != preparation.generation || input.state == .idle || input.state.isTerminal {
+                finishPreparation(.cancelled)
+            } else if !preparation.forAutoplay, !input.isPaused {
+                finishPreparation(.requiresPausedPlayback)
+            } else if !target.isMatchingEnabled {
+                finishPreparation(.disabled)
+            }
+        }
+
         let candidate = MPVDisplayMatchingContent(
             media: input.media,
             playbackRate: input.playbackRate,
@@ -222,6 +329,11 @@ final class MPVDisplayMatchingCoordinator {
             videoOutput: input.videoOutput,
             dolbyVisionStatus: input.dolbyVisionStatus
         )
+        let hasUnsupportedCadence = input.media.framesPerSecond != nil
+            && MPVDisplayMatchingContent.refreshRate(
+                for: input.media.framesPerSecond,
+                playbackRate: input.playbackRate
+            ) == nil
 
         let action = matchingState.update(
             candidate: candidate,
@@ -230,11 +342,8 @@ final class MPVDisplayMatchingCoordinator {
             matchingEnabled: target.isMatchingEnabled,
             isActive: true,
             modeSwitchInProgress: isDisplayModeSwitchInProgress,
-            hasUnsupportedCadence: input.media.framesPerSecond != nil
-                && MPVDisplayMatchingContent.refreshRate(
-                    for: input.media.framesPerSecond,
-                    playbackRate: input.playbackRate
-                ) == nil
+            hasUnsupportedCadence: hasUnsupportedCadence,
+            isPreparing: preparation != nil
         )
 
         switch action {
@@ -246,9 +355,69 @@ final class MPVDisplayMatchingCoordinator {
             guard target.apply(content) else {
                 matchingState = MPVDisplayMatchingState()
                 target.apply(nil)
+                finishPreparation(.unavailable)
                 return
             }
         }
+
+        if hasUnsupportedCadence, !isDisplayModeSwitchInProgress {
+            finishPreparation(.unavailable)
+        }
+        updatePreparation()
+    }
+
+    private func updatePreparation() {
+        guard let preparation, let target else { return }
+
+        // Read again after apply: setting criteria can start a switch synchronously.
+        setModeSwitchInProgress(target.isModeSwitchInProgress)
+        if isDisplayModeSwitchInProgress {
+            preparation.observedSwitch = true
+            preparation.settlingTask?.cancel()
+            preparation.settlingTask = nil
+            preparation.settlingContent = nil
+            return
+        }
+
+        guard let content = matchingState.content,
+              matchingState.mediaGeneration == preparation.generation,
+              latestInput?.state != .seeking
+        else {
+            preparation.settlingTask?.cancel()
+            preparation.settlingTask = nil
+            preparation.settlingContent = nil
+            if preparation.deadlinePassed {
+                finishPreparation(.timedOut)
+            }
+            return
+        }
+        guard preparation.settlingContent != content else { return }
+
+        preparation.settlingTask?.cancel()
+        preparation.settlingContent = content
+        let id = preparation.id
+        preparation.settlingTask = Task { [weak self, settlingInterval] in
+            do { try await Task.sleep(for: settlingInterval) } catch { return }
+            guard let self, self.preparation?.id == id else { return }
+
+            self.refresh()
+            guard let current = self.preparation,
+                  current.id == id,
+                  current.settlingContent == content,
+                  !self.isDisplayModeSwitchInProgress
+            else { return }
+
+            self.finishPreparation(current.observedSwitch ? .switchCompleted : .noSwitchObserved)
+        }
+    }
+
+    private func finishPreparation(_ result: MPVDisplayMatchingPreparationResult) {
+        guard let pending = preparation else { return }
+
+        preparation = nil
+        pending.timeoutTask?.cancel()
+        pending.settlingTask?.cancel()
+        pending.continuation.resume(returning: result)
     }
 
     private func setModeSwitchInProgress(_ value: Bool) {

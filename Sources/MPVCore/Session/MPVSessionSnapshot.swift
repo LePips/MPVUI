@@ -151,7 +151,7 @@ public struct MPVSessionSnapshot: Equatable, Sendable {
         case let .playbackReady(value):
             isPlaybackReady = value
 
-        case .seekCompleted, .externalTrackLoaded:
+        case .prepareDisplayForAutoplay, .seekCompleted, .externalTrackLoaded:
             break
 
         case let .buffer(value):

@@ -157,6 +157,76 @@ struct MPVPlaybackControlTests {
     }
 
     @Test
+    func `speed changes preserve the buffered audio clock`() async throws {
+        let session = try NativePlaybackSession(options: ["audio": "auto", "start": "2"])
+        defer { session.close() }
+        try await session.load(TestPaths.multitrackMedia)
+        try await eventually("initial playback is ready") { session.consumePlaybackRestart() }
+        try await eventually("initial buffered audio") { session.property("audio-pts")?.doubleValue != nil }
+        for rate in [2.0, 0.5, 1.005, 1.0] {
+            while session.consumePlaybackRestart() {}
+            let before = try #require(session.property("audio-pts")?.doubleValue)
+            try session.command(["set", "speed", "\(rate)"])
+            try await eventually("speed change refills the paused output") { session.consumePlaybackRestart() }
+            try await eventually("buffered audio retains its paused position") {
+                guard let position = session.property("audio-pts")?.doubleValue else { return false }
+
+                return session.property("seeking")?.boolValue == false && abs(position - before) < 0.08
+            }
+            let after = try #require(session.property("audio-pts")?.doubleValue)
+            #expect(abs(after - before) < 0.08, "Paused audio moved from \(before) to \(after) at \(rate)x")
+            #expect(session.property("pause")?.boolValue == true)
+        }
+
+        while session.consumePlaybackRestart() {}
+        try session.command(["seek", "7", "absolute+exact"])
+        try session.command(["set", "speed", "1.5"])
+        try await eventually("requested seek restarts playback") { session.consumePlaybackRestart() }
+        try await eventually("a speed change preserves the requested seek") {
+            abs((session.property("time-pos")?.doubleValue ?? 0) - 7) < 0.08
+                && session.property("seeking")?.boolValue == false
+        }
+        #expect(session.property("pause")?.boolValue == true)
+
+        try session.command(["set", "pause", "no"])
+        try await eventually("audio advances after resuming") { session.property("audio-pts")?.doubleValue ?? 0 > 7.2 }
+        for rate in [0.5, 2.0, 1.0] {
+            while session.consumePlaybackRestart() {}
+            let before = try #require(session.property("time-pos")?.doubleValue)
+            try session.command(["set", "speed", "\(rate)"])
+            try await eventually("speed change refills the playing output") { session.consumePlaybackRestart() }
+            try await eventually("changed speed restarts synchronized playback", timeout: .seconds(1)) {
+                session.property("time-pos")?.doubleValue ?? 0 > before
+                    && session.property("seeking")?.boolValue == false
+                    && abs(session.property("avsync")?.doubleValue ?? 10) < 0.08
+            }
+            #expect(session.property("pause")?.boolValue == false)
+        }
+    }
+
+    #if !os(tvOS)
+    @Test
+    func `speed changes reach the presentation clock without estimation`() async throws {
+        let fixture = PlaybackFixture()
+        defer { fixture.close() }
+        try await fixture.loadPaused()
+        let clock = try #require(fixture.player.sampleBufferDisplayLayer.controlTimebase)
+        fixture.player.setPlaybackRate(1.005)
+        fixture.player.play()
+        try await eventually("presentation uses the selected speed", timeout: .seconds(1)) {
+            abs(CMTimebaseGetRate(clock) - 1.005) < 0.001
+        }
+        for rate in [2.0, 0.5, 1.25, 1.0] {
+            fixture.player.setPlaybackRate(rate)
+            try await eventually("presentation follows the changed speed", timeout: .seconds(1)) {
+                abs(CMTimebaseGetRate(clock) - rate) < 0.001
+            }
+        }
+        #expect(fixture.player.lastError == nil)
+    }
+    #endif
+
+    @Test
     func `mute commands toggle the native value in their submitted order`() async throws {
         let fixture = PlaybackFixture()
         defer { fixture.close() }

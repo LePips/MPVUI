@@ -29,12 +29,17 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     var resizeCoordinatorTimingOverrideForTesting:
         MPVRenderSurfaceResizeCoordinator.Timing?
 
+    /// Injects a display endpoint without requiring physical HDMI hardware.
+    var displayMatchingTargetOverrideForTesting: (any MPVDisplayMatchingTarget)?
+
+    let surfaceToken = UUID()
     private var attachedLayerAddress: Int64?
     private var isRetainedForPictureInPicture = false
-    private let surfaceToken = UUID()
     private var surfaceConfiguration: MPVRenderSurfaceConfiguration?
+    @MPVMainActorResource
     private var headroomObservationTimer: Timer?
     private var displayRefreshTask: Task<Void, Never>?
+    @MPVMainActorResource
     private var geometryDisplayLink: CADisplayLink?
     private var geometryTrackingStartedAt: CFTimeInterval = 0
     private var lastUncoordinatedLayoutUptimeNanoseconds: UInt64?
@@ -51,9 +56,10 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
 
     private lazy var displayMatchingCoordinator: MPVDisplayMatchingCoordinator = {
         let coordinator = MPVDisplayMatchingCoordinator()
+        let token = surfaceToken
 
         coordinator.displayModeSwitchDidChange = { [weak self, weak player] switching in
-            player?.setDisplaySwitchInProgress(switching)
+            player?.setDisplaySwitchInProgress(switching, for: token)
             self?.scheduleDisplayRefresh()
         }
 
@@ -63,7 +69,9 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     private weak var videoOverlayContainer: MPVPlatformView?
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
+    @MPVMainActorResource
     private var notificationObservations: [NSObjectProtocol] = []
+    @MPVMainActorResource
     private var windowNotificationObservations: [NSObjectProtocol] = []
     private var isAnimatedGeometryTransition = false
 
@@ -75,6 +83,7 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     /// Simulated backing-scale input for deterministic integration tests.
     var displayScaleOverrideForTesting: CGFloat?
     #elseif canImport(UIKit)
+    @MPVMainActorResource
     private var notificationObservations: [NSObjectProtocol] = []
     private var registeredTransitionIdentifier: ObjectIdentifier?
     #if os(iOS)
@@ -182,21 +191,24 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
         configureBaseLayer()
     }
 
-    isolated deinit {
-        geometryDisplayLink?.invalidate()
-        headroomObservationTimer?.invalidate()
+    nonisolated deinit {
         displayRefreshTask?.cancel()
         #if os(macOS) && !targetEnvironment(macCatalyst)
         appKitTransitionStateTimeoutTask?.cancel()
-
-        for observation in notificationObservations + windowNotificationObservations {
-            notificationCenter.removeObserver(observation)
-        }
-        #elseif canImport(UIKit)
-        for observation in notificationObservations {
-            notificationCenter.removeObserver(observation)
-        }
+        let observations = [_notificationObservations, _windowNotificationObservations]
+        #else
+        let observations = [_notificationObservations]
         #endif
+        performMainActorCleanup { [_geometryDisplayLink, _headroomObservationTimer, notificationCenter, observations] in
+            _geometryDisplayLink.wrappedValue?.invalidate()
+            _headroomObservationTimer.wrappedValue?.invalidate()
+            for observation in observations.flatMap(\.wrappedValue) {
+                notificationCenter.removeObserver(observation)
+            }
+            _geometryDisplayLink.release()
+            _headroomObservationTimer.release()
+            observations.forEach { $0.release() }
+        }
     }
 
     #if os(macOS) && !targetEnvironment(macCatalyst)
@@ -370,6 +382,11 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
         registeredTransitionIdentifier = nil
         lastUncoordinatedLayoutUptimeNanoseconds = nil
         #endif
+    }
+
+    func displayMatchingForPreparation() -> MPVDisplayMatchingCoordinator {
+        updateDisplayMatching()
+        return displayMatchingCoordinator
     }
 
     /// Keep the SwiftUI host outside a representable that can be dismantled
@@ -777,6 +794,7 @@ private extension MPVPlatformVideoPlayer {
             _ = player.mediaInformation
             _ = player.playbackRate
             _ = player.state
+            _ = player.isPaused
             _ = player.videoOutput
             _ = player.dolbyVisionStatus
         } onChange: { [weak self] in
@@ -1170,6 +1188,11 @@ private extension MPVPlatformVideoPlayer {
     }
 
     func updateDisplayMatching() {
+        // A replacement coordinator may already be idle and emit no change.
+        // Synchronize its current state to release the previous surface's hold.
+        defer {
+            player.setDisplaySwitchInProgress(displayMatchingCoordinator.isDisplayModeSwitchInProgress, for: surfaceToken)
+        }
         guard player.configuration.displayMatching != .disabled else {
             displayMatchingCoordinator.detach()
             return
@@ -1180,7 +1203,7 @@ private extension MPVPlatformVideoPlayer {
             : surfaceConfiguration?.usesExtendedDynamicRange == true
 
         displayMatchingCoordinator.update(
-            target: MPVPlatformDisplayMatchingTarget.make(for: window),
+            target: displayMatchingTargetOverrideForTesting ?? MPVPlatformDisplayMatchingTarget.make(for: window),
             media: player.mediaInformation,
             mediaGeneration: player.mediaGeneration,
             playbackRate: player.playbackRate,
@@ -1188,7 +1211,8 @@ private extension MPVPlatformVideoPlayer {
             isActive: isActiveRenderingSurface,
             outputUsesHDR: outputUsesHDR,
             videoOutput: player.videoOutput,
-            dolbyVisionStatus: player.dolbyVisionStatus
+            dolbyVisionStatus: player.dolbyVisionStatus,
+            isPaused: player.isPaused
         )
     }
 

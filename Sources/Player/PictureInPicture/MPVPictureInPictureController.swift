@@ -92,8 +92,21 @@ public final class MPVPictureInPictureController {
         #endif
     }
 
-    isolated deinit {
-        invalidate()
+    nonisolated deinit {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        performMainActorCleanup { [sampleBufferController, overlayRenderer, overlaySurface, player] in
+            sampleBufferController?.invalidate()
+            overlayRenderer?.invalidate()
+            if overlayRenderer != nil {
+                player?.clearPictureInPictureOverlay()
+            }
+            overlaySurface?.videoOverlayHost?.isHidden = false
+        }
+        #elseif os(macOS)
+        performMainActorCleanup { [macController] in
+            macController?.invalidate()
+        }
+        #endif
     }
 
     /// Requests picture in picture. Call after ``isPossible`` becomes `true`.

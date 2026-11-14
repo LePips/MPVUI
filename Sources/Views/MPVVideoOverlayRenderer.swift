@@ -7,10 +7,13 @@ import SwiftUI
 @MainActor
 final class MPVVideoOverlayRenderer {
 
-    private let renderer: ImageRenderer<AnyView>
+    @MPVMainActorResource
+    private var renderer: ImageRenderer<AnyView>
+    @MPVMainActorResource
     private var content: AnyView
     private let submit: @MainActor (MPVVideoOverlayBitmap?) async -> Bool
     private let availabilityChanged: @MainActor (Bool) -> Void
+    @MPVMainActorResource
     private var observation: AnyCancellable?
     private var renderTask: Task<Void, Never>?
     private var isDirty = false
@@ -26,8 +29,9 @@ final class MPVVideoOverlayRenderer {
         submit: @escaping @MainActor (MPVVideoOverlayBitmap?) async -> Bool,
         availabilityChanged: @escaping @MainActor (Bool) -> Void
     ) {
-        renderer = ImageRenderer(content: content)
+        let renderer = ImageRenderer(content: content)
         renderer.isOpaque = false
+        self.renderer = renderer
         self.content = content
         self.submit = submit
         self.availabilityChanged = availabilityChanged
@@ -43,7 +47,14 @@ final class MPVVideoOverlayRenderer {
         }
     }
 
-    isolated deinit { invalidate() }
+    nonisolated deinit {
+        renderTask?.cancel()
+        performMainActorCleanup { [_observation, _renderer, _content] in
+            _observation.release()
+            _renderer.release()
+            _content.release()
+        }
+    }
 
     func updateContent(_ content: AnyView) {
         self.content = content

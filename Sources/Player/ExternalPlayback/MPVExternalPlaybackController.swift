@@ -32,7 +32,7 @@ import Observation
 @Observable
 public final class MPVExternalPlaybackController {
 
-    private struct SeekRequest {
+    private struct SeekRequest: Sendable {
 
         let id: UUID
         let generation: UInt64
@@ -53,7 +53,8 @@ public final class MPVExternalPlaybackController {
     public private(set) var lastError: MPVPlayerError?
 
     @ObservationIgnored
-    let systemPlayer = AVPlayer()
+    @MPVMainActorResource
+    private(set) var systemPlayer = AVPlayer()
     @ObservationIgnored
     private weak var player: MPVPlayer?
     @ObservationIgnored
@@ -90,6 +91,7 @@ public final class MPVExternalPlaybackController {
     @ObservationIgnored
     private var airPlayRouteSelected = false
     @ObservationIgnored
+    @MPVMainActorResource
     private var routeObserver: NSObjectProtocol?
 
     /// Whether the resolved preparation plan encodes tracks on this device.
@@ -108,13 +110,25 @@ public final class MPVExternalPlaybackController {
         systemPlayer.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
     }
 
-    isolated deinit {
-        if let routeObserver {
-            NotificationCenter.default.removeObserver(routeObserver)
-        }
-
+    nonisolated deinit {
         routePreparation?.cancel()
-        invalidate(restore: false)
+        preparation?.cancel()
+        monitoring?.cancel()
+        pendingSeek?.timeout?.cancel()
+        pendingSeek?.continuation.resume(throwing: CancellationError())
+        performMainActorCleanup { [_routeObserver, _systemPlayer, stream, securityScopedURL] in
+            if let observer = _routeObserver.wrappedValue {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            _systemPlayer.wrappedValue.pause()
+            _systemPlayer.wrappedValue.replaceCurrentItem(with: nil)
+            _routeObserver.release()
+            _systemPlayer.release()
+            if let stream {
+                Task { await stream.stop() }
+            }
+            securityScopedURL?.stopAccessingSecurityScopedResource()
+        }
     }
 
     /// Clears the most recent media preparation or external playback error.

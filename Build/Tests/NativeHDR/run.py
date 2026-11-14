@@ -17,6 +17,7 @@ from prepare_test_media import prepare
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from native_inputs import inputs_for, load
+from validation import publish_evidence
 
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -78,6 +79,24 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
     # Test the actual video compositor over CPU buffers without requiring a
     # display layer or rebuilding the full native framework.
     vo_source = (work / "video/out/vo_avfoundation.m").read_text()
+    timing = vo_source[vo_source.index("// --- avf sync servo core") : vo_source.index("// --- end avf sync servo core ---")]
+    timing_functions = []
+    for signature in [
+        "static bool media_pts_is_valid(",
+        "static int64_t media_pts_to_ns(",
+        "static CMTime cm_time_from_ns(",
+        "static int64_t cm_time_to_ns(",
+        "static CMTime source_time_for_mp_time(",
+        "static int64_t current_media_time_ns(",
+        "static void reset_media_timing(",
+        "static void update_media_timebase_for_frame(",
+        "static bool draw_frame(",
+    ]:
+        start = vo_source.index(signature)
+        end = vo_source.index("\n}", start) + 2
+        timing_functions.append(vo_source[start:end])
+    (work / "video/out/timing_core.h").write_text(timing)
+    (work / "video/out/timing_functions.h").write_text("\n\n".join(timing_functions))
     start = vo_source.index(
         "    bool fullRange = is_full_range_yuv_format(sourceFormat);", vo_source.index("static CVPixelBufferRef composite_yuv_frame(")
     )
@@ -210,6 +229,7 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         ("hdr10plus", "m"),
         ("dovi", "c"),
         ("dovi_validation", "m"),
+        ("timing", "m"),
     ]:
         output = work / name
         command = [
@@ -244,4 +264,25 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
         arguments = [str(output)]
         if name == "dovi":
             arguments += [str(media / "dolby-vision-p5.rpu"), str(media / "dolby-vision-p81.rpu"), str(media / "dolby-vision-p7.rpu")]
-        subprocess.run(arguments, check=True)
+        subprocess.run(arguments, env=dict(env, ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1"), check=True)
+
+publish_evidence(
+    summary={
+        "tests": {"framework": "native", "count": 9, "outcome": "passed", "issues": 0},
+        "nativeHDR": {
+            "sanitizers": ["address", "undefined"],
+            "checks": [
+                "color",
+                "compositor",
+                "upload cache",
+                "pool",
+                "metadata",
+                "HDR10+",
+                "Dolby Vision",
+                "native Dolby validation",
+                "presentation timing",
+            ],
+            "scope": "Production pixel, metadata and timing paths. Does not measure physical display output.",
+        },
+    }
+)

@@ -60,6 +60,8 @@ public final class MPVSession: @unchecked Sendable {
     package var isStoppedForResourceRelease = false
     package var shouldAutoPlay: Bool
     package var isDisplaySwitchInProgress = false
+    package var isWaitingForDisplayPreparation = false
+
     package var securityScopedURL: URL?
     package var externalTracks: [ExternalTrack] = []
     package var pendingExternalTracks: [ExternalTrack] = []
@@ -122,6 +124,10 @@ public final class MPVSession: @unchecked Sendable {
     package var videoToolboxSessionUsesHardware: Bool?
 
     private let updateDeliveryTask: Task<Void, Never>
+
+    var isPlaybackHeldForDisplay: Bool {
+        isWaitingForDisplayPreparation || isDisplaySwitchInProgress
+    }
 
     // MARK: - Initialization and teardown
 

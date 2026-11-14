@@ -26,6 +26,7 @@ final class MPVHLSStream {
     private var isFinished = false
     private var isStopped = false
     private var isInactive = false
+    @MPVMainActorResource
     private var applicationObservers: [NSObjectProtocol] = []
 
     var isTranscoding: Bool {
@@ -45,20 +46,17 @@ final class MPVHLSStream {
         server = MPVHTTPMediaServer(directory: directory)
     }
 
-    isolated deinit {
-        applicationObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    nonisolated deinit {
         updatesTask?.cancel()
-
-        let transcoder = transcoder
-        let packager = packager
-        let server = server
-        let directory = directory
-
-        Task {
-            await packager.stop()
-            await transcoder.stop()
-            await server.stop()
-            try? FileManager.default.removeItem(at: directory)
+        performMainActorCleanup { [_applicationObservers, transcoder, packager, server, directory] in
+            _applicationObservers.wrappedValue.forEach { NotificationCenter.default.removeObserver($0) }
+            _applicationObservers.release()
+            Task {
+                await packager.stop()
+                await transcoder.stop()
+                await server.stop()
+                try? FileManager.default.removeItem(at: directory)
+            }
         }
     }
 

@@ -45,7 +45,9 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     private let onStateChange: @MainActor (Snapshot) -> Void
     private let userInterfaceRestorationHandler: @MainActor () async -> Bool
     private let onRenderingModeChange: @MainActor (Bool) -> Void
+    @MPVMainActorResource
     private var platformController: AVPictureInPictureController?
+    @MPVMainActorResource
     private var observations: [NSKeyValueObservation] = []
     private var isInvalidated = false
     private var isRenderingInPictureInPicture = false
@@ -58,9 +60,11 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
     private var compositionFailed = false
     private var requestTasks: [UUID: Task<Void, Never>] = [:]
     private var requestTimeouts: [UUID: Task<Void, Never>] = [:]
+    @MPVMainActorResource
     private var pendingSkips: [UUID: () -> Void] = [:]
     private var latestSkipID: UUID?
     private var pendingSkipTarget: Duration?
+    @MPVMainActorResource
     private var pendingRestorations: [UUID: (Bool) -> Void] = [:]
     private var lastPlaybackState: PlaybackSnapshot?
     private var lastPublishedSnapshot: Snapshot?
@@ -115,18 +119,23 @@ final class MPVSampleBufferPictureInPictureController: NSObject {
         refreshPlaybackState()
     }
 
-    isolated deinit {
+    nonisolated deinit {
         startupTask?.cancel()
         startPreparationTask?.cancel()
         compositionTask?.cancel()
         requestTasks.values.forEach { $0.cancel() }
         requestTimeouts.values.forEach { $0.cancel() }
-        pendingSkips.values.forEach { $0() }
-        pendingRestorations.values.forEach { $0(false) }
-        platformController?.delegate = nil
-        platformController?.stopPictureInPicture()
-        platformController?.contentSource = nil
-        observations.removeAll()
+        performMainActorCleanup { [_pendingSkips, _pendingRestorations, _platformController, _observations] in
+            _pendingSkips.wrappedValue.values.forEach { $0() }
+            _pendingRestorations.wrappedValue.values.forEach { $0(false) }
+            _platformController.wrappedValue?.delegate = nil
+            _platformController.wrappedValue?.stopPictureInPicture()
+            _platformController.wrappedValue?.contentSource = nil
+            _pendingSkips.release()
+            _pendingRestorations.release()
+            _platformController.release()
+            _observations.release()
+        }
     }
 
     /// Called from the player's state emissions. Position updates alone do not

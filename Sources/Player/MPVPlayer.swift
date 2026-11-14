@@ -39,6 +39,10 @@ public final class MPVPlayer {
     /// Remains true during seeks and buffering. Loading, stop, EOF, and fatal failure clear it.
     public private(set) var isPlaybackReady = false
 
+    /// Whether the platform currently reports a display mode switch.
+    /// This is not a measurement of the physical display's blackout interval.
+    public private(set) var isDisplayModeSwitchInProgress = false
+
     /// Current chapter index, or `nil` when no chapter is active.
     public private(set) var currentChapterIndex: Int?
 
@@ -100,6 +104,8 @@ public final class MPVPlayer {
     private weak var activePlatformSurface: MPVPlatformVideoPlayer?
     @ObservationIgnored
     private weak var renderingPlatformSurface: MPVPlatformVideoPlayer?
+    @ObservationIgnored
+    private var autoplayDisplayTask: Task<Void, Never>?
 
     @ObservationIgnored
     private var requestedVideoFeatures: Set<MPVVideoFeature> = []
@@ -219,12 +225,15 @@ public final class MPVPlayer {
         load(url)
     }
 
-    isolated deinit {
-        storedExternalPlayback?.invalidate(restore: false)
-        storedPictureInPicture?.invalidate()
-        textSubtitleSnapshots.terminate()
-        playbackEvents.terminate()
-        engine?.shutdownSynchronously()
+    nonisolated deinit {
+        autoplayDisplayTask?.cancel()
+        performMainActorCleanup { [storedExternalPlayback, storedPictureInPicture, textSubtitleSnapshots, playbackEvents, engine] in
+            storedExternalPlayback?.invalidate(restore: false)
+            storedPictureInPicture?.invalidate()
+            textSubtitleSnapshots.terminate()
+            playbackEvents.terminate()
+            engine?.shutdownSynchronously()
+        }
     }
 
     /// Ordered lifecycle and operation events from this player's existing session.
@@ -245,6 +254,7 @@ public final class MPVPlayer {
     ///
     /// Omitted options use the configuration. Negative start times become zero.
     /// Media containing video waits for a view before starting either stream.
+    /// On tvOS, autoplay also waits for the active display to finish matching the video.
     /// Call ``disableTrack(_:)`` with `.video` after loading to play only its audio.
     public func load(
         _ url: URL,
@@ -252,6 +262,7 @@ public final class MPVPlayer {
         startTime: Duration? = nil
     ) {
         storedExternalPlayback?.invalidate(restore: false)
+        cancelAutoplayDisplayPreparation()
 
         let normalizedStartTime = startTime?.clampPositiveOrZero
 
@@ -282,12 +293,37 @@ public final class MPVPlayer {
         isPlaybackReady = false
         playbackEvents.reset(makePlaybackSnapshot())
 
+        #if os(tvOS)
+        let waitForDisplayMatching = configuration.displayMatching != .disabled
+        #else
+        let waitForDisplayMatching = false
+        #endif
         engine?.load(
             url,
             playAutomatically: playAutomatically,
             startTime: normalizedStartTime,
-            generation: playbackGeneration
+            generation: playbackGeneration,
+            waitForDisplayMatching: waitForDisplayMatching
         )
+    }
+
+    /// Prepares tvOS display matching for the current item without starting playback.
+    /// Load with `playAutomatically: false` and attach a video view before calling.
+    /// Await the result before calling ``play()``. A paused first frame may be visible,
+    /// so keep any startup cover in place until preparation finishes.
+    ///
+    /// Criteria must remain unchanged and the platform must report no switch for
+    /// 500 milliseconds. The deadline includes metadata discovery. Cancellation,
+    /// timeout, and unsupported routes leave the user's pause intent unchanged.
+    /// Later metadata or display changes can still trigger another mode switch.
+    public func prepareDisplayMatching(
+        timeout: Duration = .seconds(8)
+    ) async -> MPVDisplayMatchingPreparationResult {
+        guard configuration.displayMatching != .disabled else { return .disabled }
+        guard isPaused else { return .requiresPausedPlayback }
+        guard let surface = renderingPlatformSurface else { return .unavailable }
+
+        return await surface.displayMatchingForPreparation().prepare(timeout: timeout)
     }
 
     /// Enables or disables detailed diagnostics sampling.
@@ -330,6 +366,7 @@ public final class MPVPlayer {
     /// Stops the current item and retires its native playback session.
     /// The source and runtime settings remain available for replay with ``play()``.
     public func stop() {
+        cancelAutoplayDisplayPreparation()
         storedExternalPlayback?.invalidate(restore: false)
         storedPictureInPicture?.stop()
         playbackGeneration &+= 1
@@ -814,7 +851,13 @@ extension MPVPlayer {
         }
     }
 
-    func setDisplaySwitchInProgress(_ switching: Bool) {
+    func setDisplaySwitchInProgress(_ switching: Bool, for token: UUID) {
+        // Deferred cleanup from a retiring view must not release the current
+        // surface's mode-switch pause. A final detach can still release it.
+        guard activeRenderSurfaceToken == token || (activeRenderSurfaceToken == nil && !switching) else { return }
+        guard isDisplayModeSwitchInProgress != switching else { return }
+
+        isDisplayModeSwitchInProgress = switching
         engine?.setDisplaySwitchInProgress(switching)
     }
 
@@ -830,6 +873,7 @@ extension MPVPlayer {
     }
 
     func resumeAfterExternalPlayback(paused: Bool) {
+        cancelAutoplayDisplayPreparation()
         playbackGeneration &+= 1
         isPaused = paused
         state = paused ? .paused : .loading
@@ -944,8 +988,11 @@ extension MPVPlayer {
     func pictureInPictureSurfaceDidAttach(_ surface: MPVPlatformVideoPlayer) {
         activePlatformSurface = surface
 
-        if surface.isActiveRenderingSurface {
+        if surface.isActiveRenderingSurface, renderingPlatformSurface !== surface {
             renderingPlatformSurface = surface
+            if autoplayDisplayTask != nil {
+                prepareDisplayForAutoplay()
+            }
         }
 
         storedPictureInPicture?.attach(to: surface)
@@ -1120,6 +1167,28 @@ extension MPVPlayer {
         engine?.detachSynchronously(fromLayerAddress: layerAddress)
     }
 
+    private func cancelAutoplayDisplayPreparation() {
+        autoplayDisplayTask?.cancel()
+        autoplayDisplayTask = nil
+    }
+
+    private func prepareDisplayForAutoplay() {
+        cancelAutoplayDisplayPreparation()
+        let generation = playbackGeneration
+        guard let coordinator = renderingPlatformSurface?.displayMatchingForPreparation() else {
+            engine?.finishDisplayPreparation(generation: generation)
+            return
+        }
+
+        autoplayDisplayTask = Task { [weak self] in
+            _ = await coordinator.prepare(timeout: .seconds(8), forAutoplay: true)
+            guard !Task.isCancelled, let self, generation == playbackGeneration else { return }
+
+            autoplayDisplayTask = nil
+            engine?.finishDisplayPreparation(generation: generation)
+        }
+    }
+
     private func subtitleUsesNativeComposition(codec: String?) -> Bool {
         !isTextSubtitleInterceptionEnabled || MPVSubtitleCapabilities(codec: codec).requiresNativeComposition
     }
@@ -1200,6 +1269,9 @@ extension MPVPlayer {
         case let .videoFrame(available):
             refreshPictureInPicture = hasPlaybackFrame != available
             hasPlaybackFrame = available
+
+        case .prepareDisplayForAutoplay:
+            prepareDisplayForAutoplay()
 
         case .playbackReady, .seekCompleted, .externalTrackLoaded:
             break

@@ -36,7 +36,8 @@ final class MPVMacPictureInPictureController: NSObject {
     var userInterfaceRestorationHandler: (@MainActor () async -> Bool)?
 
     private weak var player: MPVPlayer?
-    private let systemController: (any MPVMacPiPPresenting)?
+    @MPVMainActorResource
+    private var systemController: (any MPVMacPiPPresenting)?
     private weak var sourceSurface: MPVPlatformVideoPlayer?
     private weak var replacementSurface: MPVPlatformVideoPlayer?
     private var hosting: MPVMacPiPViewHosting?
@@ -108,8 +109,30 @@ final class MPVMacPictureInPictureController: NSObject {
         systemController?.delegate = self
     }
 
-    isolated deinit {
-        invalidate()
+    nonisolated deinit {
+        restorationTask?.cancel()
+        transitionTimeout?.cancel()
+        performMainActorCleanup { [_systemController, contentController, hosting, replacementSurface, player] in
+            _systemController.wrappedValue?.delegate = nil
+            contentController?.onAppear = nil
+            contentController?.onLayout = nil
+            if let contentController {
+                try? _systemController.wrappedValue?.dismiss(contentController)
+            }
+            let restored = hosting?.restore() ?? false
+            contentController?.view = NSView()
+            hosting?.surface.releaseRenderingFromPictureInPicture()
+            if let replacementSurface, replacementSurface.window != nil {
+                hosting?.surface.detach()
+                replacementSurface.activateRenderingSurface()
+            } else if restored {
+                hosting?.surface.activateRenderingSurface()
+                hosting?.surface.requestAuthoritativeFinalResize()
+            } else if let player {
+                MPVPlayerSurfaceRegistry.shared.activateMostRecentSurface(for: player)
+            }
+            _systemController.release()
+        }
     }
 
     static func presentationSize(dimensions: MPVVideoDimensions?, rotation: Int) -> CGSize {
