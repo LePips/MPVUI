@@ -48,6 +48,21 @@ repos:
 
   - repo: local
     hooks:
+      - id: just-format
+        name: Just format
+        language: system
+        entry: just --fmt
+        files: ^justfile$
+        pass_filenames: false
+        always_run: true
+      - id: just-format-check
+        name: Just format check
+        language: system
+        entry: just --fmt --check
+        files: ^justfile$
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
       - id: prettier
         name: Prettier
         language: node

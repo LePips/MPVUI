@@ -1,0 +1,111 @@
+diff --git a/libavcodec/audiotoolboxdec.c b/libavcodec/audiotoolboxdec.c
+--- a/libavcodec/audiotoolboxdec.c
++++ b/libavcodec/audiotoolboxdec.c
+@@ -48,6 +48,7 @@
+     AVPacket in_pkt;
+     AVPacket new_in_pkt;
+     char *decoded_data;
++    unsigned int decoded_data_capacity;
+     int channel_map[64];
+ 
+     uint8_t *extradata;
+@@ -303,6 +304,11 @@
+     return 0;
+ }
+ 
++static int ffat_is_g711(enum AVCodecID codec)
++{
++    return codec == AV_CODEC_ID_PCM_ALAW || codec == AV_CODEC_ID_PCM_MULAW;
++}
++
+ static av_cold int ffat_create_decoder(AVCodecContext *avctx,
+                                        const AVPacket *pkt)
+ {
+@@ -383,8 +389,14 @@
+     out_format.mBytesPerPacket =
+         out_format.mBytesPerFrame * out_format.mFramesPerPacket;
+ 
+-    if (avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_QT)
++    if (ffat_is_g711(avctx->codec_id)) {
++        in_format.mFramesPerPacket = 1;
++        in_format.mBytesPerPacket = in_format.mBytesPerFrame =
++            in_format.mChannelsPerFrame;
++        in_format.mBitsPerChannel = 8;
++    } else if (avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_QT) {
+         in_format.mFramesPerPacket = 64;
++    }
+ 
+     status = AudioConverterNew(&in_format, &out_format, &at->converter);
+ 
+@@ -401,8 +413,9 @@
+ 
+     ffat_update_ctx(avctx);
+ 
+-    if(!(at->decoded_data = av_malloc(av_get_bytes_per_sample(avctx->sample_fmt)
+-                                      * avctx->frame_size * avctx->ch_layout.nb_channels)))
++    if (!ffat_is_g711(avctx->codec_id) &&
++        !(at->decoded_data = av_malloc(av_get_bytes_per_sample(avctx->sample_fmt)
++                                       * avctx->frame_size * avctx->ch_layout.nb_channels)))
+         return AVERROR(ENOMEM);
+ 
+     at->last_pts = AV_NOPTS_VALUE;
+@@ -484,6 +497,49 @@
+     } else {
+         COPY_SAMPLES(int16_t);
+     }
++}
++
++// Each G.711 byte is one coded sample. An AVPacket can therefore contain
++// many Core Audio packets, with one sample per channel in each packet.
++static int ffat_decode_g711(AVCodecContext *avctx, AVFrame *frame,
++                            int *got_frame_ptr, const AVPacket *pkt)
++{
++    ATDecodeContext *at = avctx->priv_data;
++    const int channels = avctx->ch_layout.nb_channels;
++    const int sample_bytes = av_get_bytes_per_sample(avctx->sample_fmt);
++    const size_t size = (size_t)pkt->size * sample_bytes;
++    UInt32 written;
++    OSStatus status;
++    int ret;
++
++    if (!pkt->size)
++        return 0;
++    if (channels <= 0 || pkt->size % channels || size > UINT32_MAX)
++        return AVERROR_INVALIDDATA;
++
++    av_fast_malloc(&at->decoded_data, &at->decoded_data_capacity, size);
++    if (!at->decoded_data)
++        return AVERROR(ENOMEM);
++
++    written = size;
++    status = AudioConverterConvertBuffer(at->converter, pkt->size, pkt->data,
++                                         &written, at->decoded_data);
++    if (status || written != size) {
++        av_log(avctx, AV_LOG_ERROR, "G.711 decode failed (%i, %u bytes)\n",
++               (int)status, (unsigned)written);
++        return AVERROR_INVALIDDATA;
++    }
++
++    frame->sample_rate = avctx->sample_rate;
++    frame->nb_samples = pkt->size / channels;
++    frame->flags |= AV_FRAME_FLAG_KEY;
++    ret = ff_get_buffer(avctx, frame, 0);
++    if (ret < 0)
++        return ret;
++    ffat_copy_samples(avctx, frame);
++    *got_frame_ptr = 1;
++
++    return pkt->size;
+ }
+ 
+ static int ffat_decode(AVCodecContext *avctx, AVFrame *frame,
+@@ -516,6 +572,9 @@
+             return ret;
+         }
+     }
++
++    if (ffat_is_g711(avctx->codec_id))
++        return ffat_decode_g711(avctx, frame, got_frame_ptr, avpkt);
+ 
+     out_buffers = (AudioBufferList){
+         .mNumberBuffers = 1,

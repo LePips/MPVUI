@@ -259,7 +259,7 @@ def build(abi, *, product=None, tests=False):
     arch = ARCHITECTURES[abi]
     prefix = ROOT / ".build/android/upstream/buildscripts/prefix" / ("arm64" if arch == "aarch64" else arch)
     if not (prefix / "include/mpv/client.h").is_file():
-        raise RuntimeError(f"Build the native {abi} inputs first with make build PLATFORM=android")
+        raise RuntimeError(f"Build the native {abi} inputs first with just build --platform android")
     command = [
         compiler(),
         "build",

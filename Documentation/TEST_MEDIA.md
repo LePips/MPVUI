@@ -4,7 +4,7 @@ Apple and Android tests share generated fixtures in `.build/test-media`. See [Te
 
 ## Generated fixtures
 
-Tests prepare media automatically, and `make setup` prepares it ahead of time. [prepare_test_media.py](../Build/Tests/prepare_test_media.py) generates files, reuses valid cached outputs, and removes obsolete fixtures. Keep generated media outside version control.
+Tests prepare media automatically, and `just setup` prepares it ahead of time. [prepare_test_media.py](../Build/Tests/prepare_test_media.py) generates files, reuses valid cached outputs, and removes obsolete fixtures. Keep generated media outside version control.
 
 [test_generated_media.py](../Build/Tests/test_generated_media.py) checks codecs, color tags, metadata, tracks, and timing before playback tests use the files.
 

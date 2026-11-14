@@ -1,0 +1,14 @@
+diff --git a/libavformat/flvdec.c b/libavformat/flvdec.c
+--- a/libavformat/flvdec.c
++++ b/libavformat/flvdec.c
+@@ -408,6 +408,10 @@ static int flv_same_video_codec(AVCodecParameters *vpar, uint32_t flv_codecid)
+         return vpar->codec_id == AV_CODEC_ID_VP9;
+     case FLV_CODECID_H263:
+         return vpar->codec_id == AV_CODEC_ID_FLV1;
++    case FLV_CODECID_REALH263:
++        return vpar->codec_id == AV_CODEC_ID_H263;
++    case FLV_CODECID_MPEG4:
++        return vpar->codec_id == AV_CODEC_ID_MPEG4;
+     case FLV_CODECID_SCREEN:
+         return vpar->codec_id == AV_CODEC_ID_FLASHSV;
+     case FLV_CODECID_SCREEN2:

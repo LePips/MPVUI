@@ -21,7 +21,8 @@ public struct MPVAudioConfiguration: Equatable, Sendable {
     public enum DolbyDecoding: String, CaseIterable, Sendable {
 
         /// Sends AC-3 and E-AC-3 to Apple, preserving any embedded Atmos data.
-        /// Unsupported routes, audio processing, or playback failures fall back to PCM.
+        /// Detected route or playback failures and incompatible audio processing fall back to PCM.
+        /// Silent output with an advancing system clock cannot be detected automatically.
         /// Apple determines whether the active route renders Atmos.
         case automatic
         /// Decodes to PCM in mpv. Surround channels support spatialization, but

@@ -1,0 +1,73 @@
+diff --git a/libavformat/cache.c b/libavformat/cache.c
+--- a/libavformat/cache.c
++++ b/libavformat/cache.c
+@@ -28,6 +28,7 @@
+  */
+ 
+ #include <inttypes.h>
++#include <stdlib.h>
+ 
+ #include "libavutil/avassert.h"
+ #include "libavutil/avstring.h"
+@@ -58,6 +59,7 @@
+     AVClass *class;
+     int fd;
+     char *filename;
++    char *cache_dir;
+     struct AVTreeNode *root;
+     int64_t logical_pos;
+     int64_t cache_pos;
+@@ -74,16 +76,28 @@
+     return FFDIFFSIGN(*(const int64_t *)key, ((const CacheEntry *) node)->logical_pos);
+ }
+ 
++static int cache_close(URLContext *h);
++
+ static int cache_open(URLContext *h, const char *arg, int flags, AVDictionary **options)
+ {
+     CacheContext *c = h->priv_data;
+     int ret;
+-    char *buffername;
++    char *buffername = NULL;
+ 
+     av_strstart(arg, "cache:", &arg);
+ 
+-    c->fd = avpriv_tempfile("ffcache", &buffername, 0, h);
+-    if (c->fd < 0){
++    if (c->cache_dir && c->cache_dir[0]) {
++        buffername = av_asprintf("%s/ffcacheXXXXXX", c->cache_dir);
++        if (!buffername)
++            return AVERROR(ENOMEM);
++        c->fd = mkstemp(buffername);
++        if (c->fd < 0)
++            c->fd = AVERROR(errno);
++    } else {
++        c->fd = avpriv_tempfile("ffcache", &buffername, 0, h);
++    }
++    if (c->fd < 0) {
++        av_free(buffername);
+         av_log(h, AV_LOG_ERROR, "Failed to create tempfile\n");
+         return c->fd;
+     }
+@@ -95,8 +109,11 @@
+     else
+         c->filename = buffername;
+ 
+-    return ffurl_open_whitelist(&c->inner, arg, flags, &h->interrupt_callback,
+-                                options, h->protocol_whitelist, h->protocol_blacklist, h);
++    ret = ffurl_open_whitelist(&c->inner, arg, flags, &h->interrupt_callback,
++                               options, h->protocol_whitelist, h->protocol_blacklist, h);
++    if (ret < 0)
++        cache_close(h);
++    return ret;
+ }
+ 
+ static int add_entry(URLContext *h, const unsigned char *buf, int size)
+@@ -324,6 +341,7 @@
+ #define D AV_OPT_FLAG_DECODING_PARAM
+ 
+ static const AVOption options[] = {
++    { "cache_dir", "Writable directory for the temporary cache file", OFFSET(cache_dir), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D },
+     { "read_ahead_limit", "Amount in bytes that may be read ahead when seeking isn't supported, -1 for unlimited", OFFSET(read_ahead_limit), AV_OPT_TYPE_INT, { .i64 = 65536 }, -1, INT_MAX, D },
+     {NULL},
+ };

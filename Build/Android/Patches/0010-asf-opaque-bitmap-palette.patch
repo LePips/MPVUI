@@ -1,0 +1,37 @@
+diff --git a/libavformat/asfdec_f.c b/libavformat/asfdec_f.c
+--- a/libavformat/asfdec_f.c
++++ b/libavformat/asfdec_f.c
+@@ -24,10 +24,10 @@
+ #include "libavutil/attributes.h"
+ #include "libavutil/avassert.h"
+ #include "libavutil/avstring.h"
+-#include "libavutil/bswap.h"
+ #include "libavutil/common.h"
+ #include "libavutil/dict.h"
+ #include "libavutil/internal.h"
++#include "libavutil/intreadwrite.h"
+ #include "libavutil/mathematics.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+@@ -434,14 +434,13 @@
+         /* This code assumes that extradata contains only palette */
+         /* This is true for all paletted codecs implemented in libavcodec */
+         if (st->codecpar->extradata_size && (st->codecpar->bits_per_coded_sample <= 8)) {
+-#if HAVE_BIGENDIAN
+-            int i;
+-            for (i = 0; i < FFMIN(st->codecpar->extradata_size, AVPALETTE_SIZE) / 4; i++)
+-                asf_st->palette[i] = av_bswap32(((uint32_t *)st->codecpar->extradata)[i]);
+-#else
+-            memcpy(asf_st->palette, st->codecpar->extradata,
+-                   FFMIN(st->codecpar->extradata_size, AVPALETTE_SIZE));
+-#endif
++            const uint8_t *palette = st->codecpar->extradata;
++            int entries = FFMIN(st->codecpar->extradata_size, AVPALETTE_SIZE) / 4;
++
++            /* The fourth byte of ASF's RGBQUAD is reserved. FFmpeg
++             * palette side data carries alpha in that byte. */
++            for (int i = 0; i < entries; i++)
++                asf_st->palette[i] = AV_RL32(palette + 4 * i) | 0xFF000000U;
+             asf_st->palette_changed = 1;
+         }
+ 

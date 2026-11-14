@@ -1,0 +1,119 @@
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -48,6 +48,7 @@
+     bool ass_configured;
+     bool is_converted;
+     bool is_webvtt;
++    bool is_cea608;
+     struct lavc_conv *converter;
+     struct sd_filter **filters;
+     int num_filters;
+@@ -77,6 +78,7 @@
+ struct seen_packet {
+     int64_t pos;
+     double pts;
++    char *caption;
+ };
+ 
+ #undef OPT_BASE_STRUCT
+@@ -407,6 +409,7 @@
+         if (!ctx->converter)
+             return -1;
+         ctx->is_webvtt = lavc_conv_is_webvtt(ctx->converter);
++        ctx->is_cea608 = strcmp(sd->codec->codec, "eia_608") == 0;
+     }
+ 
+     assobjects_init(sd);
+@@ -520,10 +523,12 @@
+         talloc_free(pkt);
+ }
+ 
+-// Test if the packet with the given file position and pts was already consumed.
++// Synthetic caption frames have no byte position. Compare their output as
++// well as the presentation time, after feeding the stateful decoder.
+ // Return false if the packet is new (and add it to the internal list), and
+ // return true if it was already seen.
+-static bool check_packet_seen(struct sd *sd, struct demux_packet *packet)
++static bool check_packet_seen(struct sd *sd, struct demux_packet *packet,
++                              const char *caption)
+ {
+     struct sd_ass_priv *priv = sd->priv;
+     int a = 0;
+@@ -531,12 +536,17 @@
+     while (a < b) {
+         int mid = a + (b - a) / 2;
+         struct seen_packet *seen_packet = &priv->seen_packets[mid];
+-        if (packet->pos == seen_packet->pos && packet->pts == seen_packet->pts) {
++        int order = (packet->pos > seen_packet->pos) - (packet->pos < seen_packet->pos);
++        if (!order)
++            order = (packet->pts > seen_packet->pts) - (packet->pts < seen_packet->pts);
++        if (!order && (caption || seen_packet->caption))
++            order = strcmp(caption ? caption : "",
++                           seen_packet->caption ? seen_packet->caption : "");
++        if (!order) {
+             packet->seen_pos = mid;
+             return true;
+         }
+-        if (packet->pos > seen_packet->pos ||
+-            (packet->pos == seen_packet->pos && packet->pts > seen_packet->pts)) {
++        if (order > 0) {
+             a = mid + 1;
+         } else {
+             b = mid;
+@@ -544,7 +554,9 @@
+     }
+     packet->seen_pos = a;
+     MP_TARRAY_INSERT_AT(priv, priv->seen_packets, priv->num_seen_packets, a,
+-                        (struct seen_packet){packet->pos, packet->pts});
++                        (struct seen_packet){.pos = packet->pos, .pts = packet->pts});
++    if (caption)
++        priv->seen_packets[a].caption = talloc_strdup(priv->seen_packets, caption);
+     return false;
+ }
+ 
+@@ -559,7 +571,7 @@
+ 
+     if (ctx->converter) {
+         if (!sd->opts->sub_clear_on_seek && packet->pos >= 0 &&
+-            check_packet_seen(sd, packet))
++            check_packet_seen(sd, packet, NULL))
+             return;
+ 
+         double sub_pts = 0;
+@@ -575,11 +587,18 @@
+ 
+         for (int n = 0; r && r[n]; n++) {
+             struct demux_packet pkt2 = {
++                .pos = -1,
+                 .pts = sub_pts,
+                 .duration = sub_duration,
+                 .buffer = r[n],
+                 .len = strlen(r[n]),
+             };
++            if (ctx->is_cea608 && !sd->opts->sub_clear_on_seek && packet->pos < 0) {
++                // The converter generates a new ASS read order after a seek.
++                const char *read_order_end = strchr(r[n], ',');
++                if (read_order_end && check_packet_seen(sd, &pkt2, read_order_end + 1))
++                    continue;
++            }
+             filter_and_add(sd, &pkt2, webvtt_settings);
+         }
+         for (int n = track->n_events - 1; n >= 0; n--) {
+@@ -602,7 +621,7 @@
+         // Note that for this packet format, libass has an internal mechanism
+         // for discarding duplicate (already seen) packets but we check this
+         // anyways for our purposes for ASS subtitles.
+-        packet->seen = check_packet_seen(sd, packet);
++        packet->seen = check_packet_seen(sd, packet, NULL);
+         filter_and_add(sd, packet, NULL);
+     }
+ }
+@@ -1158,6 +1177,7 @@
+     if (sd->opts->sub_clear_on_seek || ctx->clear_once) {
+         ass_flush_events(ctx->ass_track);
+         clear_text_event_metadata(ctx);
++        TA_FREEP(&ctx->seen_packets);
+         ctx->num_seen_packets = 0;
+         sd->preload_ok = false;
+         ctx->clear_once = false;

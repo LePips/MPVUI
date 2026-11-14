@@ -1,7 +1,7 @@
 import Foundation
 import Libmpv
 
-/// Supplies seekable zero-filled media with optional controlled read throughput.
+/// Supplies seekable test media with optional controlled read throughput.
 final class SyntheticCacheStream: @unchecked Sendable {
 
     static let bytesPerSecond: Int64 = 384_000 * 8 * 4
@@ -31,6 +31,7 @@ final class SyntheticCacheStream: @unchecked Sendable {
     }
 
     private let length: Int64
+    private let contents: Data?
     private let deliveryBytesPerSecond: Double?
     private let lock = NSLock()
     private var position: Int64 = 0
@@ -38,6 +39,13 @@ final class SyntheticCacheStream: @unchecked Sendable {
     init(length: Int64 = SyntheticCacheStream.bytesPerSecond * 60, deliveryBytesPerSecond: Double? = nil) {
         self.length = length
         self.deliveryBytesPerSecond = deliveryBytesPerSecond
+        contents = nil
+    }
+
+    init(contents: Data) {
+        self.contents = contents
+        length = Int64(contents.count)
+        deliveryBytesPerSecond = nil
     }
 
     private func read(_ buffer: UnsafeMutablePointer<CChar>, count: UInt64) -> Int64 {
@@ -48,7 +56,13 @@ final class SyntheticCacheStream: @unchecked Sendable {
         if let deliveryBytesPerSecond {
             Thread.sleep(forTimeInterval: Double(amount) / deliveryBytesPerSecond)
         }
-        memset(buffer, 0, Int(amount))
+        if let contents {
+            let start = contents.startIndex + Int(position)
+            let output = UnsafeMutableRawBufferPointer(start: buffer, count: Int(amount))
+            _ = contents.copyBytes(to: output, from: start ..< start + output.count)
+        } else {
+            memset(buffer, 0, Int(amount))
+        }
         position += amount
         return amount
     }

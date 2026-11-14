@@ -1225,6 +1225,92 @@
             "apple"
           ],
           "sha256": "1aa8a32d50106fece910048c4a1230852361f63549b4afbe51fc0685ae2fe79f"
+        },
+        {
+          "id": "0024-avfoundation-pcm-feeding",
+          "path": "Build/Patches/mpv/0024-avfoundation-pcm-feeding.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "b74862b76363897c1ba0172c289f6544ce266ccbacd13dc8ad66d5e9b496b5b6"
+        },
+        {
+          "id": "0025-paused-pull-audio-clock",
+          "path": "Build/Patches/mpv/0025-paused-pull-audio-clock.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "1c2b71ad2bfdc70a1190de3a53040969f19f204647783f489bcca17ad9f4be52"
+        },
+        {
+          "id": "0026-initial-demux-track-selection",
+          "path": "Build/Patches/mpv/0026-initial-demux-track-selection.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "3285705ee645fcfe953ada368dfd8d9d2973382285edf99cc6bf858c35a1271a"
+        },
+        {
+          "id": "0027-select-rtp-demuxer-for-rtp-urls",
+          "path": "Build/Patches/mpv/0027-select-rtp-demuxer-for-rtp-urls.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "beddf874b51be6d8ebb3345fde391b589c21c61bcb7a35238502668fe77115dd"
+        },
+        {
+          "id": "0028-deduplicate-synthetic-caption-replay",
+          "path": "Build/Patches/mpv/0028-deduplicate-synthetic-caption-replay.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "936a202fcbc64aea433c0f0641241d07a25ec55c51d46a427cdea5da34afdc49"
+        },
+        {
+          "id": "0029-bound-offset-slice-reads",
+          "path": "Build/Patches/mpv/0029-bound-offset-slice-reads.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "1039b72bc12e102f16277637750674fb61c78acad552c9a9534519be9e0932c6"
+        },
+        {
+          "id": "0030-restore-dash-stream-selection-on-seek",
+          "path": "Build/Patches/mpv/0030-restore-dash-stream-selection-on-seek.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "e4ea4fb0ac2551c8616208a3e00655beea065ffc1d0f037e6e60bd412dc9de11"
+        },
+        {
+          "id": "0031-consume-audio-priming-on-discarded-frames",
+          "path": "Build/Patches/mpv/0031-consume-audio-priming-on-discarded-frames.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "8f94c950fbd683c6208377f0aa4ce5df3aa187721634f6a927fb65009c1a85fc"
+        },
+        {
+          "id": "0012-display-untimed-bitmap-subtitles",
+          "path": "Build/Android/Patches/0012-display-untimed-bitmap-subtitles.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "7b35f9f265f92e2660fa7ba0916dc862c52b4325a324f84dcb538ff301b66a9e"
+        },
+        {
+          "id": "0013-open-sap-announcements",
+          "path": "Build/Android/Patches/0013-open-sap-announcements.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "6db01b4cd23f5769ba8a13af1666d533bd09db80c03ceba460309331c1144c8b"
         }
       ],
       "ref": "v0.41.0",
@@ -1284,6 +1370,94 @@
           "sha256": "bc76709c109c0de0e9721753732e69b1989159c453c8ca028ae0000b21ef3e5a"
         },
         {
+          "id": "0007-audiotoolbox-g711-packet-sizing",
+          "path": "Build/Patches/ffmpeg/0007-audiotoolbox-g711-packet-sizing.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "ae2a1fee49af7859c9ce2c7841bdc52a3f43a869eea0e150dc4644b4516dc8ef"
+        },
+        {
+          "id": "0008-dash-live-seekability",
+          "path": "Build/Patches/ffmpeg/0008-dash-live-seekability.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "4d01af6cf5ac4a97e445655cf6ca2b0ab9611d548b1407e96e32fd92037e51e7"
+        },
+        {
+          "id": "0009-audiotoolbox-aac-layers",
+          "path": "Build/Patches/ffmpeg/0009-audiotoolbox-aac-layers.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "693701549e56edd4f40f2b6a9e436f992ca7de0b1a9d7df14ce1bf7b404f4f29"
+        },
+        {
+          "id": "0010-aiff-g726-codeword-alignment",
+          "path": "Build/Patches/ffmpeg/0010-aiff-g726-codeword-alignment.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "6b0a9e609542aececa39333262a920adeddb75c31498893fcc6948edd9ec2e1b"
+        },
+        {
+          "id": "0011-match-legacy-flv-video-tags",
+          "path": "Build/Patches/ffmpeg/0011-match-legacy-flv-video-tags.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "51518ce19f8fa32660bf37916e52d4c38621ee9550a38f6a2b2e201710783cdc"
+        },
+        {
+          "id": "0012-stream-tls-options-and-seekability",
+          "path": "Build/Patches/ffmpeg/0012-stream-tls-options-and-seekability.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "07f754d15e208da35f5e492047e6e468572fec5eb4f5b612a5ba74f838065ba5"
+        },
+        {
+          "id": "0013-handle-mmst-end-of-stream",
+          "path": "Build/Patches/ffmpeg/0013-handle-mmst-end-of-stream.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "3ff8329f61f3febda2de12d7864b5aadc2a85124bd9149761e202e69a83c1973"
+        },
+        {
+          "id": "0014-preserve-rtmpts-transport",
+          "path": "Build/Patches/ffmpeg/0014-preserve-rtmpts-transport.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "ce2438645091afe86604abcc682bb3c27506e430204bc13eeea5e6175dd15780"
+        },
+        {
+          "id": "0015-preserve-dash-segment-list-sequence",
+          "path": "Build/Patches/ffmpeg/0015-preserve-dash-segment-list-sequence.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "47ae7dfd3aa166beb8d3080609b517d0423a25767a22711a7813f8a1bb2f5b16"
+        },
+        {
+          "id": "0016-pad-rtmpe-shared-secret",
+          "path": "Build/Patches/ffmpeg/0016-pad-rtmpe-shared-secret.patch",
+          "platforms": [
+            "apple",
+            "android"
+          ],
+          "sha256": "9f596ecbc0aa644b698bea1b6e1810702c7b59a6e18d634a3af299f5244a16ca"
+        },
+        {
           "id": "0001-mediacodec-dolby-vision",
           "path": "Build/Android/Patches/0001-mediacodec-dolby-vision.patch",
           "platforms": [
@@ -1322,6 +1496,38 @@
             "android"
           ],
           "sha256": "0c39b909cbafe39fb457a954a2100428f99ce685beed1b85842cd55553f35822"
+        },
+        {
+          "id": "0009-dirac-picture-timestamps",
+          "path": "Build/Android/Patches/0009-dirac-picture-timestamps.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "8168367f9a45177f66ea6c4acd21030b52dbd7a31a0c0a7d8884eb691bfbb56f"
+        },
+        {
+          "id": "0010-asf-opaque-bitmap-palette",
+          "path": "Build/Android/Patches/0010-asf-opaque-bitmap-palette.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "801bdeed4b495b3c891e9b4595d185f74326e6c17d2c815f95359db4c05aba73"
+        },
+        {
+          "id": "0011-cache-protocol-directory",
+          "path": "Build/Android/Patches/0011-cache-protocol-directory.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "541f5df5760a6229d9fd163cdc45d2e6549f0c3103444d9b4f369fb9205123c6"
+        },
+        {
+          "id": "0014-close-finished-imf-resources",
+          "path": "Build/Android/Patches/0014-close-finished-imf-resources.patch",
+          "platforms": [
+            "android"
+          ],
+          "sha256": "e4c436a4ab36487ca4808f3b1844b3bc6a8cfb9567d2d828f83f27a485632080"
         }
       ],
       "ref": "n9.0.2",

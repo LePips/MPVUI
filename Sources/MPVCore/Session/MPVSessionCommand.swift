@@ -108,7 +108,7 @@ public extension MPVSession {
     ///
     /// - Throws: ``MPVPlayerError/clientUnavailable`` if the session is closed.
     @discardableResult
-    func send(_ command: MPVSessionCommand) throws -> MPVSessionOperation {
+    func send(_ command: MPVSessionCommand, sourceArgument: String? = nil) throws -> MPVSessionOperation {
         try queue.sync {
             guard !isClosed else { throw MPVPlayerError.clientUnavailable }
 
@@ -121,7 +121,13 @@ public extension MPVSession {
             switch command {
             case let .load(url, playAutomatically, startTime):
                 generation &+= 1
-                load(url, playAutomatically: playAutomatically, startTime: startTime, generation: generation)
+                load(
+                    url,
+                    playAutomatically: playAutomatically,
+                    startTime: startTime,
+                    generation: generation,
+                    sourceArgument: sourceArgument
+                )
 
             case .play: play()
 

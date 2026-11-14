@@ -172,6 +172,35 @@ struct MPVHeadlessPlaybackTests {
         #expect(player.lastError == nil)
     }
 
+    @Test
+    func `indexed WebM reports a frame only when a frame decodes`() async throws {
+        let url = try TestPaths.testMedia("codecs-webm-dash-index.webm")
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null", "demuxer": "lavf", "keep-open": "yes"],
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
+        ))
+        defer { fixture.close() }
+        let player = fixture.player
+
+        try await fixture.loadPaused(TestPaths.testMedia("codecs-hls-01.ts"), at: .zero)
+        try await eventually("first item has a decoded frame") { player.hasVideoFrame }
+
+        player.setProperty("options/demuxer-lavf-format", to: "webm_dash_manifest")
+        player.load(url)
+        try await eventually("index reader reaches the end of the replacement item") {
+            player.mediaInformation.container == "webm_dash_manifest" && player.state == .ended
+        }
+        #expect(player.videoTracks.contains { $0.isSelected && $0.codec == "vp9" })
+        #expect(!player.hasVideoFrame)
+
+        player.setProperty("options/demuxer-lavf-format", to: "")
+        try await fixture.loadPaused(url, at: .zero)
+        try await eventually("the regular WebM reader decodes a frame") { player.hasVideoFrame }
+        #expect(player.mediaInformation.container?.split(separator: ",").contains("matroska") == true)
+        #expect(player.lastError == nil)
+    }
+
     @Test(arguments: MPVPlayerConfiguration.VideoOutput.allCases, ["audio-pcm-stereo.mka", "baseline.mp4"])
     func `loading without a view decodes only audio and supports playback controls`(
         output: MPVPlayerConfiguration.VideoOutput,

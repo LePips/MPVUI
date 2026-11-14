@@ -12,7 +12,7 @@ enum TestPaths {
     static let baselineMedia = generatedMediaDirectory.appendingPathComponent("baseline.mp4")
     static let multitrackMedia = generatedMediaDirectory.appendingPathComponent("multitrack.mkv")
 
-    /// The only reference media that cannot be generated: a 1080p Dolby Vision
+    /// A reference that cannot be generated: a 1080p Dolby Vision
     /// Profile 5 color chart, whose colors depend on a real IPT-PQ-c2 encode. It is
     /// never a package resource; MPVUI_DOLBY_VISION_CHART may point to another copy.
     static let dolbyVisionChart: URL = {
@@ -41,7 +41,7 @@ enum TestPaths {
 
         try #require(
             FileManager.default.fileExists(atPath: url.path),
-            "Missing test media: \(name). Run make test, or run make setup before direct SwiftPM tests."
+            "Missing test media: \(name). Run just test, or run just setup before direct SwiftPM tests."
         )
 
         return url

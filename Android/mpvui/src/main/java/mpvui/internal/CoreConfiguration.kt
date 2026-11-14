@@ -10,8 +10,11 @@ internal fun PlayerConfiguration.coreRecord(context: Context): ByteArray {
     val options = additionalOptions.toMutableMap()
     options.putIfAbsent("tls-ca-file", TLSCertificates.path(context))
     if (cacheDirectory.isDirectory) {
-        options.putIfAbsent("gpu-shader-cache-dir", cacheDirectory.absolutePath)
-        options.putIfAbsent("icc-cache-dir", cacheDirectory.absolutePath)
+        val path = cacheDirectory.absolutePath
+        options.putIfAbsent("gpu-shader-cache-dir", path)
+        options.putIfAbsent("icc-cache-dir", path)
+        val cacheOption = "cache_dir=%${path.toByteArray(Charsets.UTF_8).size}%$path"
+        options["stream-lavf-o"] = listOfNotNull(cacheOption, options["stream-lavf-o"]?.takeIf { it.isNotEmpty() }).joinToString(",")
     }
     return CoreWire.encode(mapOf(
         "autoPlay" to autoPlay, "loop" to loop, "playbackRate" to playbackRate, "volume" to volume, "startTime" to startTime,

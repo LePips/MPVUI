@@ -10,6 +10,59 @@ import Testing
 @MainActor
 struct MPVPlaybackControlTests {
 
+    @Test(arguments: ["m3u", "pls"])
+    func `typed playlist playback advances past an unreadable child and reaches EOF`(suffix: String) async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null", "keep-open": "no"],
+            automaticallyPlays: false,
+            videoOutput: .sampleBuffer
+        ))
+        defer { fixture.close() }
+        let player = fixture.player
+        let source = try TestPaths.testMedia("codecs-playlist.\(suffix)")
+        player.load(source, playAutomatically: false)
+        let generation = player.generation
+
+        try await eventually("first \(suffix) entry is decoded") {
+            let title = player.mediaInformation.title
+            return player.hasVideoFrame && player.isPaused
+                && (title == "Opening" || title?.contains("codecs-http-hls-00.ts") == true)
+        }
+        player.play()
+        try await eventually("final \(suffix) entry is decoded") {
+            let title = player.mediaInformation.title
+            return player.hasVideoFrame && player.state == .playing
+                && (title == "Ending" || title?.contains("codecs-http-hls-02.ts") == true)
+        }
+        try await eventually("playlist reaches EOF after its final entry") { player.state == .ended }
+
+        #expect(player.lastError == nil)
+        #expect(player.generation == generation)
+        #expect(await player.lifecycleDiagnostics().loadCommands == 1)
+    }
+
+    @Test
+    func `a playlist with no playable child reports an error and allows replacement`() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let source = folder.appendingPathComponent("missing.m3u")
+        try "#EXTM3U\nmissing.ts\n".write(to: source, atomically: true, encoding: .utf8)
+
+        let fixture = PlaybackFixture()
+        defer { fixture.close() }
+        fixture.player.load(source)
+        try await eventually("unreadable playlist reports a terminal error") {
+            if case .failed = fixture.player.state {
+                return true
+            }
+            return false
+        }
+
+        try await fixture.loadPaused()
+        #expect(fixture.player.lastError == nil)
+    }
+
     @Test
     func `chapter controls navigate authored boundaries in both directions`() async throws {
         let fixture = PlaybackFixture()

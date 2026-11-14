@@ -16,7 +16,7 @@ val verifyNativeLibraries = tasks.register("verifyNativeLibraries") {
         for (abi in supportedABIs) {
             for (library in listOf("libmpvui.so", "libmpv.so", "libc++_shared.so")) {
                 check(nativeRoot.resolve("$abi/$library").isFile) {
-                    "Missing $abi/$library. Run: make build PLATFORM=android"
+                    "Missing $abi/$library. Run: just build --platform android"
                 }
             }
         }

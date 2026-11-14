@@ -1,0 +1,44 @@
+diff --git a/stream/stream_lavf.c b/stream/stream_lavf.c
+--- a/stream/stream_lavf.c
++++ b/stream/stream_lavf.c
+@@ -288,12 +288,13 @@
+         }
+     }
+ 
+-    // rtsp is a demuxer not protocol in ffmpeg so it is handled separately
++    // These network formats are demuxers rather than AVIO protocols.
+     for (int i = 0; ffmpeg_demuxers[i]; i++) {
+         if (strcmp("rtsp", ffmpeg_demuxers[i]) == 0) {
+             MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "rtsp"));
+             MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "rtsps"));
+-            break;
++        } else if (strcmp("sap", ffmpeg_demuxers[i]) == 0) {
++            MP_TARRAY_APPEND(NULL, protocols, num, talloc_strdup(protocols, "sap"));
+         }
+     }
+ 
+@@ -379,6 +380,13 @@
+         // including their RTP headers, to the media format probe.
+         stream->demuxer = "lavf";
+         stream->lavf_type = "rtp";
++        talloc_free(temp);
++        return STREAM_OK;
++    }
++
++    if (!strncmp(filename, "sap:", 4) && av_find_input_format("sap")) {
++        stream->demuxer = "lavf";
++        stream->lavf_type = "sap";
+         talloc_free(temp);
+         return STREAM_OK;
+     }
+diff --git a/demux/demux_lavf.c b/demux/demux_lavf.c
+--- a/demux/demux_lavf.c
++++ b/demux/demux_lavf.c
+@@ -168,6 +168,7 @@
+     {"hls", .no_stream = true, .clear_filepos = true, .no_ext_picky = true},
+     {"dash", .no_stream = true, .clear_filepos = true},
+     {"sdp", .clear_filepos = true, .is_network = true, .no_seek = true},
++    {"sap", .clear_filepos = true, .is_network = true, .no_seek = true},
+     {"mpeg", .use_stream_ids = true},
+     {"mpegts", .use_stream_ids = true},
+     {"mxf", .use_stream_ids = true},

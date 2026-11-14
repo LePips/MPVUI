@@ -16,6 +16,10 @@ final class NativePlaybackSession {
         handle = try #require(mpv_create())
 
         do {
+            #if os(macOS)
+            // Only the macOS build includes the Lua downloader. Exercise the native protocol handlers directly.
+            try #require(mpv_set_option_string(handle, "ytdl", "no") >= 0)
+            #endif
             for (name, value) in [
                 "vo": "null",
                 "ao": "null",
@@ -27,7 +31,7 @@ final class NativePlaybackSession {
                 "image-display-duration": "inf",
                 "msg-level": "all=error",
             ].merging(options, uniquingKeysWith: { _, new in new }) {
-                try #require(mpv_set_option_string(handle, name, value) >= 0)
+                try #require(mpv_set_option_string(handle, name, value) >= 0, "Setting libmpv option \(name)")
             }
 
             try #require(mpv_initialize(handle) >= 0)
@@ -59,17 +63,21 @@ final class NativePlaybackSession {
     }
 
     func consumePlaybackRestart() -> Bool {
+        consumeEvent(MPV_EVENT_PLAYBACK_RESTART)
+    }
+
+    func consumeEndFileStatus() -> Int32? {
         while let event = mpv_wait_event(handle, 0)?.pointee {
             if event.event_id == MPV_EVENT_NONE {
-                return false
+                return nil
             }
 
-            if event.event_id == MPV_EVENT_PLAYBACK_RESTART {
-                return true
+            if event.event_id == MPV_EVENT_END_FILE, let data = event.data {
+                return data.assumingMemoryBound(to: mpv_event_end_file.self).pointee.error
             }
         }
 
-        return false
+        return nil
     }
 
     @discardableResult
@@ -86,12 +94,34 @@ final class NativePlaybackSession {
     }
 
     func load(_ url: URL) async throws {
-        try #require(FileManager.default.fileExists(atPath: url.path))
-        try command(["loadfile", url.path])
+        if url.isFileURL {
+            try #require(FileManager.default.fileExists(atPath: url.path))
+        }
+        try await load(argument: url.isFileURL ? url.path : url.absoluteString, named: url.lastPathComponent)
+    }
 
-        try await eventually("decoded frame from \(url.lastPathComponent)") {
+    func load(argument: String, named name: String) async throws {
+        // A replacement can leave the previous item's video properties readable until FILE_LOADED.
+        while consumeEvent(MPV_EVENT_FILE_LOADED) {}
+        try command(["loadfile", argument])
+        try await eventually("libmpv loads \(name)") { self.consumeEvent(MPV_EVENT_FILE_LOADED) }
+        try await eventually("decoded frame from \(name)") {
             self.property("video-out-params/w")?.integerValue != nil
                 && self.property("time-pos")?.doubleValue != nil
         }
+    }
+
+    private func consumeEvent(_ id: mpv_event_id) -> Bool {
+        while let event = mpv_wait_event(handle, 0)?.pointee {
+            if event.event_id == MPV_EVENT_NONE {
+                return false
+            }
+
+            if event.event_id == id {
+                return true
+            }
+        }
+
+        return false
     }
 }

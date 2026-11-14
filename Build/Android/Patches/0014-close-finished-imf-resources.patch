@@ -1,0 +1,12 @@
+diff --git a/libavformat/imfdec.c b/libavformat/imfdec.c
+--- a/libavformat/imfdec.c
++++ b/libavformat/imfdec.c
+@@ -769,7 +769,7 @@ static int get_resource_context_for_timestamp(AVFormatContext *s, IMFVirtualTrackP
+                 ret = open_track_resource_context(s, track, i);
+                 if (ret != 0)
+                     return ret;
+-                if (track->current_resource_index > 0)
++                if (track->current_resource_index >= 0)
+                     avformat_close_input(&track->resources[track->current_resource_index].ctx);
+                 track->current_resource_index = i;
+             }

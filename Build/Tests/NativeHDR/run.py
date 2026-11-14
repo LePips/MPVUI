@@ -45,7 +45,7 @@ include = args.libplacebo_include
 if include is None:
     include = next((root / ".build/mpvbuild/products/dependencies/libplacebo/macos-arm64").glob("*/include"), None)
 if include is None:
-    raise SystemExit("Run make build first, or pass --libplacebo-include")
+    raise SystemExit("Run just build first, or pass --libplacebo-include")
 ffmpeg = args.ffmpeg_prefix
 if ffmpeg is None:
     candidates = list((root / ".build/mpvbuild/products/ffmpeg/macos-arm64").glob("*/lib/libavutil.a"))
@@ -257,6 +257,8 @@ with tempfile.TemporaryDirectory(prefix="mpv-native-hdr-tests-") as tmp:
             command += [str(ffobject), str(ffmpeg / "lib/libavutil.a")]
         if name == "dovi":
             command += dovi_objects + ["-Wl,-dead_strip", str(ffmpeg / "lib/libavcodec.a"), str(ffmpeg / "lib/libavutil.a")]
+        if name in ("hdr10plus", "dovi"):
+            command += ["-lz"]
         if ext == "m":
             for framework in ["Foundation", "CoreVideo", "CoreMedia", "CoreGraphics", "CoreImage"]:
                 command += ["-framework", framework]

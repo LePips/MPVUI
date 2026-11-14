@@ -38,8 +38,8 @@ def run(*command):
     subprocess.run(command, check=True)
 
 
-def mpeg2_crc(data):
-    crc = 0xFFFFFFFF
+def mpeg2_crc(data, *, initial=0xFFFFFFFF):
+    crc = initial
     for byte in data:
         crc ^= byte << 24
         for _ in range(8):
@@ -243,6 +243,36 @@ def first_rpu(work, name, output):
     output.write_bytes(rpu.replace(b"\x00\x00\x03", b"\x00\x00"))
 
 
+def fragmented_hls(source, output):
+    name = source.stem
+    run(
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-c",
+        "copy",
+        "-strict",
+        "unofficial",
+        "-hls_time",
+        "1",
+        "-hls_list_size",
+        "0",
+        "-hls_segment_type",
+        "fmp4",
+        "-hls_fmp4_init_filename",
+        f"{name}-init.mp4",
+        "-hls_segment_filename",
+        str(output / f"{name}-%02d.m4s"),
+        str(output / f"{name}.m3u8"),
+    )
+
+
 def untagged_mp4(source, output):
     """Remux intact RPUs into fragmented MP4 without a Dolby Vision config box."""
     run(
@@ -416,6 +446,8 @@ def generate(output):
         extended = work / "dolby-vision-p81-extended.ts"
         transport_stream(p81, declared, "none", compatibility=1)
         transport_stream(p81, extended, "extended", compatibility=1)
+        for source in (p5_hls, p81_hls):
+            fragmented_hls(source, output)
         for path in (p5, p7, p81, p84, p5_hls, p81_hls, declared, extended):
             shutil.move(path, output / path.name)
         for path in (p5, p7, p81):

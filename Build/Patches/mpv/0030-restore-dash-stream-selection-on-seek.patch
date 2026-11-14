@@ -1,0 +1,15 @@
+diff --git a/demux/demux_lavf.c b/demux/demux_lavf.c
+--- a/demux/demux_lavf.c
++++ b/demux/demux_lavf.c
+@@ -1389,6 +1389,11 @@
+         }
+     }
+ 
++    // FFmpeg's DASH demuxer discards exhausted representations. Restore the
++    // player's selection so a seek can reopen them.
++    if (strcmp(priv->avif->name, "dash") == 0)
++        select_tracks(demuxer, 0);
++
+     int r = av_seek_frame(priv->avfc, seek_stream, seek_pts_av, avsflags);
+     if (r < 0 && (avsflags & AVSEEK_FLAG_BACKWARD)) {
+         // When seeking before the beginning of the file, and seeking fails,

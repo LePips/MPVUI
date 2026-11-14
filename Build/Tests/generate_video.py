@@ -12,16 +12,23 @@ import subprocess
 
 def generate(output):
     output.mkdir(parents=True, exist_ok=True)
-    for name, codec, pixel_format, rate, options in [
-        ("video-hevc-8bit", "libx265", "yuv420p", 24, ["-preset", "ultrafast", "-x265-params", "log-level=error:pools=2:frame-threads=1"]),
-        ("video-vp9", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
-        ("video-vp9-ac3", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
-        ("video-vp9-opus", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
-        ("video-av1-10bit", "libsvtav1", "yuv420p10le", 24, ["-preset", "12", "-svtav1-params", "lp=2"]),
-        ("video-h264-120fps", "libx264", "yuv420p", 120, ["-preset", "ultrafast"]),
-        ("video-h264-long-gop", "libx264", "yuv420p", 24, ["-preset", "fast", "-g", "240", "-keyint_min", "240", "-sc_threshold", "0"]),
+    for filename, codec, pixel_format, rate, options in [
+        ("video-mp42.asf", "msmpeg4v2", "yuv420p", 25, ["-tag:v", "MP42"]),
+        (
+            "video-hevc-8bit.mkv",
+            "libx265",
+            "yuv420p",
+            24,
+            ["-preset", "ultrafast", "-x265-params", "log-level=error:pools=2:frame-threads=1"],
+        ),
+        ("video-vp9.mkv", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
+        ("video-vp9-ac3.mkv", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
+        ("video-vp9-opus.mkv", "libvpx-vp9", "yuv420p", 24, ["-deadline", "realtime", "-cpu-used", "8"]),
+        ("video-av1-10bit.mkv", "libsvtav1", "yuv420p10le", 24, ["-preset", "12", "-svtav1-params", "lp=2"]),
+        ("video-h264-120fps.mkv", "libx264", "yuv420p", 120, ["-preset", "ultrafast"]),
+        ("video-h264-long-gop.mkv", "libx264", "yuv420p", 24, ["-preset", "fast", "-g", "240", "-keyint_min", "240", "-sc_threshold", "0"]),
     ]:
-        duration = 12 if name == "video-h264-long-gop" else 2
+        duration = 12 if filename == "video-h264-long-gop.mkv" else 2
         subprocess.run(
             [
                 "ffmpeg",
@@ -35,11 +42,11 @@ def generate(output):
                 f"testsrc2=size=320x180:rate={rate}:duration={duration}",
                 *(
                     ["-f", "lavfi", "-i", "aevalsrc=0.05*sin(2*PI*440*t):s=48000:d=2:c=5.1", "-c:a", "ac3", "-b:a", "448k"]
-                    if name == "video-vp9-ac3"
+                    if filename == "video-vp9-ac3.mkv"
                     else ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-c:a", "libopus"]
-                    if name == "video-vp9-opus"
+                    if filename == "video-vp9-opus.mkv"
                     else ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={duration}", "-c:a", "aac"]
-                    if name == "video-h264-long-gop"
+                    if filename == "video-h264-long-gop.mkv"
                     else ["-an"]
                 ),
                 "-c:v",
@@ -51,7 +58,7 @@ def generate(output):
                 "2",
                 "-map_metadata",
                 "-1",
-                str(output / f"{name}.mkv"),
+                str(output / filename),
             ],
             check=True,
         )

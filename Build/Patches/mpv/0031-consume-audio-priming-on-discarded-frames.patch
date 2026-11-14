@@ -1,0 +1,24 @@
+diff --git a/audio/decode/ad_lavc.c b/audio/decode/ad_lavc.c
+--- a/audio/decode/ad_lavc.c
++++ b/audio/decode/ad_lavc.c
+@@ -208,9 +208,6 @@
+         MP_ERR(da, "Error decoding audio.\n");
+     }
+ 
+-    if (priv->avframe->flags & AV_FRAME_FLAG_DISCARD)
+-        av_frame_unref(priv->avframe);
+-
+     if (!priv->avframe->buf[0])
+         return ret;
+ 
+@@ -263,7 +260,9 @@
+     // Strip possibly bogus float values like Infinity, NaN, denormalized
+     mp_aframe_sanitize_float(mpframe);
+ 
+-    if (mp_aframe_get_size(mpframe) > 0) {
++    // Discarded preroll still consumes the codec delay and skip-samples side data.
++    if (!(priv->avframe->flags & AV_FRAME_FLAG_DISCARD) &&
++        mp_aframe_get_size(mpframe) > 0) {
+         *out = MAKE_FRAME(MP_FRAME_AUDIO, mpframe);
+     } else {
+         talloc_free(mpframe);

@@ -13,6 +13,12 @@ def generate(output):
         ("interlaced-576i-top", "720x576", "50", "top", "bt470bg"),
         ("interlaced-1080i-top", "1920x1080", "60000/1001", "top", "bt709"),
     ]:
+        # Place a different gray patch in each successive field to expose field swaps.
+        filters = []
+        for field, level in enumerate((45, 100, 165, 220)):
+            gray = f"{level:02x}" * 3
+            filters.append(f"drawbox=x=iw/4:y=ih/4:w=iw/2:h=ih/2:color=0x{gray}:t=fill:enable='eq(mod(n,4),{field})'")
+        filters.append(f"tinterlace=mode=interleave_{order}")
         subprocess.run(
             [
                 "ffmpeg",
@@ -27,7 +33,7 @@ def generate(output):
                 "-t",
                 "2",
                 "-vf",
-                f"tinterlace=mode=interleave_{order}",
+                ",".join(filters),
                 "-c:v",
                 "mpeg2video",
                 "-flags",

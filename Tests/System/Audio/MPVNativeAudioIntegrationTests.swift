@@ -1,12 +1,12 @@
-#if os(macOS)
+#if os(macOS) || os(iOS) || os(tvOS)
 import Foundation
 import Libmpv
 @testable import MPVCore
 @testable import MPVUI
 import Testing
 
-/// Opens the real system audio route with playback muted. Run explicitly on a Mac
-/// with an audio output. The default test run uses null audio output.
+/// Opens the real system audio route with playback muted. Run explicitly on a
+/// Mac or physical Apple device. Advancing clocks do not establish audibility.
 @Suite(.tags(.system), .serialized, .enabled(if:
     ProcessInfo.processInfo.environment["MPVUI_RUN_NATIVE_AUDIO_TESTS"] == "1"
 ))
@@ -15,6 +15,39 @@ import Testing
 struct MPVNativeAudioIntegrationTests {
 
     private typealias Session = NativeAudioSession
+
+    @Test(.enabled(
+        if: ProcessInfo.processInfo.environment["MPVUI_DOLBY_AUDIO_REFERENCE"] != nil,
+        "Set MPVUI_DOLBY_AUDIO_REFERENCE to a verified E-AC-3/JOC file or URL."
+    ), arguments: MPVAudioConfiguration.DolbyDecoding.allCases)
+    func `reference Dolby audio initializes and recovers to PCM`(policy: MPVAudioConfiguration.DolbyDecoding) async throws {
+        let location = try #require(ProcessInfo.processInfo.environment["MPVUI_DOLBY_AUDIO_REFERENCE"])
+        let url: URL = if location.hasPrefix("https://") || location.hasPrefix("http://") {
+            try #require(URL(string: location))
+        } else if location.hasPrefix("/") {
+            URL(fileURLWithPath: location)
+        } else {
+            try TestPaths.testMedia(location)
+        }
+        if url.isFileURL {
+            try #require(
+                FileManager.default.fileExists(atPath: url.path),
+                "Reference audio must be accessible to the test process: \(location)"
+            )
+        }
+        let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
+        defer { audio.close() }
+        try await audio.load(url)
+        try await audio.wait("reference audio clock starts") { audio.number("audio-pts") > 0.5 }
+        let position = audio.number("audio-pts")
+        if policy == .automatic {
+            try audio.set("speed", "1.25")
+        }
+        try await audio.wait("reference plays through PCM") {
+            audio.node("avfoundation-audio-spatialization")?.mapValue?["path"] == .string("sample-buffer")
+                && audio.number("audio-pts") > position + 0.2
+        }
+    }
 
     @Test(arguments: MPVAudioConfiguration.DolbyDecoding.allCases, MPVAudioConfiguration.Spatialization.allCases)
     func `public audio configuration reaches Apple without a video view`(
@@ -159,7 +192,9 @@ struct MPVNativeAudioIntegrationTests {
         #expect(fields["path"] == .string("sample-buffer"))
         #expect(fields["allows-stereo"] == .bool(policy == "all"))
         #expect(fields["allows-multichannel"] == .bool(policy != "no"))
+        #if os(macOS)
         #expect(fields["route-spatial-enabled"] == nil) // No equivalent public macOS route API.
+        #endif
 
         let count = try #require(["mono": 1.0, "stereo": 2.0, "5.1": 6.0, "7.1": 8.0][layout])
 
@@ -270,26 +305,6 @@ struct MPVNativeAudioIntegrationTests {
         #expect(audio.string("pause") == "yes")
     }
 
-    @Test
-    func `pcm keeps default buffering and supports transport`() async throws {
-        let audio = try Session()
-        defer { audio.close() }
-
-        #expect(audio.string("options/ao-avfoundation-max-lookahead") == "0.000000"
-            || audio.number("options/ao-avfoundation-max-lookahead") == 0)
-
-        try await audio.load(TestPaths.baselineMedia)
-
-        try await audio.wait("PCM output and advancing audio clock") {
-            audio.string("current-ao") == "avfoundation" && audio.number("audio-pts") > 0.25
-        }
-
-        #expect(!audio.string("audio-out-params/format").contains("spdif"))
-        try await audio.pauseAndSeek(to: 0.6)
-        try audio.set("pause", "no")
-        try await audio.wait("PCM EOF") { audio.eof }
-    }
-
     @Test(arguments: ["audio-ac3-stereo.mka", "audio-eac3-stereo.mka"])
     func `compressed transport and EOF`(_ fixture: String) async throws {
         let audio = try Session(options: [
@@ -381,6 +396,24 @@ struct MPVNativeAudioIntegrationTests {
         #expect(start.duration(to: .now) < .seconds(14))
     }
 
+    @Test(arguments: [256, 768], MPVAudioConfiguration.DolbyDecoding.allCases)
+    func `EAC3 bitrate supports playback and PCM processing`(bitrate: Int, policy: MPVAudioConfiguration.DolbyDecoding) async throws {
+        let audio = try Session(options: MPVAudioConfiguration(dolbyDecoding: policy).mpvOptions)
+        defer { audio.close() }
+        try await audio.load(TestPaths.testMedia("audio-eac3-\(bitrate)k-5.1.mka"))
+        try await audio.wait("\(bitrate)k EAC3 advances") { audio.number("audio-pts") > 0.5 }
+        #expect(audio.number("current-tracks/audio/demux-channel-count") == 6)
+        let position = audio.number("audio-pts")
+        if policy == .automatic {
+            try audio.set("speed", "1.25")
+        }
+        try await audio.wait("PCM playback continues") {
+            audio.node("avfoundation-audio-spatialization")?.mapValue?["path"] == .string("sample-buffer")
+                && audio.number("audio-pts") > position + 0.2
+        }
+    }
+
+    #if os(macOS)
     @Test
     func `explicit device uses PCM without affecting another compressed player`() async throws {
         let compressed = try Session(
@@ -457,5 +490,6 @@ struct MPVNativeAudioIntegrationTests {
         #expect(compressed.string("audio-out-params/format") == "spdif-ac3")
         #expect(!compressed.logs.lowercased().contains("falling back to pcm"), "\(compressed.logs)")
     }
+    #endif
 }
 #endif

@@ -1,0 +1,82 @@
+diff --git a/configure b/configure
+index 52b3c4b..d9fd5f9 100755
+--- a/configure
++++ b/configure
+@@ -3738,6 +3738,7 @@ aac_parser_select="adts_header mpeg4audio"
+ ahx_parser_deps="lgpl_gpl"
+ apv_parser_select="cbs_apv"
+ av1_parser_select="cbs_av1"
++dirac_parser_select="dirac_parse"
+ evc_parser_select="evcparse"
+ ffv1_parser_select="rangecoder"
+ ftr_parser_select="adts_header mpeg4audio"
+diff --git a/libavcodec/dirac_parser.c b/libavcodec/dirac_parser.c
+index d9cf443..4a3dae0 100644
+--- a/libavcodec/dirac_parser.c
++++ b/libavcodec/dirac_parser.c
+@@ -31,9 +31,11 @@
+ 
+ #include "libavutil/attributes.h"
+ #include "libavutil/intreadwrite.h"
++#include "libavutil/mathematics.h"
+ #include "libavutil/mem.h"
+ 
+ #include "avcodec.h"
++#include "dirac.h"
+ #include "parser_internal.h"
+ 
+ #define DIRAC_PARSE_INFO_PREFIX 0x42424344
+@@ -199,28 +201,43 @@ static int dirac_combine_frame(AVCodecParserContext *s, AVCodecContext *avctx,
+          * ensure that pts is set correctly. So if the current parse unit is
+          * not frame data, wait for frame data to come along */
+ 
+-        pc->dirac_unit = pc->buffer + pc->index - 13 -
+-                         pu1.prev_pu_offset - pc->dirac_unit_size;
++        uint8_t *unit = pc->buffer + pc->index - 13 - pu1.prev_pu_offset;
++        pc->dirac_unit = unit - pc->dirac_unit_size;
+ 
+         pc->dirac_unit_size += pu.next_pu_offset;
+ 
+         if ((pu.pu_type & 0x08) != 0x08) {
++            if (parse_timing_info && pu.pu_type == DIRAC_PCODE_SEQ_HEADER &&
++                pu.next_pu_offset > 13) {
++                AVDiracSeqHeader *header;
++                if (av_dirac_parse_sequence_header(&header, unit + 13,
++                                                   pu.next_pu_offset - 13, NULL) >= 0) {
++                    avctx->framerate = header->framerate;
++                    av_free(header);
++                }
++            }
+             pc->header_bytes_needed = 9;
+             *buf_size               = next;
+             return -1;
+         }
+ 
+-        /* Get the picture number to set the pts and dts*/
+-        if (parse_timing_info && pu1.prev_pu_offset >= 13) {
+-            uint8_t *cur_pu = pc->buffer +
+-                              pc->index - 13 - pu1.prev_pu_offset;
+-            int64_t pts = AV_RB32(cur_pu + 13);
++        /* Picture numbers count frames. The raw demuxer uses a separate packet clock. */
++        if (parse_timing_info && pu1.prev_pu_offset >= 17) {
++            AVRational frame_time_base = av_inv_q(avctx->framerate);
++            AVRational packet_time_base = avctx->pkt_timebase;
++            int64_t pts = AV_RB32(unit + 13);
++            int64_t frame_duration = 1;
++            if (frame_time_base.num > 0 && frame_time_base.den > 0 &&
++                packet_time_base.num > 0 && packet_time_base.den > 0) {
++                pts = av_rescale_q(pts, frame_time_base, packet_time_base);
++                frame_duration = FFMAX(1, av_rescale_q(1, frame_time_base, packet_time_base));
++            }
+             if (s->last_pts == 0 && s->last_dts == 0)
+-                s->dts = pts - 1;
++                s->dts = pts - frame_duration;
+             else if (s->last_dts != AV_NOPTS_VALUE)
+-                s->dts = s->last_dts + 1;
++                s->dts = s->last_dts + frame_duration;
+             s->pts = pts;
+-            if (!avctx->has_b_frames && (cur_pu[4] & 0x03))
++            if (!avctx->has_b_frames && (unit[4] & 0x03))
+                 avctx->has_b_frames = 1;
+         }
+         if (avctx->has_b_frames && s->pts == s->dts)

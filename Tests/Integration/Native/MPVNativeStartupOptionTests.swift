@@ -20,6 +20,9 @@ struct MPVNativeStartupOptionTests {
         ("ao-avfoundation-accept-compressed", "yes"),
         ("ao-avfoundation-compressed-lead", "1"),
         ("ao-avfoundation-compressed-lead", "30"),
+        ("ao-avfoundation-max-lookahead", "0"),
+        ("ao-avfoundation-max-lookahead", "2"),
+        ("ao-avfoundation-max-lookahead", "10"),
         ("avfoundation-native-dovi-profile7", "no"),
         ("avfoundation-native-dovi-profile7", "p8.1"),
         ("hwdec", "auto-safe"),
@@ -49,7 +52,7 @@ struct MPVNativeStartupOptionTests {
     ]
 
     @MainActor
-    @Test(.serialized, arguments: ["aac", "webp", "webp_anim", "prores_raw"])
+    @Test(.serialized, arguments: ["aac", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "webp", "webp_anim", "prores_raw"])
     func `bundled mpv exposes required media decoder`(codec: String) throws {
         let session = try NativePlaybackSession()
         defer { session.close() }

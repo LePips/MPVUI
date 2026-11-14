@@ -51,7 +51,7 @@ struct MPVDolbyVisionRemuxTests {
         let layer = player.sampleBufferDisplayLayer
 
         for position in [0.25, 1.25] {
-            try player.load(TestPaths.testMedia(name), playAutomatically: false, startTime: .seconds(position))
+            try await fixture.loadForVideoReadback(TestPaths.testMedia(name), startTime: .seconds(position))
 
             try await eventually("native remuxed frame in \(name)") {
                 player.lastError != nil || player.state == .paused
@@ -85,7 +85,7 @@ struct MPVDolbyVisionRemuxTests {
         }
 
         // A later HDR10 item must not inherit the recovered Dolby Vision session.
-        try player.load(TestPaths.testMedia("color-hdr10.mkv"), playAutomatically: false, startTime: .seconds(1))
+        try await fixture.loadForVideoReadback(TestPaths.testMedia("color-hdr10.mkv"), startTime: .seconds(1))
 
         try await eventually("ordinary HDR10 after Dolby Vision") {
             if player.lastError != nil {

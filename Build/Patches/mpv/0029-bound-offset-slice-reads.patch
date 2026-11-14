@@ -1,0 +1,17 @@
+diff --git a/stream/stream_slice.c b/stream/stream_slice.c
+--- a/stream/stream_slice.c
++++ b/stream/stream_slice.c
+@@ -38,10 +38,10 @@
+     if (p->slice_max_end) {
+         // We don't simply use (s->pos >= size) to avoid early return
+         // if the file is still being appended to.
+-        if (s->pos + p->slice_start >= p->slice_max_end)
++        int64_t remaining = p->slice_max_end - p->slice_start - s->pos;
++        if (remaining <= 0)
+             return -1;
+-        // Avoid rading beyond p->slice_max_end
+-        len = MPMIN(len, p->slice_max_end - s->pos);
++        len = MPMIN(len, remaining);
+     }
+ 
+     return stream_read_partial(p->inner, buffer, len);

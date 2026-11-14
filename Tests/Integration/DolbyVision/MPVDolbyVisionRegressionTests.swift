@@ -458,6 +458,24 @@ struct MPVDolbyVisionRegressionTests {
         #expect(host.player.lastError == nil)
     }
 
+    @MainActor
+    @Test(.enabled(if: TestPaths.hasDolbyVisionChart, "The optional Dolby Vision chart provides the raw HEVC reference."))
+    func `raw HEVC uses the in-band Dolby Vision matrix and preserves the chart colors`() async throws {
+        let host = Host(hardwareDecoding: .disabled, videoOutput: .metal, startTime: .zero)
+        defer { host.close() }
+        try host.player.load(TestPaths.testMedia("dolby-vision-inband.hevc"))
+        try await eventually("raw Dolby Vision frame through Metal") {
+            host.player.lastError != nil
+                || host.player.state == .paused && host.player.mediaInformation.hdr.decoded.matrix == "dolbyvision"
+        }
+        try #require(host.player.lastError == nil)
+        #expect(host.player.mediaInformation.container == "hevc")
+        #expect(host.player.mediaInformation.videoCodec == "hevc")
+        #expect(host.player.mediaInformation.hdr.decoded.transferFunction == .pq)
+        let image = try await host.screenshot(named: "inband-hevc")
+        try expectChartColors(pixels(image))
+    }
+
     private func expectChartColors(_ actual: Pixels) {
         // At 25 seconds, the 1920x1080 chart has red/green/blue patch centers at
         // (182, 470), (439, 470), (696, 470). Sample inside each patch after the

@@ -41,8 +41,20 @@ struct NativePatchRegistrationTests {
 
         #expect(try fingerprint(native.appleBuildInputs) == fingerprint(changed.appleBuildInputs))
         #expect(try fingerprint(native) != fingerprint(changed))
-        #expect(try native.source("ffmpeg").patches.allSatisfy { !$0.path.hasPrefix("Build/Android/") })
-        #expect(try native.source("ffmpeg", platform: .android).patches.allSatisfy { $0.path.hasPrefix("Build/Android/") })
+        let applePatches = try Set(native.source("ffmpeg").patches.map(\.path))
+        let androidPatches = try Set(native.source("ffmpeg", platform: .android).patches.map(\.path))
+        #expect(applePatches.allSatisfy { !$0.hasPrefix("Build/Android/") })
+        #expect(applePatches.intersection(androidPatches) == [
+            "Build/Patches/ffmpeg/0008-dash-live-seekability.patch",
+            "Build/Patches/ffmpeg/0010-aiff-g726-codeword-alignment.patch",
+            "Build/Patches/ffmpeg/0011-match-legacy-flv-video-tags.patch",
+            "Build/Patches/ffmpeg/0012-stream-tls-options-and-seekability.patch",
+            "Build/Patches/ffmpeg/0013-handle-mmst-end-of-stream.patch",
+            "Build/Patches/ffmpeg/0014-preserve-rtmpts-transport.patch",
+            "Build/Patches/ffmpeg/0015-preserve-dash-segment-list-sequence.patch",
+            "Build/Patches/ffmpeg/0016-pad-rtmpe-shared-secret.patch",
+        ])
+        #expect(androidPatches.subtracting(applePatches).allSatisfy { $0.hasPrefix("Build/Android/") })
     }
 
     @Test(arguments: ["mpv", "ffmpeg", "libplacebo"])

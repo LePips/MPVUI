@@ -4,8 +4,8 @@
 - Don't add or update Markdown documentation for reports, audits, results, or otherwise.
 - Don't add transitional, migration, or temporary implementations. Keep all changes current.
 - Document new public APIs with clear, brief Swift documentation comments.
-- Run `make format` and `make format CHECK=1` after completing work.
-- Use `make COMMAND` for builds, tests, and requested benchmarks. Choose variants with options such as `PLATFORM`, `SUITE`, and `STEP`. See `make help` for commands and options.
-- Use `JSON=1` for structured Make results. Read completed summaries first. Open logs only for unresolved failures, warnings, or missing evidence.
+- Run `just format` and `just format --check` after completing work.
+- Use `just COMMAND` for builds, tests, and requested benchmarks. Choose variants with named flags such as `--platform`, `--suite`, and `--step`. Pass tool arguments after `--`. See `just help` for commands and options.
+- Use `--json` for structured results. Read completed summaries first. Open logs only for unresolved failures, warnings, or missing evidence.
 - Wait for completion instead of repeatedly polling status or tailing logs.
 - Keep prose succinct, clear, and educational. Avoid semicolon clauses and repeated explanations.

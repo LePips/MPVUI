@@ -1,0 +1,11 @@
+diff --git a/libavformat/dashdec.c b/libavformat/dashdec.c
+--- a/libavformat/dashdec.c
++++ b/libavformat/dashdec.c
+@@ -2161,6 +2161,7 @@
+     if (!c->is_live) {
+         s->duration = (int64_t) c->media_presentation_duration * AV_TIME_BASE;
+     } else {
++        s->ctx_flags |= AVFMTCTX_UNSEEKABLE;
+         av_dict_set(&c->avio_opts, "seekable", "0", 0);
+     }
+ 

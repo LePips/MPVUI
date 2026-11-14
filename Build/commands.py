@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Route make commands and their options to the build, test, release, and benchmark tools.
+"""Route just recipes to the build, test, release, and benchmark tools.
 
-Make passes the command, then OPTION=value settings, then tool arguments after --.
+The justfile passes the command, private OPTION=value settings, then tool arguments after --.
 Each selected step runs through validation.py, which streams output and saves logs and results.
 """
 
@@ -18,12 +18,12 @@ PROFILES = ("dev", "release")
 OPTIONS = {
     "PLATFORM": "apple|android, default apple",
     "PROFILE": "dev|release, default dev. Native build profile and Android example variant",
-    "SUITE": "Test suite, listed under make test",
+    "SUITE": "Test suite, listed under just test",
     "STEP": "Release or benchmark step, listed under each command",
     "DEVICE": "Device or simulator identifier, or Android serial",
     "FILTER": "Run matching Swift tests without coverage",
-    "CHECK": "1 checks formatting without changing files",
-    "JSON": "1 prints one JSON result per step instead of tool output",
+    "CHECK": "Check formatting without changing files",
+    "JSON": "Print one JSON result per step instead of tool output",
 }
 
 
@@ -127,9 +127,16 @@ COMMANDS = {
                 "integration": ("Integration tests with coverage", lane("integration")),
                 "system": ("System tests with coverage. Each needs its opt-in variable", lane("system")),
                 "all": ("Every package test lane with coverage", lane("all")),
-                "native": ("Native HDR and compositor harnesses with sanitizers", fixed(python("test", "Build/Tests/NativeHDR/run.py"))),
+                "native": (
+                    "Native HDR, compositor, and audio harnesses with sanitizers",
+                    fixed(
+                        python("test", "Build/Tests/NativeHDR/run.py"),
+                        python("test", "Build/Tests/NativeAudio/run.py"),
+                    ),
+                ),
+                "native-audio": ("Audio policy and PCM feeding with sanitizers", fixed(python("test", "Build/Tests/NativeAudio/run.py"))),
                 "device": (
-                    "Generated test project on DEVICE, a device or simulator",
+                    "Generated test project on --device, a device or simulator",
                     fixed(python("test", "Build/Tests/run_xcode_tests.py", device="flag")),
                 ),
                 "consumer": (
@@ -137,7 +144,7 @@ COMMANDS = {
                     fixed(python("test", "Build/Tests/apple_consumer.py")),
                 ),
                 "regression": (
-                    "Playback lifecycle checks on DEVICE",
+                    "Playback lifecycle checks on --device",
                     fixed(python("test", "Build/Benchmarks/benchmark.py", "device-regression", device="flag")),
                 ),
                 "rendering": (
@@ -148,12 +155,12 @@ COMMANDS = {
             },
             "android": {
                 "": ("Kotlin unit tests and release lint", fixed(gradle("Android", ":mpvui:testDebugUnitTest", ":mpvui:lintRelease"))),
-                "core": ("Shared core tests on DEVICE", fixed(python("test", "Build/Android/swift_core.py", "--test", device="flag"))),
+                "core": ("Shared core tests on --device", fixed(python("test", "Build/Android/swift_core.py", "--test", device="flag"))),
                 "integration": (
                     "Library instrumentation tests",
                     fixed(MEDIA, gradle("Android", ":mpvui:connectedDebugAndroidTest", device="env")),
                 ),
-                "example": ("Example instrumentation tests. PROFILE=release tests the optimized build", android_example),
+                "example": ("Example instrumentation tests. --profile release tests the optimized build", android_example),
                 "native": (
                     "Profile 7 and Dolby Vision GPU checks on arm64",
                     fixed(
@@ -162,7 +169,7 @@ COMMANDS = {
                     ),
                 ),
                 "consumer": (
-                    "Independent consumer apps from the Maven bundle, run on DEVICE when set",
+                    "Independent consumer apps from the Maven bundle, run on --device when set",
                     fixed(python("test", "Build/Android/consumer.py", device="flag")),
                 ),
                 **SHARED_SUITES,
@@ -209,14 +216,14 @@ COMMANDS = {
         ("PLATFORM", "STEP", "DEVICE"),
         {
             "apple": {
-                "": ("Host benchmarks, or mpv and AVPlayer playback on DEVICE when set", apple_benchmark),
+                "": ("Host benchmarks, or mpv and AVPlayer playback on --device when set", apple_benchmark),
                 "compare": ("Compare two benchmark reports", fixed(python("benchmark", "Build/Benchmarks/benchmark.py", "compare"))),
                 "ab": (
-                    "Compare two built checkouts on DEVICE",
+                    "Compare two built checkouts on --device",
                     fixed(python("benchmark", "Build/Benchmarks/run_device_ab.py", device="flag")),
                 ),
                 "profile": (
-                    "Record an Instruments trace of playback on DEVICE",
+                    "Record an Instruments trace of playback on --device",
                     fixed(python("benchmark", "Build/Benchmarks/capture_device_profile.py", device="flag")),
                 ),
                 "analyze": (
@@ -232,16 +239,16 @@ COMMANDS = {
                     fixed(python("benchmark", "Build/Benchmarks/prepare_sync_probe.py")),
                 ),
                 "sync": (
-                    "Run the synchronization probe on DEVICE",
+                    "Run the synchronization probe on --device",
                     fixed(python("benchmark", "Build/Benchmarks/run_device_sync_probe.py", device="flag")),
                 ),
             },
-            "android": {"": ("Playback on DEVICE", fixed(python("benchmark", "Build/Android/benchmark.py", device="flag")))},
+            "android": {"": ("Playback on --device", fixed(python("benchmark", "Build/Android/benchmark.py", device="flag")))},
         },
         "STEP",
     ),
     "select": Command(
-        "Point Package.swift at the latest candidate. ARGS=--remote restores the published artifact",
+        "Point Package.swift at the latest candidate. -- --remote restores the published artifact",
         (),
         {"apple": {"": ("", fixed(python("command", MPVBUILD, "select")))}},
     ),
@@ -251,12 +258,12 @@ COMMANDS = {
         {"any": {"": ("", fixed(python("command", "Build/update_dependencies.py")))}},
     ),
     "clean": Command(
-        "Remove build outputs and test results. ARGS=--cache also removes downloads and tools",
+        "Remove build outputs and test results. -- --cache also removes downloads and tools",
         (),
         {"any": {"": ("", fixed(python("command", "Build/clean.py")))}},
     ),
     "format": Command(
-        "Format sources. CHECK=1 checks without changing files",
+        "Format sources. --check checks without changing files",
         ("CHECK",),
         {
             "any": {
@@ -272,8 +279,12 @@ COMMANDS = {
 }
 
 
+def flag(name):
+    return "--" + name.lower()
+
+
 def parse(argv):
-    """Split make's arguments into a command, validated options, and tool arguments."""
+    """Split the justfile's arguments into a command, validated options, and tool arguments."""
     if not argv:
         raise UsageError("Expected a command")
     name, *rest = argv
@@ -288,11 +299,11 @@ def parse(argv):
         key, separator, value = setting.partition("=")
         allowed = command.options + ("JSON",)
         if not separator or key not in allowed:
-            raise UsageError(f"make {name} accepts {', '.join(allowed)}, not {key}")
+            raise UsageError(f"just {name} accepts {', '.join(map(flag, allowed))}, not {flag(key)}")
         values[key] = value
     for key, choices in (("PLATFORM", PLATFORMS), ("PROFILE", PROFILES), ("CHECK", ("0", "1")), ("JSON", ("0", "1"))):
         if key in values and values[key] not in choices:
-            raise UsageError(f"{key} must be one of {', '.join(choices)}")
+            raise UsageError(f"{flag(key)} must be one of {', '.join(choices)}")
     options = Options(
         platform=values.get("PLATFORM", "apple"),
         profile=values.get("PROFILE", "dev"),
@@ -311,21 +322,21 @@ def resolve(name, options):
     command = COMMANDS[name]
     selections = command.table.get(options.platform, command.table.get("any"))
     if selections is None:
-        raise UsageError(f"make {name} does not support PLATFORM={options.platform}")
+        raise UsageError(f"just {name} does not support --platform {options.platform}")
     if options.filter:
         if options.platform != "apple" or options.suite:
-            raise UsageError("FILTER runs Apple package tests and cannot be combined with SUITE")
+            raise UsageError("--filter runs Apple package tests and cannot be combined with --suite")
         steps = [python("test", "Build/Tests/run_swift_tests.py", "--filter", options.filter)]
     else:
         selected = options.suite if command.selector == "SUITE" else options.step
         if selected not in selections:
             values = ", ".join(value for value in selections if value)
             if not values:
-                raise UsageError(f"make {name} PLATFORM={options.platform} takes no {command.selector}")
-            raise UsageError(f"{command.selector} for make {name} PLATFORM={options.platform} must be one of: {values}")
+                raise UsageError(f"just {name} --platform {options.platform} takes no {flag(command.selector)}")
+            raise UsageError(f"{flag(command.selector)} for just {name} --platform {options.platform} must be one of: {values}")
         steps = selections[selected][1](options)
     if options.device and not any(step.device for step in steps):
-        raise UsageError("DEVICE does not apply to this selection")
+        raise UsageError("--device does not apply to this selection")
     return steps
 
 
@@ -347,23 +358,25 @@ def execute(name, options, arguments):
 
 
 def usage():
-    lines = ['Usage: make COMMAND [OPTION=value ...] [ARGS="tool options"]', "", "Commands:"]
+    lines = ["Usage: just COMMAND [--option value ...] [-- tool arguments]", "", "Commands:"]
     lines += [f"  {name:<10} {command.summary}" for name, command in COMMANDS.items()]
     for name, command in COMMANDS.items():
         if not command.selector:
             continue
-        lines += ["", f"make {name} {command.selector}:"]
+        lines += ["", f"just {name} {flag(command.selector)}:"]
         for platform, selections in command.table.items():
-            lines.append(f"  PLATFORM={platform}")
+            lines.append(f"  --platform {platform}")
             lines += [f"    {value or '(default)':<14} {description}" for value, (description, _) in selections.items()]
     lines += ["", "Options:"]
-    lines += [f"  {key + '=':<10} {description}" for key, description in OPTIONS.items()]
+    lines += [f"  {flag(key):<10} {description}" for key, description in OPTIONS.items()]
     lines += [
-        f"  {'ARGS=':<10} Tool options. ARGS=--help lists them for the selected tool",
-        f"  {'PYTHON=':<10} Python executable",
+        "  --         Pass remaining arguments to the selected tool. -- --help lists its options",
         "",
-        "make build test runs commands in order and stops on failure.",
-        "Logs and results are saved in .build/validation. make -C Build accepts the same commands.",
+        "just --list lists recipes. just --usage COMMAND lists a command's flags.",
+        "just --set python /path/to/python3 COMMAND selects a Python executable.",
+        "Chain commands with &&, for example just build && just test, to stop on failure.",
+        "Trailing arguments belong to one command. just build test passes test to the build tool.",
+        "Logs and results are saved in .build/validation. Run just from any project subdirectory.",
     ]
     return "\n".join(lines)
 
@@ -376,7 +389,7 @@ def main(argv=None):
             return 0
         return execute(name, options, arguments)
     except UsageError as error:
-        print(f"error: {error}. Run make help.", file=sys.stderr)
+        print(f"error: {error}. Run just help.", file=sys.stderr)
         return 2
 
 

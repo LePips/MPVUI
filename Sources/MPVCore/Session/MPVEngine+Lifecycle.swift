@@ -288,6 +288,7 @@ package extension MPVSession {
         hasPlaybackStarted = false
         requestedPlaylistEntryID = nil
         activePlaylistEntryID = nil
+        resetPlaylistExpansion()
 
         if preservePlayback, needsSourceLoad {
             publishState(.loading)
@@ -301,6 +302,7 @@ package extension MPVSession {
             isWaitingForDisplayPreparation = false
             didReachEnd = false
             sourceURL = nil
+            sourceArgument = nil
             pendingStartTime = nil
             pendingSeekAfterLoad = nil
             needsSourceLoad = false

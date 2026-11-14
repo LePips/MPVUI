@@ -1,0 +1,65 @@
+Subject: [PATCH] Freeze the pull audio clock while the renderer is paused
+
+During a tvOS display mode switch AVFoundation retains queued PCM.
+Letting its estimated delay drain on wall time advances audio-pts
+while paused and makes it jump backwards on resume. Update both
+clock transitions under the same lock as audio reads.
+
+--- a/audio/out/buffer.c
++++ b/audio/out/buffer.c
+@@ -69,11 +69,7 @@
+     int64_t device_clock_wakeup_ns;
+ 
+     int64_t end_time_ns;        // absolute output time of last played sample
+-    int64_t queued_time_ns;     // duration of samples that have been queued to
+-                                // the device but have not been played.
+-                                // This field is only set in ao_set_paused(),
+-                                // and is considered as a temporary solution;
+-                                // DO NOT USE IT IN OTHER PLACES.
++    int64_t paused_delay_ns;    // remaining device delay of a paused pull AO
+ 
+     // "Push" AOs only (AOs with driver->write).
+     bool recover_pause;         // non-hw_paused: needs to recover delay
+@@ -373,9 +369,9 @@
+     } else if (ao->device_clock) {
+         driver_delay = MP_TIME_NS_TO_S(device_clock_delay(p, mp_time_ns()));
+     } else {
+-        int64_t end = p->end_time_ns;
+-        int64_t now = mp_time_ns();
+-        driver_delay = MPMAX(0, MP_TIME_NS_TO_S(end - now));
++        int64_t delay = p->paused && p->hw_paused
++            ? p->paused_delay_ns : p->end_time_ns - mp_time_ns();
++        driver_delay = MP_TIME_NS_TO_S(MPMAX(0, delay));
+     }
+ 
+     int64_t pending = mp_async_queue_get_samples(p->queue);
+@@ -507,6 +503,14 @@
+         int64_t now = mp_time_ns();
+         p->device_delay_ns = device_clock_delay(p, now);
+         p->device_clock_time_ns = now;
++    } else if (do_change_state && is_hw_paused) {
++        // A paused pull renderer retains its queued samples. Freeze their
++        // remaining duration and rebase the deadline before reads resume.
++        int64_t now = mp_time_ns();
++        if (paused)
++            p->paused_delay_ns = MPMAX(0, p->end_time_ns - now);
++        else
++            p->end_time_ns = now + p->paused_delay_ns;
+     }
+     p->paused = paused;
+ 
+@@ -514,13 +518,7 @@
+ 
+     if (do_change_state) {
+         if (is_hw_paused) {
+-            if (paused) {
+-                ao->driver->set_pause(ao, true);
+-                p->queued_time_ns = p->end_time_ns - mp_time_ns();
+-            } else {
+-                p->end_time_ns = p->queued_time_ns + mp_time_ns();
+-                ao->driver->set_pause(ao, false);
+-            }
++            ao->driver->set_pause(ao, paused);
+         } else {
+             if (paused)
+                 ao->driver->reset(ao);

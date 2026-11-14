@@ -1,0 +1,154 @@
+diff --git a/libavcodec/audiotoolboxdec.c b/libavcodec/audiotoolboxdec.c
+--- a/libavcodec/audiotoolboxdec.c
++++ b/libavcodec/audiotoolboxdec.c
+@@ -29,7 +29,9 @@
+ #include "bytestream.h"
+ #include "codec_internal.h"
+ #include "decode.h"
++#include "mpeg4audio.h"
+ #include "mpegaudiodecheader.h"
++#include "put_bits.h"
+ #include "libavutil/avassert.h"
+ #include "libavutil/channel_layout.h"
+ #include "libavutil/mem.h"
+@@ -304,6 +306,46 @@
+     return 0;
+ }
+ 
++static OSStatus ffat_read_format(AVCodecContext *avctx,
++                                 const uint8_t *cookie, UInt32 cookie_size,
++                                 AudioStreamBasicDescription *format)
++{
++    if (avctx->codec_id == AV_CODEC_ID_AAC) {
++        AudioFormatInfo info = {
++            .mASBD = *format,
++            .mMagicCookie = cookie,
++            .mMagicCookieSize = cookie_size,
++        };
++        AudioFormatListItem *formats;
++        UInt32 size, index, index_size = sizeof(index);
++        OSStatus status;
++
++        // FormatInfo returns the AAC core even when the cookie signals SBR or PS.
++        status = AudioFormatGetPropertyInfo(kAudioFormatProperty_FormatList,
++                                            sizeof(info), &info, &size);
++        if (!status && size >= sizeof(*formats)) {
++            formats = av_malloc(size);
++            if (!formats)
++                return AVERROR(ENOMEM);
++            status = AudioFormatGetProperty(kAudioFormatProperty_FormatList,
++                                            sizeof(info), &info, &size, formats);
++            if (!status)
++                status = AudioFormatGetProperty(kAudioFormatProperty_FirstPlayableFormatFromList,
++                                                size, formats, &index_size, &index);
++            if (!status && index < size / sizeof(*formats)) {
++                *format = formats[index].mASBD;
++                av_free(formats);
++                return 0;
++            }
++            av_free(formats);
++        }
++    }
++
++    UInt32 size = sizeof(*format);
++    return AudioFormatGetProperty(kAudioFormatProperty_FormatInfo,
++                                  cookie_size, cookie, &size, format);
++}
++
+ static int ffat_is_g711(enum AVCodecID codec)
+ {
+     return codec == AV_CODEC_ID_PCM_ALAW || codec == AV_CODEC_ID_PCM_MULAW;
+@@ -333,13 +375,11 @@
+     avctx->sample_fmt = sample_fmt;
+ 
+     if (ffat_usable_extradata(avctx)) {
+-        UInt32 format_size = sizeof(in_format);
+         UInt32 cookie_size;
+         uint8_t *cookie = ffat_get_magic_cookie(avctx, &cookie_size);
+         if (!cookie)
+             return AVERROR(ENOMEM);
+-        status = AudioFormatGetProperty(kAudioFormatProperty_FormatInfo,
+-                                        cookie_size, cookie, &format_size, &in_format);
++        status = ffat_read_format(avctx, cookie, cookie_size, &in_format);
+         if (cookie != at->extradata)
+             av_free(cookie);
+         if (status != 0) {
+@@ -434,6 +474,10 @@
+         memcpy(at->extradata, avctx->extradata, avctx->extradata_size);
+     }
+ 
++    // ADTS carries its AudioSpecificConfig on the first filtered packet.
++    if (avctx->codec_id == AV_CODEC_ID_AAC && !at->extradata_size)
++        return 0;
++
+     if ((avctx->ch_layout.nb_channels && avctx->sample_rate) || ffat_usable_extradata(avctx))
+         return ffat_create_decoder(avctx, NULL);
+     else
+@@ -542,6 +586,52 @@
+     return pkt->size;
+ }
+ 
++static int ffat_aac_set_config(AVCodecContext *avctx, const uint8_t *config, size_t size)
++{
++    ATDecodeContext *at = avctx->priv_data;
++    uint8_t extended[7];
++    unsigned core_index, output_index;
++
++    // aac_adtstoasc supplies the ADTS header's core configuration.
++    // If stream probing detected SBR, retain its output rate and PS signal.
++    if (size == 2 && config[0] >> 3 == AOT_AAC_LC &&
++        (avctx->profile == AV_PROFILE_AAC_HE || avctx->profile == AV_PROFILE_AAC_HE_V2)) {
++        core_index = (AV_RB16(config) >> 7) & 15;
++        for (output_index = 0; output_index < 13; output_index++) {
++            if (ff_mpeg4audio_sample_rates[output_index] == avctx->sample_rate)
++                break;
++        }
++
++        if (core_index < 13 && output_index < 13 &&
++            2 * ff_mpeg4audio_sample_rates[core_index] == avctx->sample_rate) {
++            PutBitContext bits;
++
++            init_put_bits(&bits, extended, sizeof(extended));
++            put_bits(&bits, 16, AV_RB16(config));
++            put_bits(&bits, 11, 0x2B7); // SBR sync extension
++            put_bits(&bits, 5, AOT_SBR);
++            put_bits(&bits, 1, 1);
++            put_bits(&bits, 4, output_index);
++            if (avctx->profile == AV_PROFILE_AAC_HE_V2) {
++                put_bits(&bits, 11, 0x548); // PS sync extension
++                put_bits(&bits, 1, 1);
++            }
++            flush_put_bits(&bits);
++            size = put_bytes_output(&bits);
++            config = extended;
++        }
++    }
++
++    if (size > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE)
++        return AVERROR_INVALIDDATA;
++    at->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
++    if (!at->extradata)
++        return AVERROR(ENOMEM);
++    at->extradata_size = size;
++    memcpy(at->extradata, config, size);
++    return 0;
++}
++
+ static int ffat_decode(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame_ptr, AVPacket *avpkt)
+ {
+@@ -558,11 +648,9 @@
+             side_data = av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA,
+                                                 &side_data_size);
+             if (side_data_size) {
+-                at->extradata = av_mallocz(side_data_size + AV_INPUT_BUFFER_PADDING_SIZE);
+-                if (!at->extradata)
+-                    return AVERROR(ENOMEM);
+-                at->extradata_size = side_data_size;
+-                memcpy(at->extradata, side_data, side_data_size);
++                int err = ffat_aac_set_config(avctx, side_data, side_data_size);
++                if (err < 0)
++                    return err;
+             }
+         }
+     }

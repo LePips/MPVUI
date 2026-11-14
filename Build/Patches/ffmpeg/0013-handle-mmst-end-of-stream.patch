@@ -1,0 +1,82 @@
+diff --git a/libavformat/mmst.c b/libavformat/mmst.c
+--- a/libavformat/mmst.c
++++ b/libavformat/mmst.c
+@@ -72,12 +72,6 @@
+     SC_PKT_STREAM_ID_ACCEPTED       = 0x21,
+     /*@}*/
+ 
+-    /** Pseudo packets. */
+-    /*@{*/
+-    SC_PKT_CANCEL                   = -1,
+-    SC_PKT_NO_DATA                  = -2,
+-    /*@}*/
+-
+     /** Data packets. */
+     /*@{*/
+     SC_PKT_ASF_HEADER               = 0x010000,// make it bigger than 0xFF in case of
+@@ -242,26 +236,19 @@
+ }
+ 
+ /** Read incoming MMST media, header or command packet. */
+-static MMSSCPacketType get_tcp_server_response(MMSTContext *mmst)
++static int get_tcp_server_response(MMSTContext *mmst)
+ {
+     int read_result;
+-    MMSSCPacketType packet_type= -1;
++    int packet_type;
+     MMSContext *mms = &mmst->mms;
+     for(;;) {
+         read_result = ffurl_read_complete(mms->mms_hd, mms->in_buffer, 8);
+-        if (read_result != 8) {
+-            if(read_result < 0) {
+-                av_log(mms->mms_hd, AV_LOG_ERROR,
+-                       "Error reading packet header: %d (%s)\n",
+-                       read_result, strerror(AVUNERROR(read_result)));
+-                packet_type = SC_PKT_CANCEL;
+-            } else {
+-                av_log(mms->mms_hd, AV_LOG_ERROR,
+-                       "The server closed the connection\n");
+-                packet_type = SC_PKT_NO_DATA;
+-            }
+-            return packet_type;
+-        }
++        if (read_result == AVERROR_EOF || read_result == 0)
++            return AVERROR_EOF;
++        if (read_result < 0)
++            return read_result;
++        if (read_result != 8)
++            return AVERROR_INVALIDDATA;
+ 
+         // handle command packet.
+         if(AV_RL32(mms->in_buffer + 4)==0xb00bface) {
+@@ -380,7 +367,7 @@
+                               int (*send_fun)(MMSTContext *mmst),
+                               const MMSSCPacketType expect_type)
+ {
+-    MMSSCPacketType type;
++    int type;
+     if(send_fun) {
+         int ret = send_fun(mmst);
+         if (ret < 0) {
+@@ -389,7 +376,10 @@
+         }
+     }
+ 
+-    if ((type = get_tcp_server_response(mmst)) != expect_type) {
++    type = get_tcp_server_response(mmst);
++    if (type < 0)
++        return type;
++    if (type != expect_type) {
+         av_log(NULL, AV_LOG_ERROR,
+                "Corrupt stream (unexpected packet type 0x%x, expected 0x%x)\n",
+                type, expect_type);
+@@ -621,8 +611,7 @@
+                     }
+                 }
+             } else {
+-                av_log(h, AV_LOG_TRACE, "read packet error!\n");
+-                break;
++                return err;
+             }
+         }
+     } while(!result); // only return one packet.

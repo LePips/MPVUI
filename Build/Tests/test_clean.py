@@ -1,4 +1,4 @@
-"""Check which build outputs make clean removes and keeps."""
+"""Check which build outputs just clean removes and keeps."""
 
 from pathlib import Path
 import sys

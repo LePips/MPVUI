@@ -1,0 +1,26 @@
+diff --git a/sub/sd_lavc.c b/sub/sd_lavc.c
+--- a/sub/sd_lavc.c
++++ b/sub/sd_lavc.c
+@@ -427,8 +427,9 @@ static struct sub *get_current(struct sd_lavc_priv *priv, double pts)
+             ((sub->pts == MP_NOPTS_VALUE || pts + 1e-6 >= sub->pts) &&
+              (sub->endpts == MP_NOPTS_VALUE || pts + 1e-6 < sub->endpts)))
+         {
+-            // Ignore "trailing" subtitles with unknown length after 1 minute.
+-            if (sub->endpts == MP_NOPTS_VALUE && pts >= sub->pts + 60)
++            // Limit the lifetime of a timed subtitle whose end time is unknown.
++            if (sub->pts != MP_NOPTS_VALUE && sub->endpts == MP_NOPTS_VALUE &&
++                pts >= sub->pts + 60)
+                 break;
+             current = sub;
+             break;
+diff --git a/demux/demux_lavf.c b/demux/demux_lavf.c
+--- a/demux/demux_lavf.c
++++ b/demux/demux_lavf.c
+@@ -202,6 +202,7 @@
+     TEXTSUB("subviewer1"), TEXTSUB("vplayer"), TEXTSUB("ass"),
+ 
+     TEXTSUB_UTF8("webvtt"),
++    {"dvbsub", .skipinfo = true, .no_seek = true},
+ 
+     // Useless non-sense, sometimes breaks MLP2 subreader.c fallback
+     BLACKLIST("tty"),

@@ -1,0 +1,442 @@
+Subject: [PATCH] Bound mobile PCM feeding and yield on source starvation
+
+Account for route preroll in the queue budget. Limit both renderer lead and
+wall-clock consumption, suspend empty callbacks, and serialize transport and
+timer teardown. Keep sample timestamps in the synchronizer's clock domain.
+
+--- a/audio/out/ao_avfoundation.m
++++ b/audio/out/ao_avfoundation.m
+@@ -129,16 +129,12 @@
+     // quantum, ~4min measurement dropped from 21/min (Plezy 2.15) or 10.6/min
+     // (2s AO) to zero.
+     double opt_compressed_lead;
+-#if TARGET_OS_OSX
+-    // PCM lookahead bound: macOS only, where slider/keyboard --volume affects
+-    // software gain. iOS/tvOS hardware volume bypasses mpv; deep renderer
+-    // queue supports AirPlay.
+-    //
+-    // Limit PCM enqueue lead. Local AVSampleBufferAudioRenderer backpressure
+-    // measured ~1.7s; software gain is baked into queued samples, delaying
+-    // volume changes until drain. Bound reduces delay; 0 preserves renderer
+-    // depth.
++    // Bound both renderer lead and consumption against monotonic time. A
++    // renderer that stays ready, or advances its clock unexpectedly, must not
++    // drain the demuxer's audio stream faster than playback.
+     int64_t pcm_lookahead_ns;
++    int64_t pcm_credit_ns;
++    int64_t pcm_credit_time_ns;
+     // Owned one-shot timer, idle at DISPATCH_TIME_FOREVER. Unlike
+     // dispatch_after, teardown can cancel before ao_uninit() frees AO
+     // referenced by handler.
+@@ -147,7 +143,6 @@
+     // so stop timer from repeatedly checking exceeded bound.
+     bool feed_enabled;
+     double opt_max_lookahead;
+-#endif
+ };
+ 
+ // Eligibility only: Apple still honors the user's Off/Fixed/Head Tracked choice.
+@@ -168,6 +163,13 @@
+ #define SPDIF_FRAMES_PER_BURST 1536
+ 
+ #define AVP_TICK_NS         MP_TIME_MS_TO_NS(50)
++
++// Mobile routes need preroll beyond their output latency. Keep macOS's
++// explicit opt-in bound and allow zero to select renderer-only backpressure.
++#define PCM_DEFAULT_LOOKAHEAD (TARGET_OS_IPHONE ? 2.0 : 0.0)
++#define PCM_ROUTE_RESERVE_S 2.0
++#define PCM_RETRY_NS MP_TIME_MS_TO_NS(10)
++#define PCM_FULL_RETRY_NS MP_TIME_MS_TO_NS(50)
+ // Startup lead allows seconds of preroll before playhead moves. Steady-state
+ // cap would deadlock against frozen clock.
+ #define AVP_START_LEAD_NS(p) (2 * (p)->avp_lead_ns)
+@@ -782,7 +784,6 @@
+     p->avp_last_progress = mp_time_ns();
+ }
+ 
+-#if TARGET_OS_OSX
+ static void feed(struct ao *ao);
+ 
+ static void pcm_request_media_data(struct ao *ao)
+@@ -806,22 +807,17 @@
+ // Disarm feed until queue falls below bound; retry by timer. Returning empty
+ // while renderer stays ready spins: callback runs until not-ready/no-data,
+ // and rearming needs a new ready edge.
+-static void pcm_pause_feeding(struct ao *ao)
++static void pcm_pause_feeding(struct ao *ao, int64_t delay_ns)
+ {
+     struct priv *p = ao->priv;
+ 
+     [p->renderer stopRequestingMediaData];
+     if (!p->feed_enabled)
+         return;
+-    if (!p->feed_timer) {
+-        // No wake timer: keep feeding to avoid stall.
+-        pcm_request_media_data(ao);
+-        return;
+-    }
+     dispatch_source_set_timer(
+         p->feed_timer,
+-        dispatch_time(DISPATCH_TIME_NOW, p->pcm_lookahead_ns / 2),
+-        DISPATCH_TIME_FOREVER, p->pcm_lookahead_ns / 10);
++        dispatch_time(DISPATCH_TIME_NOW, delay_ns),
++        DISPATCH_TIME_FOREVER, delay_ns / 10);
+ }
+ 
+ // Toggle bounded PCM feed on p->queue. start()/stop() already hold queue;
+@@ -831,6 +827,8 @@
+     struct priv *p = ao->priv;
+ 
+     void (^block)(void) = ^{
++        // Pausing cannot accumulate credit for a burst on resume.
++        p->pcm_credit_time_ns = mp_time_ns();
+         p->feed_enabled = enabled;
+         pcm_cancel_pending_feed(p);
+         if (enabled) {
+@@ -844,7 +842,79 @@
+     else
+         dispatch_sync(p->queue, block);
+ }
+-#endif  // TARGET_OS_OSX
++
++static bool pcm_init_feeding(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++
++    if (p->opt_max_lookahead > 0) {
++        double lookahead = MPMAX(p->opt_max_lookahead, ao->def_buffer);
++#if TARGET_OS_IPHONE
++        // This is a queue capacity, not a timestamp offset. The synchronizer
++        // already owns the device clock and its latency compensation.
++        double latency = AVAudioSession.sharedInstance.outputLatency;
++        if (!isfinite(latency))
++            latency = 0;
++        lookahead = MPMAX(lookahead,
++            MPCLAMP(latency, 0, 10) + PCM_ROUTE_RESERVE_S);
++#endif
++        p->pcm_lookahead_ns = (int64_t)(lookahead * 1e9);
++        MP_VERBOSE(ao, "PCM lookahead bound: %.3f s\n", lookahead);
++    }
++
++    p->feed_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
++                                           p->queue);
++    if (!p->feed_timer) {
++        MP_FATAL(ao, "failed to create PCM feed timer\n");
++        return false;
++    }
++    dispatch_source_set_event_handler(p->feed_timer, ^{
++        pcm_cancel_pending_feed(p);
++        if (p->feed_enabled)
++            pcm_request_media_data(ao);
++    });
++    pcm_cancel_pending_feed(p);
++    // Keep resumed for its lifetime. Releasing a suspended source traps.
++    dispatch_resume(p->feed_timer);
++    return true;
++}
++
++static void pcm_uninit_feeding(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    if (!p->feed_timer)
++        return;
++    dispatch_sync(p->queue, ^{
++        pcm_set_feeding(ao, false);
++        dispatch_source_cancel(p->feed_timer);
++    });
++    dispatch_release(p->feed_timer);
++    p->feed_timer = NULL;
++}
++
++// All pacing state is confined to p->queue. Limit the next read as well as
++// the already queued lead, so even one buffer cannot exceed the bound.
++static int pcm_request_samples(struct ao *ao, int64_t media_time_ns)
++{
++    struct priv *p = ao->priv;
++    int samples = ao->samplerate / 10;
++    if (!p->pcm_lookahead_ns)
++        return samples;
++
++    int64_t now = mp_time_ns();
++    int64_t elapsed = MPCLAMP(now - p->pcm_credit_time_ns, 0,
++                             p->pcm_lookahead_ns);
++    p->pcm_credit_time_ns = now;
++    // Allow 1% device-clock drift. The renderer-lead limit remains exact,
++    // while this independent guard prevents consumption at decode speed.
++    int64_t refill = elapsed + elapsed / 100;
++    p->pcm_credit_ns = MPMIN(p->pcm_lookahead_ns,
++                            p->pcm_credit_ns + refill);
++    int64_t lead = MPMAX(0, p->end_time_av - media_time_ns);
++    int64_t available = MPMIN(p->pcm_credit_ns,
++                              MPMAX(0, p->pcm_lookahead_ns - lead));
++    return MPMIN(samples, available * ao->samplerate / 1000000000);
++}
+ 
+ static void feed(struct ao *ao)
+ {
+@@ -852,33 +922,39 @@
+     int samplerate = ao->samplerate;
+     int sstride = ao->sstride;
+ 
+-#if TARGET_OS_OSX
+-    if (p->pcm_lookahead_ns) {
+-        int64_t now = CMTimeGetNanoseconds([p->synchronizer currentTime]);
+-        if (p->end_time_av - now >= p->pcm_lookahead_ns) {
+-            pcm_pause_feeding(ao);
+-            return;
+-        }
+-    }
+-#endif
++    if (!p->feed_enabled)
++        return;
++    CMTime current = [p->synchronizer currentTime];
++    if (!CMTIME_IS_NUMERIC(current)) {
++        pcm_pause_feeding(ao, PCM_RETRY_NS);
++        return;
++    }
++    int64_t cur_time_av = CMTimeGetNanoseconds(current);
++    int request_sample_count = pcm_request_samples(ao, cur_time_av);
++    if (!request_sample_count) {
++        pcm_pause_feeding(ao, PCM_FULL_RETRY_NS);
++        return;
++    }
+ 
+     CMBlockBufferRef block_buffer = NULL;
+     CMSampleBufferRef sample_buffer = NULL;
+     OSStatus err;
+ 
+-    int request_sample_count = samplerate / 10;
+     int buffer_size = request_sample_count * sstride;
+     void *data[] = {CFAllocatorAllocate(NULL, buffer_size, 0)};
+ 
+-    int64_t cur_time_av = CMTimeGetNanoseconds([p->synchronizer currentTime]);
+     int64_t cur_time_mp = mp_time_ns();
+     int64_t end_time_av = MPMAX(p->end_time_av, cur_time_av);
+     int64_t time_delta = CMTimeGetNanoseconds(CMTimeMake(request_sample_count, samplerate));
+     bool eof;
+     int real_sample_count = ao_read_data(ao, data, request_sample_count, end_time_av - cur_time_av + cur_time_mp + time_delta, &eof, false, true);
+     if (eof) {
+-        [p->renderer stopRequestingMediaData];
++        pcm_set_feeding(ao, false);
+         ao_stop_streaming(ao);
++    } else if (real_sample_count < request_sample_count) {
++        // A short read puts mpv into underrun recovery. Yield the callback
++        // until it can refill, including when the renderer remains ready.
++        pcm_pause_feeding(ao, PCM_RETRY_NS);
+     }
+     if (real_sample_count == 0) {
+         goto finish;
+@@ -927,15 +1003,54 @@
+ 
+     time_delta = CMTimeGetNanoseconds(CMTimeMake(real_sample_count, samplerate));
+     p->end_time_av = end_time_av + time_delta;
++    if (p->pcm_lookahead_ns)
++        p->pcm_credit_ns = MPMAX(0, p->pcm_credit_ns - time_delta);
+ 
+     goto finish;
+ 
+ error:
++    pcm_set_feeding(ao, false);
+     ao_request_reload(ao);
+ finish:
+     if (data[0]) CFAllocatorDeallocate(NULL, data[0]);
+     if (block_buffer) CFRelease(block_buffer);
+     if (sample_buffer) CFRelease(sample_buffer);
++}
++
++static void pcm_start(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    void (^block)(void) = ^{
++        p->end_time_av = -1;
++        p->pcm_credit_ns = p->pcm_lookahead_ns;
++        [p->synchronizer setRate:1];
++        pcm_set_feeding(ao, true);
++    };
++    if (dispatch_get_specific(&avfoundation_queue_key) == p)
++        block();
++    else
++        dispatch_sync(p->queue, block);
++}
++
++static void pcm_stop(struct ao *ao)
++{
++    struct priv *p = ao->priv;
++    pcm_set_feeding(ao, false);
++    [p->renderer flush];
++    [p->synchronizer setRate:0];
++}
++
++static void pcm_set_pause(struct ao *ao, bool paused)
++{
++    struct priv *p = ao->priv;
++    void (^block)(void) = ^{
++        pcm_set_feeding(ao, !paused);
++        [p->synchronizer setRate:paused ? 0 : 1];
++    };
++    if (dispatch_get_specific(&avfoundation_queue_key) == p)
++        block();
++    else
++        dispatch_sync(p->queue, block);
+ }
+ 
+ static void start(struct ao *ao)
+@@ -967,18 +1082,7 @@
+         return;
+     }
+ 
+-    p->end_time_av = -1;
+-    [p->synchronizer setRate:1];
+-#if TARGET_OS_OSX
+-    // Unbounded path needs no gate; retain direct initial arm.
+-    if (p->pcm_lookahead_ns) {
+-        pcm_set_feeding(ao, true);
+-        return;
+-    }
+-#endif
+-    [p->renderer requestMediaDataWhenReadyOnQueue:p->queue usingBlock:^{
+-        feed(ao);
+-    }];
++    pcm_start(ao);
+ }
+ 
+ static void stop(struct ao *ao)
+@@ -993,14 +1097,7 @@
+             ao_update_streaming_clock(ao, 0, 0, false);
+             return;
+         }
+-        [p->renderer stopRequestingMediaData];
+-        [p->renderer flush];
+-        [p->synchronizer setRate:0];
+-#if TARGET_OS_OSX
+-        // Frozen clock cannot drain; unschedule feed until start().
+-        p->feed_enabled = false;
+-        pcm_cancel_pending_feed(p);
+-#endif
++        pcm_stop(ao);
+     };
+     if (dispatch_get_specific(&avfoundation_queue_key) == p)
+         stop_block();
+@@ -1043,21 +1140,7 @@
+         return true;
+     }
+ 
+-    if (paused) {
+-        [p->synchronizer setRate:0];
+-#if TARGET_OS_OSX
+-        // Stopped clock cannot lower queue depth; stop requests instead of
+-        // polling every half-bound.
+-        if (p->pcm_lookahead_ns)
+-            pcm_set_feeding(ao, false);
+-#endif
+-    } else {
+-#if TARGET_OS_OSX
+-        if (p->pcm_lookahead_ns)
+-            pcm_set_feeding(ao, true);
+-#endif
+-        [p->synchronizer setRate:1];
+-    }
++    pcm_set_pause(ao, paused);
+ 
+     return true;
+ }
+@@ -1374,33 +1457,8 @@
+         goto error;
+     }
+ 
+-#if TARGET_OS_OSX
+-    // --audio-buffer is minimum, not maximum. Use only to keep bound above
+-    // core's promised buffering.
+-    if (p->opt_max_lookahead > 0) {
+-        p->pcm_lookahead_ns =
+-            (int64_t)(MPMAX(p->opt_max_lookahead, ao->def_buffer) * 1e9);
+-        p->feed_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+-                                               p->queue);
+-        if (p->feed_timer) {
+-            dispatch_source_set_event_handler(p->feed_timer, ^{
+-                pcm_cancel_pending_feed(p);  // one-shot: idle before refeeding
+-                // Stop/pause may have arrived since timer fired.
+-                if (p->feed_enabled)
+-                    pcm_request_media_data(ao);
+-            });
+-            dispatch_source_set_timer(p->feed_timer, DISPATCH_TIME_FOREVER,
+-                                      DISPATCH_TIME_FOREVER, 0);
+-            // Keep resumed for lifetime; releasing suspended source traps.
+-            // Idle timer costs nothing.
+-            dispatch_resume(p->feed_timer);
+-        } else {
+-            MP_WARN(ao, "no timer available; leaving the renderer's own "
+-                        "buffer depth alone\n");
+-            p->pcm_lookahead_ns = 0;
+-        }
+-    }
+-#endif
++    if (!pcm_init_feeding(ao))
++        goto error;
+ 
+     if (ao->device && ao->device[0]) {
+ #if TARGET_OS_OSX
+@@ -1450,11 +1508,10 @@
+ 
+     p->observer = [[AVObserver alloc] initWithAO:ao];
+     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+-#if HAVE_MACOS_12_FEATURES
++    // Rebuild the route's PCM budget as well as its format after a change.
+     if (@available(tvOS 15.0, iOS 15.0, macOS 12.0, *)) {
+         [center addObserver:p->observer selector:@selector(handleRestartNotification:) name:AVSampleBufferAudioRendererOutputConfigurationDidChangeNotification object:p->renderer];
+     }
+-#endif
+     [center addObserver:p->observer selector:@selector(handleRestartNotification:) name:AVSampleBufferAudioRendererWasFlushedAutomaticallyNotification object:p->renderer];
+ 
+     return CONTROL_OK;
+@@ -1467,13 +1524,7 @@
+         dispatch_release(p->avp_timer);
+         p->avp_timer = NULL;
+     }
+-#if TARGET_OS_OSX
+-    if (p->feed_timer) {
+-        dispatch_source_cancel(p->feed_timer);
+-        dispatch_release(p->feed_timer);
+-        p->feed_timer = NULL;
+-    }
+-#endif
++    pcm_uninit_feeding(ao);
+     if (p->loader) {
+         [p->loader invalidate];
+         [p->loader release];
+@@ -1510,17 +1561,7 @@
+         [p->player release];
+         dispatch_release(p->queue);
+     } else {
+-        // stop() idled timer. Cancel on p->queue before ao_uninit() frees
+-        // handler's AO; no active or future handler remains.
+-#if TARGET_OS_OSX
+-        if (p->feed_timer) {
+-            dispatch_sync(p->queue, ^{
+-                dispatch_source_cancel(p->feed_timer);
+-            });
+-            dispatch_release(p->feed_timer);
+-            p->feed_timer = NULL;
+-        }
+-#endif
++        pcm_uninit_feeding(ao);
+         [p->renderer release];
+         [p->synchronizer release];
+         dispatch_release(p->queue);
+@@ -1549,15 +1590,10 @@
+         .opt_spatial_audio = 2,
+         .opt_manage_session = true,
+         .opt_compressed_lead = 8,
+-        // Preserve PCM latency unless bound enabled.
+-#if TARGET_OS_OSX
+-        .opt_max_lookahead = 0,
+-#endif
++        .opt_max_lookahead = PCM_DEFAULT_LOOKAHEAD,
+     },
+     .options = (const struct m_option[]) {
+-#if TARGET_OS_OSX
+         {"max-lookahead", OPT_DOUBLE(opt_max_lookahead), M_RANGE(0, 10)},
+-#endif
+         {"spatial-audio", OPT_CHOICE(opt_spatial_audio,
+             {"no", 0}, {"multichannel", 1}, {"all", 2})},
+         {"manage-audio-session", OPT_BOOL(opt_manage_session)},

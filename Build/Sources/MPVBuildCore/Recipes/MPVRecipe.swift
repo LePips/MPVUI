@@ -12,6 +12,7 @@ enum MPVRecipe {
             "-Dgpl=true",
             "-Dbuild-date=false",
             "-Dauto_features=disabled",
+            "-Dzlib=enabled",
             "-Diconv=enabled",
             "-Duchardet=enabled",
             "-Dvulkan=enabled",
@@ -186,7 +187,7 @@ enum MPVRecipe {
 
         let config = try String(contentsOf: build.appendingPathComponent("config.h"), encoding: .utf8)
 
-        for feature in ["HAVE_VO_AVFOUNDATION", "HAVE_AVFOUNDATION", "HAVE_VULKAN", "HAVE_MOLTENVK", "HAVE_VIDEOTOOLBOX_PL"] {
+        for feature in ["HAVE_ZLIB", "HAVE_VO_AVFOUNDATION", "HAVE_AVFOUNDATION", "HAVE_VULKAN", "HAVE_MOLTENVK", "HAVE_VIDEOTOOLBOX_PL"] {
             try require(config.contains("#define \(feature) 1"), "mpv configuration lost required \(feature)")
         }
 

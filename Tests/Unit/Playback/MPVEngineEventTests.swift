@@ -380,6 +380,8 @@ struct MPVEngineEventTests {
 
                 #expect(engine.playbackRequestIsActive && engine.isFileLoaded)
                 pointer.pointee.reason = MPV_END_FILE_REASON_REDIRECT
+                pointer.pointee.playlist_insert_id = 13
+                pointer.pointee.playlist_insert_num_entries = 1
                 engine.handleEvent(event)
 
                 #expect(engine.playbackRequestIsActive)

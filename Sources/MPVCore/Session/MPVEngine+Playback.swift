@@ -44,6 +44,7 @@ package extension MPVSession {
         playAutomatically: Bool?,
         startTime: Duration?,
         generation: UInt64,
+        sourceArgument: String? = nil,
         waitForDisplayMatching: Bool = false
     ) {
         queue.async { [weak self] in
@@ -53,6 +54,7 @@ package extension MPVSession {
 
             self.cancelSubtitleQueries()
             self.cancelExternalTrackRequests()
+            self.resetPlaylistExpansion()
 
             if self.usesAndroidOutput {
                 self.didFallbackFromAndroidNative = false
@@ -98,6 +100,7 @@ package extension MPVSession {
             self.externalTracks.removeAll()
             self.pendingExternalTracks.removeAll()
             self.sourceURL = url
+            self.sourceArgument = sourceArgument
 
             self.pendingStartTime =
                 startTime?.clampPositiveOrZero
@@ -391,7 +394,7 @@ package extension MPVSession {
         guard needsSourceLoad, handle != nil, let sourceURL else { return }
 
         resetFileLocalPlaybackPolicyOverrides()
-        var arguments = ["loadfile", platform.mediaPath(sourceURL), "replace"]
+        var arguments = ["loadfile", sourceArgument ?? platform.mediaPath(sourceURL), "replace"]
 
         if let start = pendingStartTime, start > .zero {
             // mpv expects the playlist index before per-file options.
@@ -417,6 +420,7 @@ package extension MPVSession {
         }
 
         requestedPlaylistEntryID = nil
+        resetPlaylistExpansion()
 
         let (status, result) = runCommandReturningValue(arguments)
 

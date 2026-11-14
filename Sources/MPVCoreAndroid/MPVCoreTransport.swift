@@ -21,6 +21,23 @@ func copiedRecord(_ value: MPVCoreString) -> CoreValue? {
     return try? CoreValue.decode(UnsafeBufferPointer(start: value.data, count: value.length))
 }
 
+private func mpvSourceReference(_ argument: String) -> URL? {
+    guard let separator = argument.range(of: "://") else { return nil }
+
+    let scheme = String(argument[..<separator.lowerBound])
+    guard ["edl", "ffmpeg", "lavf", "mf", "slice"].contains(scheme) else { return nil }
+
+    if let reference = URL(string: argument) {
+        return reference
+    }
+
+    // mpv uses a protocol-specific payload where Foundation expects a URL authority.
+    var reference = URLComponents()
+    reference.scheme = scheme
+    reference.path = String(argument[separator.upperBound...])
+    return reference.url
+}
+
 /// Submits a versioned command to the sole native session owner.
 @_cdecl("mpvcore_session_send")
 public func coreSessionSend(
@@ -70,16 +87,24 @@ public func coreSessionSend(
     }
 
     let request: MPVSessionCommand
+    var sourceArgument: String?
 
     switch value.kind {
     case 1:
-        guard let url = source(),
+        guard let argument = strings.first, !argument.isEmpty,
               (-1 ... 1).contains(value.flags),
               value.has_value == 0 || Duration(mpvSeconds: value.value) != nil
         else {
             return MPV_ERROR_INVALID_PARAMETER.rawValue
         }
 
+        let reference = mpvSourceReference(argument)
+
+        guard let url = reference ?? source() else {
+            return MPV_ERROR_INVALID_PARAMETER.rawValue
+        }
+
+        sourceArgument = reference != nil ? argument : nil
         request = .load(
             url,
             playAutomatically: value.flags == -1 ? nil : value.flags != 0,
@@ -164,7 +189,7 @@ public func coreSessionSend(
     }
 
     do {
-        let result = try session.send(request)
+        let result = try session.send(request, sourceArgument: sourceArgument)
         operation?.pointee = .init(id: result.id, generation: result.generation)
         return 0
     } catch {

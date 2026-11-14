@@ -1,4 +1,5 @@
-#if os(macOS)
+#if os(macOS) || os(iOS) || os(tvOS)
+import Darwin
 import Foundation
 import Libmpv
 @testable import MPVCore
@@ -72,7 +73,7 @@ final class NativeAudioSession {
 
     func load(_ url: URL, resume: Bool = true) async throws {
         eof = false
-        try command(["loadfile", url.path])
+        try command(["loadfile", url.isFileURL ? url.path : url.absoluteString])
 
         try await wait("paused audio output initialization") {
             !self.string("current-ao").isEmpty

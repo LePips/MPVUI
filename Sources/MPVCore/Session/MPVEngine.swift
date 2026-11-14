@@ -48,6 +48,7 @@ public final class MPVSession: @unchecked Sendable {
     // MARK: - Source and playback state
 
     package var sourceURL: URL?
+    package var sourceArgument: String?
     package var pendingStartTime: Duration?
     package var pendingSeekAfterLoad: Duration?
     package var needsSourceLoad = false
@@ -84,6 +85,8 @@ public final class MPVSession: @unchecked Sendable {
     package var playbackRequestIsActive = false
     package var requestedPlaylistEntryID: Int64?
     package var activePlaylistEntryID: Int64?
+    package var expandedPlaylistEntries: [ClosedRange<Int64>] = []
+    package var deferredPlaylistEndStatus: Int32?
     package var fatalPlaybackError: MPVPlayerError?
 
     // MARK: - Published state

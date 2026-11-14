@@ -1,0 +1,14 @@
+diff --git a/libavformat/aiffdec.c b/libavformat/aiffdec.c
+--- a/libavformat/aiffdec.c
++++ b/libavformat/aiffdec.c
+@@ -166,7 +166,9 @@ static unsigned int get_aiff_header(AVFormatContext *s, int64_t size,
+             break;
+         case AV_CODEC_ID_ADPCM_G726LE:
+             par->bits_per_coded_sample = 5;
+-            av_fallthrough;
++            /* Each five-byte group holds eight complete G.726 codewords. */
++            par->block_align = 5 * channels;
++            break;
+         case AV_CODEC_ID_ADPCM_IMA_WS:
+         case AV_CODEC_ID_ADPCM_G722:
+         case AV_CODEC_ID_MACE6:

@@ -102,10 +102,9 @@ def main():
 
     with tarfile.open(destination / f"mpvui-android-{args.version}-sources.tar.gz", "w:gz") as archive:
         for relative in (
-            "Makefile",
+            "justfile",
             "Brewfile",
             "Android",
-            "Build/Makefile",
             "Build/commands.py",
             "Build/Android",
             "Build/native_inputs.py",

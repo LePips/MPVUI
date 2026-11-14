@@ -17,6 +17,12 @@ import subprocess
 import sys
 import tempfile
 
+from generate_bluray import output_names as bluray_outputs
+from generate_codecs import output_names as codec_outputs
+from generate_imf import output_names as imf_outputs
+from generate_matroska import output_names as matroska_outputs
+from generate_text_subtitles import output_names as text_subtitle_outputs
+
 SCRIPTS = Path(__file__).resolve().parent
 DOLBY_VISION_CHART = SCRIPTS.parents[1] / "Example/Sources/MPVUIExample/Resources/Media/dolby-vision-p5-chart.mp4"
 INBAND_DOLBY_VISION = "dolby-vision-inband.hevc"
@@ -26,6 +32,7 @@ GROUPS = {
     "video": (
         ("ffmpeg",),
         (
+            "video-mp42.asf",
             "video-hevc-8bit.mkv",
             "video-vp9.mkv",
             "video-vp9-ac3.mkv",
@@ -37,7 +44,10 @@ GROUPS = {
             "video-h264-long-gop.ts",
         ),
     ),
-    "color": (("ffmpeg",), ("color-hdr10.mkv", "color-hlg.mkv")),
+    "color": (
+        ("ffmpeg",),
+        ("color-hdr10.mkv", "color-hlg.mkv", "color-hdr10-luma.mkv", "color-hlg-luma.mkv", "color-hdr10plus-scenes.mkv"),
+    ),
     "dolby-vision": (
         ("ffmpeg", "ffprobe", "dovi_tool"),
         (
@@ -57,6 +67,11 @@ GROUPS = {
             "dolby-vision-p5.rpu",
             "dolby-vision-p7.rpu",
             "dolby-vision-p81.rpu",
+        )
+        + tuple(
+            f"dolby-vision-{profile}-hls{suffix}"
+            for profile in ("p5", "p81")
+            for suffix in (".m3u8", "-init.mp4", *(f"-{index:02d}.m4s" for index in range(4)))
         ),
     ),
     "interlaced": (("ffmpeg",), ("interlaced-480i-bottom.mkv", "interlaced-576i-top.mkv", "interlaced-1080i-top.mkv")),
@@ -65,16 +80,58 @@ GROUPS = {
         (
             "audio-ac3-stereo.mka",
             "audio-ac3-5.1.mka",
+            "audio-dts-multitrack.mkv",
             "audio-eac3-stereo.mka",
             "audio-eac3-5.1.mka",
+            "audio-eac3-256k-5.1.mka",
+            "audio-eac3-768k-5.1.mka",
             "audio-pcm-mono.mka",
             "audio-pcm-stereo.mka",
             "audio-pcm-5.1.mka",
             "audio-pcm-7.1.mka",
+            "audio-flac.flac",
+            "audio-flac-gapless-01.flac",
+            "audio-flac-gapless-02.flac",
+            "audio-flac-gapless.m3u",
+            "audio-alac.m4a",
+            "audio-mp3.mp3",
+            "audio-vorbis.ogg",
+            "audio-opus.ogg",
+            "audio-pcm.wav",
+            "audio-adts.aac",
         ),
     ),
-    "subtitles": (("ffmpeg",), ("subtitles.mkv",)),
+    "subtitles": (
+        ("ffmpeg", "ffprobe", "mkvmerge", "mkvpropedit"),
+        (
+            "subtitles.mkv",
+            "subtitles-positioned.mkv",
+            "subtitles-none.mkv",
+            "subtitles-zlib.mkv",
+            "subtitles-xsub.avi",
+            "subtitles-dvd.mp4",
+            "subtitles-ascii.mkv",
+            "subtitles-text.nut",
+            "subtitles-ass.nut",
+            "subtitles-dvd.nut",
+            "subtitles-dvb.nut",
+            "subtitles-dvb.wtv",
+            "subtitles-cues.mpl2",
+            "subtitles-external.sup",
+            "subtitles-external.dvb",
+            "subtitles-dvb.ts",
+            "subtitles-pgs.m2ts",
+            "subtitles-vobsub.idx",
+            "subtitles-vobsub.sub",
+        ),
+    ),
     "image": (("cwebp", "img2webp"), ("image-webp-still.webp", "image-webp-animated.webp")),
+    "matroska": (("ffmpeg", "ffprobe"), matroska_outputs()),
+    "text-subtitles": ((), text_subtitle_outputs()),
+    "tls": (("ffmpeg", "openssl"), ("tls-loopback.pem", "tls-loopback.p12", "tls-ranges.mp4", "tls-ranges.mp4.enc")),
+    "bluray": (("ffmpeg", "ffprobe"), bluray_outputs()),
+    "imf": (("ffmpeg",), imf_outputs()),
+    "codecs": (("ffmpeg", "ffprobe", "mac", "pkg-config", "cwebp"), codec_outputs()),
 }
 
 
@@ -157,7 +214,34 @@ def prepare(output, groups=tuple(GROUPS)):
         for group in groups:
             tools, names = GROUPS[group]
             generator = script(group)
-            recipe = hashlib.sha256(generator.read_bytes() + Path(__file__).read_bytes()).hexdigest()
+            recipe_inputs = (generator, Path(__file__))
+            if group == "subtitles":
+                recipe_inputs += (SCRIPTS / "generate_broadcast_formats.py",)
+            if group == "codecs":
+                recipe_inputs += tuple(
+                    SCRIPTS / name
+                    for name in (
+                        "remux_mappings.py",
+                        "derive_reference_media.py",
+                        "generate_authored_formats.py",
+                        "generate_broadcast_formats.py",
+                        "generate_dolby_vision.py",
+                        "generate_legacy_audio.py",
+                        "generate_wave_adpcm.py",
+                        "generate_console_audio.py",
+                        "generate_apv.py",
+                        "generate_avs3.py",
+                        "generate_prores_raw.py",
+                        "generate_segmented_mappings.py",
+                        "generate_speex.py",
+                        "generate_legacy_video.py",
+                        "generate_legacy_wrappers.py",
+                        "generate_matroska.py",
+                        "generate_packetized_rtp.py",
+                        "generate_rtmp.py",
+                    )
+                )
+            recipe = hashlib.sha256(b"".join(path.read_bytes() for path in recipe_inputs)).hexdigest()
             cached = state.get(group, {})
             if not isinstance(cached, dict) or not isinstance(cached.get("files", {}), dict):
                 cached = {}
@@ -188,7 +272,9 @@ def prepare(output, groups=tuple(GROUPS)):
                             raise RuntimeError(f"Generator did not produce {name}")
                     checksums = {name: digest(generated / name) for name in names}
                     for name in names:
-                        (generated / name).replace(output / name)
+                        target = output / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        (generated / name).replace(target)
                 cached = {"recipe": recipe, "files": checksums}
                 state[group] = cached
                 write_json(state_path, state)

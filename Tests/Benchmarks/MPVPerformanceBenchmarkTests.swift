@@ -12,7 +12,7 @@ import Libmpv
 import QuartzCore
 import Testing
 
-/// Run through `make benchmark`. Excluded from ordinary tests.
+/// Run through `just benchmark`. Excluded from ordinary tests.
 /// Measurements describe this process, fixture, and display, not energy use.
 @Suite(.tags(.benchmark), .serialized)
 @MainActor

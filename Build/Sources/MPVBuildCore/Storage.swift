@@ -353,7 +353,7 @@ struct ManagedStore {
         let link = try path("candidates/latest")
 
         guard (try? fm.destinationOfSymbolicLink(atPath: link.path)) != nil, exists(link) else {
-            throw BuildError("No candidate has been built. Run make build, or pass the candidate path.")
+            throw BuildError("No candidate has been built. Run just build, or pass the candidate path.")
         }
 
         return link.resolvingSymlinksInPath()

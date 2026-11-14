@@ -1,10 +1,15 @@
 """Keep source selection, patch isolation and native update provenance consistent."""
 
 import copy
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from native_inputs import LOCK_PATH, fingerprint, inputs_for, load, sources_for
 import update_dependencies
+from Android import release
 from Android.release import configured_version, verify_native
 from Android.swift_core import source_fingerprint
 from Android.build import native_fingerprint, require_native_inputs
@@ -65,12 +71,34 @@ class NativeInputTests(unittest.TestCase):
                 "0006-mpv-dovi-yuv.patch",
                 "0008-mpv-gles-bitmap-subtitles.patch",
                 "0020-unavailable-pixel-aspect-ratio.patch",
+                "0026-initial-demux-track-selection.patch",
+                "0027-select-rtp-demuxer-for-rtp-urls.patch",
+                "0028-deduplicate-synthetic-caption-replay.patch",
+                "0029-bound-offset-slice-reads.patch",
+                "0030-restore-dash-stream-selection-on-seek.patch",
+                "0031-consume-audio-priming-on-discarded-frames.patch",
+                "0012-display-untimed-bitmap-subtitles.patch",
+                "0013-open-sap-announcements.patch",
             ],
         )
-        self.assertTrue(all(p["path"].startswith("Build/Android/Patches/") for p in android[1]["patches"]))
-        self.assertTrue(
-            all(not p["path"].startswith("Build/Android/") for source in sources_for(self.lock, "apple") for p in source["patches"])
+        apple = sources_for(self.lock, "apple")
+        apple_ffmpeg = {p["path"] for p in apple[1]["patches"]}
+        android_ffmpeg = {p["path"] for p in android[1]["patches"]}
+        self.assertEqual(
+            apple_ffmpeg & android_ffmpeg,
+            {
+                "Build/Patches/ffmpeg/0008-dash-live-seekability.patch",
+                "Build/Patches/ffmpeg/0010-aiff-g726-codeword-alignment.patch",
+                "Build/Patches/ffmpeg/0011-match-legacy-flv-video-tags.patch",
+                "Build/Patches/ffmpeg/0012-stream-tls-options-and-seekability.patch",
+                "Build/Patches/ffmpeg/0013-handle-mmst-end-of-stream.patch",
+                "Build/Patches/ffmpeg/0014-preserve-rtmpts-transport.patch",
+                "Build/Patches/ffmpeg/0015-preserve-dash-segment-list-sequence.patch",
+                "Build/Patches/ffmpeg/0016-pad-rtmpe-shared-secret.patch",
+            },
         )
+        self.assertTrue(all(path.startswith("Build/Android/Patches/") for path in android_ffmpeg - apple_ffmpeg))
+        self.assertTrue(all(not p["path"].startswith("Build/Android/") for source in apple for p in source["patches"]))
 
     def test_invalid_shared_overrides_and_patch_scopes_are_rejected(self):
         mutations = [
@@ -231,6 +259,65 @@ class NativeInputTests(unittest.TestCase):
             properties.write_text("# mpvuiVersion=old\n")
             with self.assertRaisesRegex(ValueError, "Set mpvuiVersion"):
                 configured_version(root)
+
+    def test_android_source_bundle_runs_just_from_an_extracted_subdirectory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "source checkout"
+            for directory in (
+                "Android/mpvui/build/outputs/aar",
+                "Build/Android",
+                "Build/Patches",
+                "Sources/CMPV",
+                "Sources/MPVCore",
+                "Sources/MPVCoreAndroid",
+                "Tests/Core",
+                ".build/android/native/assets/mpvui",
+                ".build/android/upstream/buildscripts/deps/ffmpeg",
+                ".build/android/upstream/buildscripts/include",
+                ".build/android/upstream/buildscripts/scripts",
+                ".build/android/rust-vendor",
+            ):
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            for relative in (
+                "justfile",
+                "Brewfile",
+                "Build/commands.py",
+                "Build/validation.py",
+                "Build/native_inputs.py",
+                LOCK_PATH,
+                "Package.swift",
+                "LICENSE",
+            ):
+                shutil.copyfile(ROOT / relative, root / relative)
+            for relative in (
+                "Android/mpvui/build/outputs/aar/mpvui-release.aar",
+                ".build/android/upstream/buildscripts/buildall.sh",
+                ".build/android/upstream/LICENSE",
+            ):
+                (root / relative).write_text("fixture")
+            with (
+                patch.object(release, "ROOT", root),
+                patch.object(release, "configured_version", return_value="1.2.3"),
+                patch.object(release, "verify_native"),
+                patch.object(release.subprocess, "run"),
+                patch.object(release, "publish_evidence"),
+                patch.object(sys, "argv", ["release.py"]),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                release.main()
+            extracted = Path(temporary) / "extracted's checkout"
+            with tarfile.open(root / ".build/android/releases/1.2.3/mpvui-android-1.2.3-sources.tar.gz") as archive:
+                self.assertIn("justfile", archive.getnames())
+                archive.extractall(extracted, filter="data")
+            result = subprocess.run(
+                ["just", "--set", "python", sys.executable, "help"],
+                cwd=extracted / "Build",
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Usage: just COMMAND", result.stdout)
+            self.assertIn("--platform android", result.stdout)
 
     def test_package_only_rejects_stale_native_dependencies(self):
         lock = inputs_for(self.lock, "android")

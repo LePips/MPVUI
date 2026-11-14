@@ -51,7 +51,9 @@ package extension MPVSession {
     ]
 
     var isRequestedPlaylistEntryActive: Bool {
-        guard playbackRequestIsActive else { return false }
+        guard playbackRequestIsActive,
+              expandedPlaylistEntries.isEmpty || activePlaylistEntryID != nil
+        else { return false }
 
         return Self.nativeDiagnosticMatchesCurrentEntry(requested: requestedPlaylistEntryID, active: activePlaylistEntryID)
     }
@@ -67,7 +69,7 @@ package extension MPVSession {
             let format: mpv_format = switch property {
             case "hwdec-current":
                 MPV_FORMAT_STRING
-            case "paused-for-cache":
+            case "idle-active", "paused-for-cache":
                 MPV_FORMAT_FLAG
             case "cache-buffering-state", "chapter":
                 MPV_FORMAT_INT64
@@ -209,8 +211,16 @@ package extension MPVSession {
             let startEvent = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee
             let entryID = startEvent.playlist_entry_id
 
-            if let requestedPlaylistEntryID, entryID != requestedPlaylistEntryID {
-                return
+            if let requestedPlaylistEntryID {
+                guard entryID == requestedPlaylistEntryID else { return }
+            } else if !expandedPlaylistEntries.isEmpty {
+                guard expandedPlaylistEntries.contains(where: { $0.contains(entryID) }) else { return }
+            }
+
+            if deferredPlaylistEndStatus != nil {
+                deferredPlaylistEndStatus = nil
+                failPendingSeek(MPVPlayerError.seekUnavailable)
+                cancelExternalTrackRequests()
             }
 
             cancelSubtitleQueries()
@@ -288,7 +298,9 @@ package extension MPVSession {
                 return
             }
 
-            publish(.videoFrame(getInt64("current-tracks/video/id") != nil))
+            // A restart at EOF can have a selected track and a retained VO.
+            let hasFrame = getInt64("video-dec-params/w") != nil && getInt64("video-out-params/w") != nil
+            publish(.videoFrame(hasFrame))
 
             if isDiagnosticsEnabled {
                 refreshPlaybackDiagnostics()
@@ -336,7 +348,7 @@ package extension MPVSession {
             }
 
         case MPV_EVENT_PROPERTY_CHANGE:
-            guard isRequestedPlaylistEntryActive, let data = event.data else {
+            guard let data = event.data else {
                 return
             }
 
@@ -352,6 +364,16 @@ package extension MPVSession {
             } else {
                 return
             }
+
+            if propertyName == "idle-active", let status = deferredPlaylistEndStatus {
+                if MPVNodeValue(copying: property)?.boolValue == true {
+                    finishPlayback(reason: status < 0 ? MPV_END_FILE_REASON_ERROR : MPV_END_FILE_REASON_EOF, error: status)
+                }
+
+                return
+            }
+
+            guard isRequestedPlaylistEntryActive else { return }
 
             lifecycleDiagnostics.engineActivity.propertyChangeEvents[propertyName, default: 0] &+= 1
 
@@ -403,6 +425,11 @@ package extension MPVSession {
         renderingOptionsDirty = true
         publish(.chapter(nil))
         publish(.videoFrame(false))
+    }
+
+    func resetPlaylistExpansion() {
+        expandedPlaylistEntries.removeAll()
+        deferredPlaylistEndStatus = nil
     }
 
     private func refreshPropertySnapshot(_ snapshot: PropertySnapshot) {
@@ -569,11 +596,22 @@ package extension MPVSession {
             return
         }
 
+        if !expandedPlaylistEntries.isEmpty, activePlaylistEntryID != entryID {
+            return
+        }
+
         if endEvent.reason == MPV_END_FILE_REASON_REDIRECT {
             cancelPendingSeek()
 
-            // A playlist-like source replaces itself with new entries. The
-            // next START_FILE identifies the actual selected item.
+            let firstID = endEvent.playlist_insert_id
+            let count = Int64(endEvent.playlist_insert_num_entries)
+
+            guard firstID > 0, count > 0 else {
+                handlePlaylistEntryEnd(status: MPV_ERROR_NOTHING_TO_PLAY.rawValue)
+                return
+            }
+
+            expandedPlaylistEntries.append(firstID ... firstID + count - 1)
             clearTextSubtitleSnapshot()
             requestedPlaylistEntryID = nil
             activePlaylistEntryID = nil
@@ -594,6 +632,13 @@ package extension MPVSession {
             return
         }
 
+        if !expandedPlaylistEntries.isEmpty,
+           endEvent.reason == MPV_END_FILE_REASON_EOF || endEvent.reason == MPV_END_FILE_REASON_ERROR
+        {
+            handlePlaylistEntryEnd(status: endEvent.error)
+            return
+        }
+
         if endEvent.reason == MPV_END_FILE_REASON_ERROR, videoOutput == .nativeSurface {
             if fallbackFromAndroidNative(reason: "Native surface playback failed; reloaded through GPU output", decoderFailed: true) {
                 return
@@ -608,6 +653,19 @@ package extension MPVSession {
         finishPlayback(reason: endEvent.reason, error: endEvent.error)
     }
 
+    private func handlePlaylistEntryEnd(status: Int32) {
+        guard !expandedPlaylistEntries.isEmpty else {
+            finishPlayback(reason: MPV_END_FILE_REASON_ERROR, error: status)
+            return
+        }
+
+        // mpv advances past both EOF and unreadable children. The ordered
+        // start events and idle observation decide whether playback is done.
+        requestedPlaylistEntryID = nil
+        activePlaylistEntryID = nil
+        deferredPlaylistEndStatus = status
+    }
+
     private func finishPlayback(reason: mpv_end_file_reason, error: Int32 = 0) {
         let failedDuringLoad = !isFileLoaded
         cancelExternalTrackRequests()
@@ -616,6 +674,7 @@ package extension MPVSession {
         clearTextSubtitleSnapshot()
         requestedPlaylistEntryID = nil
         activePlaylistEntryID = nil
+        resetPlaylistExpansion()
         isLoading = false
         isFileLoaded = false
         isSeeking = false

@@ -24,6 +24,24 @@ struct MPVNativeSubtitleLayerTests {
         case unavailable
     }
 
+    @Test(
+        .disabled(if: subtitleLayerReadbackUnavailable, "Displayed subtitle pixels require macOS or a physical Apple device."),
+        arguments: ["mkv", "lavf"],
+        ["subtitles-none.mkv", "subtitles-zlib.mkv"]
+    )
+    func `Matroska PGS compression preserves visible pixels and cue clearing`(demuxer: String, file: String) async throws {
+        try await expectNativeBitmapCue(file, demuxer: demuxer, id: "2", codec: "hdmv_pgs_subtitle")
+    }
+
+    @Test(
+        .disabled(if: subtitleLayerReadbackUnavailable, "Displayed subtitle pixels require macOS or a physical Apple device."),
+        arguments: ["mkv", "lavf"],
+        [("3", "dvd_subtitle"), ("4", "dvb_subtitle")]
+    )
+    func `DVD and DVB cues clear on the native presenter`(demuxer: String, track: (id: String, codec: String)) async throws {
+        try await expectNativeBitmapCue("subtitles.mkv", demuxer: demuxer, id: track.id, codec: track.codec)
+    }
+
     @Test(.disabled(if: subtitleLayerReadbackUnavailable, "Displayed subtitle pixels require macOS or a physical Apple device."))
     func `inline subtitles preserve video pixels and switch to composited PiP frames`() async throws {
         let fixture = PlaybackFixture(configuration: .init(
@@ -172,6 +190,30 @@ struct MPVNativeSubtitleLayerTests {
         #expect(try dolbyVisionPixels(video) == original)
         #expect(player.isPaused)
         #expect(player.lastError == nil)
+    }
+
+    private func expectNativeBitmapCue(_ file: String, demuxer: String, id: String, codec: String) async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null", "demuxer": demuxer, "sid": id, "osd-level": "0"],
+            automaticallyPlays: false,
+            hardwareDecoding: .disabled,
+            videoOutput: .sampleBuffer
+        ))
+        defer { fixture.close() }
+        // Start before the sparse cue. A late initial seek also depends on
+        // each demuxer's subtitle preroll policy, independently of decompression.
+        try await fixture.loadPaused(TestPaths.testMedia(file), at: .zero)
+        #expect(fixture.player.selectedSubtitle()?.codec == codec)
+        let overlay = fixture.player.sampleBufferOSDLayer
+        try await eventually("\(codec) pixels from \(file) using \(demuxer)") {
+            ((try? alpha(overlay).visible) ?? 0) > 0
+        }
+        let cue = try alpha(overlay)
+        #expect(cue.visible < cue.width * cue.height)
+        fixture.player.seek(to: .seconds(5))
+        try await eventually("\(codec) cue clears") {
+            fixture.player.position > .seconds(4) && subtitleIsClear(overlay)
+        }
     }
 
     private func dolbyVisionPixels(_ layer: AVSampleBufferDisplayLayer) throws -> [Data] {

@@ -1,0 +1,61 @@
+diff --git a/libavformat/rtmphttp.c b/libavformat/rtmphttp.c
+--- a/libavformat/rtmphttp.c
++++ b/libavformat/rtmphttp.c
+@@ -58,7 +58,7 @@
+     uint8_t c;
+     int ret;
+ 
+-    ff_url_join(uri, sizeof(uri), "http", NULL, rt->host, rt->port,
++    ff_url_join(uri, sizeof(uri), rt->tls ? "https" : "http", NULL, rt->host, rt->port,
+                 "/%s/%s/%d", cmd, rt->client_id, rt->seq++);
+ 
+     av_opt_set_bin(rt->stream->priv_data, "post_data", rt->out_data,
+@@ -180,7 +180,8 @@
+     return ret;
+ }
+ 
+-static int rtmp_http_open(URLContext *h, const char *uri, int flags)
++static int rtmp_http_open(URLContext *h, const char *uri, int flags,
++                          AVDictionary **options)
+ {
+     RTMP_HTTPContext *rt = h->priv_data;
+     char headers[1024], url[1024];
+@@ -210,6 +211,10 @@
+     if ((ret = ffurl_alloc(&rt->stream, url, AVIO_FLAG_READ_WRITE, &h->interrupt_callback)) < 0)
+         goto fail;
+ 
++    if ((ret = av_opt_copy(rt->stream, h)) < 0 ||
++        (ret = av_opt_set_dict(rt->stream->priv_data, options)) < 0)
++        goto fail;
++
+     /* set options */
+     snprintf(headers, sizeof(headers),
+              "Cache-Control: no-cache\r\n"
+@@ -219,16 +224,8 @@
+     av_opt_set(rt->stream->priv_data, "multiple_requests", "1", 0);
+     av_opt_set_bin(rt->stream->priv_data, "post_data", "", 1, 0);
+ 
+-    if (!rt->stream->protocol_whitelist && h->protocol_whitelist) {
+-        rt->stream->protocol_whitelist = av_strdup(h->protocol_whitelist);
+-        if (!rt->stream->protocol_whitelist) {
+-            ret = AVERROR(ENOMEM);
+-            goto fail;
+-        }
+-    }
+-
+-    /* open the http context */
+-    if ((ret = ffurl_connect(rt->stream, NULL)) < 0)
++    /* The HTTPS child needs the caller's TLS verification and CA options. */
++    if ((ret = ffurl_connect(rt->stream, options)) < 0)
+         goto fail;
+ 
+     /* read the server reply which contains a unique ID */
+@@ -274,7 +271,7 @@
+ 
+ const URLProtocol ff_ffrtmphttp_protocol = {
+     .name           = "ffrtmphttp",
+-    .url_open       = rtmp_http_open,
++    .url_open2      = rtmp_http_open,
+     .url_read       = rtmp_http_read,
+     .url_write      = rtmp_http_write,
+     .url_close      = rtmp_http_close,

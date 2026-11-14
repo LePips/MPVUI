@@ -21,7 +21,9 @@ class TestMediaPreparationTests(unittest.TestCase):
         destination = Path(command[3])
         group = next(group for group in media.GROUPS if media.script(group) == Path(command[1]))
         for name in media.GROUPS[group][1]:
-            (destination / name).write_bytes(("encoded fixture " + name).encode())
+            path = destination / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(("encoded fixture " + name).encode())
 
     def prepare(self):
         with (
@@ -34,7 +36,7 @@ class TestMediaPreparationTests(unittest.TestCase):
         self.prepare()
         self.assertEqual(len(self.calls), len(media.GROUPS))
         names = [name for key in media.GROUPS for name in media.GROUPS[key][1]]
-        self.assertEqual({p.name for p in self.output.iterdir()}, set(names))
+        self.assertEqual({p.relative_to(self.output).as_posix() for p in self.output.rglob("*") if p.is_file()}, set(names))
         state = json.loads((self.output.parent / "GeneratedMedia.state.json").read_text())
         for key in media.GROUPS:
             for name in media.GROUPS[key][1]:
@@ -138,7 +140,7 @@ class TestMediaPreparationTests(unittest.TestCase):
             with self.subTest(group=group):
                 self.assertTrue(media.script(group).is_file())
                 for name in files:
-                    self.assertTrue(name.startswith((group + "-", group + ".")), name)
+                    self.assertTrue(name.startswith((group + "-", group + ".", group + "/")), name)
 
     def test_retired_generated_files_are_removed_and_other_files_kept(self):
         self.prepare()

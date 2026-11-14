@@ -1,4 +1,4 @@
-"""Check how make commands and options route to tools."""
+"""Check how just recipes and their private settings route to tools."""
 
 import contextlib
 import io
@@ -47,17 +47,17 @@ class CommandRoutingTests(unittest.TestCase):
                     for step in build(commands.Options(device="id")):
                         for part in step.command:
                             if part.startswith("Build/") and part.endswith((".py", "mpvbuild")):
-                                self.assertTrue((ROOT / part).is_file(), f"make {name}: {part}")
+                                self.assertTrue((ROOT / part).is_file(), f"just {name}: {part}")
 
     def test_invalid_usage_explains_the_valid_choices(self):
         cases = (
-            (("test", "SUIT=unit"), "accepts PLATFORM, SUITE"),
+            (("test", "SUIT=unit"), "accepts --platform, --suite"),
             (("test", "SUITE=nope"), "must be one of: core, unit"),
-            (("test", "SUITE=unit", "DEVICE=phone"), "DEVICE does not apply"),
-            (("test", "PLATFORM=android", "FILTER=Name"), "FILTER runs Apple package tests"),
-            (("select", "PLATFORM=android"), "accepts JSON, not PLATFORM"),
-            (("release", "PLATFORM=android", "STEP=publish"), "takes no STEP"),
-            (("build", "PROFILE=fast"), "PROFILE must be one of dev, release"),
+            (("test", "SUITE=unit", "DEVICE=phone"), "--device does not apply"),
+            (("test", "PLATFORM=android", "FILTER=Name"), "--filter runs Apple package tests"),
+            (("select", "PLATFORM=android"), "accepts --json, not --platform"),
+            (("release", "PLATFORM=android", "STEP=publish"), "takes no --step"),
+            (("build", "PROFILE=fast"), "--profile must be one of dev, release"),
         )
         for argv, message in cases:
             with self.subTest(argv=argv), self.assertRaisesRegex(commands.UsageError, message):

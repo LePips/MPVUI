@@ -322,6 +322,7 @@ enum FFmpegRecipe {
         // configure embeds its invocation. Normalize only the reported string; compilation still uses actual paths.
         let config = build.appendingPathComponent("config.h")
         var text = try String(contentsOf: config, encoding: .utf8)
+        try require(text.contains("#define CONFIG_ZLIB 1"), "FFmpeg must support zlib-compressed Matroska tracks")
 
         if assemblyEnabled {
             let assemblyFeature = c.arch == "x86_64" ? "X86ASM" : "NEON"

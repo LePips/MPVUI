@@ -17,7 +17,7 @@ Build the native libraries:
 ```sh
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
-make build PLATFORM=android
+just build --platform android
 ```
 
 The build includes both native architectures, which the example needs even when running on one device. Open `Example/Android` in Android Studio, select an Android 16+ emulator or device, and run the `app` configuration.
