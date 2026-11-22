@@ -379,12 +379,30 @@ package extension MPVSession {
         dispatchPrecondition(condition: .onQueue(queue))
         guard renderTarget != nil else { return }
 
+        if videoOutput == .sampleBuffer {
+            outputHeadroom = 1
+        }
+
         if isFileLoaded, getInt64("current-tracks/audio/id") == nil {
             // Preserve the position until a view attaches.
             destroyHandle(preservePlayback: true)
+
+            if videoOutput == .sampleBuffer {
+                // Keep the video's metadata for reattachment, but drop the
+                // display route as soon as the inline renderer is gone.
+                var media = latestSnapshot.mediaInformation
+                let hdr = media.hdr
+                media.hdr = hdrStatus(
+                    source: hdr.source,
+                    decoded: hdr.decoded,
+                    videoOutputInput: hdr.videoOutputInput,
+                    output: hdr.output,
+                    removingDisplay: true
+                )
+                publish(.media(media))
+            }
             renderTarget = nil
             isLoading = needsSourceLoad
-
             return
         }
 

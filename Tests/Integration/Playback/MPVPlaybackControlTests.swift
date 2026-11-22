@@ -363,6 +363,8 @@ struct MPVPlaybackControlTests {
         player.setPlaybackRate(1.25)
         player.setAudioDelay(.milliseconds(250))
         player.setSubtitleDelay(.milliseconds(125))
+        player.executeCommand("add", arguments: ["sub-delay", "0.25"])
+        player.executeCommand("set", arguments: ["secondary-sub-visibility", "no"])
         player.stop()
         try await eventually("runtime-configured item stopped") { player.state == .stopped }
         player.play()
@@ -388,16 +390,18 @@ struct MPVPlaybackControlTests {
 
         player.executeCommand("expand-properties", arguments: [
             "print-text",
-            "REPLAY_RUNTIME volume=${=volume} mute=${mute} speed=${=speed} audio=${=audio-delay} sub=${=sub-delay}",
+            "REPLAY_RUNTIME volume=${=volume} mute=${mute} speed=${=speed} audio=${=audio-delay} sub=${=sub-delay} " +
+                "secondaryVisible=${secondary-sub-visibility}",
         ])
 
-        try await eventually("native replay properties observed") { observed.count == 5 }
+        try await eventually("native replay properties observed") { observed.count == 6 }
 
         #expect(observed["volume"].flatMap(Double.init) == 37)
         #expect(observed["mute"] == "yes")
         #expect(observed["speed"].flatMap(Double.init) == 1.25)
         #expect(observed["audio"].flatMap(Double.init) == 0.25)
-        #expect(observed["sub"].flatMap(Double.init) == 0.125)
+        #expect(observed["sub"].flatMap(Double.init) == 0.375)
+        #expect(observed["secondaryVisible"] == "no")
         #expect(player.lastError == nil)
     }
 

@@ -53,6 +53,10 @@ extension MPVSession {
             #endif
 
             options += [
+                // This output builds and enqueues the sample in flip_page.
+                // Its queue lead already schedules that work before presentation.
+                // A separate mpv pre-draw wait blocks the VO thread during close.
+                ("video-timing-offset", "0"),
                 ("avfoundation-presentation", presentationMode),
                 ("avfoundation-native-dovi-profile7", configuration.dolbyVisionPolicy == .strict ? "no" : "p8.1"),
                 ("avfoundation-pip-composite-osd", "yes"),

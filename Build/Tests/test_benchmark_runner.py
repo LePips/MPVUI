@@ -27,9 +27,10 @@ class RunnerTests(unittest.TestCase):
                 self.subTest(locked=locked),
                 patch.object(benchmark.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=payload)) as run,
             ):
+                self.assertEqual(benchmark.display_session_identity(["stopped"]), {"displaySessionUnlocked": not locked})
                 if locked:
                     with self.assertRaisesRegex(ValueError, "Unlock this Mac") as error:
-                        benchmark.display_session_identity(["playback"])
+                        benchmark.display_session_identity(["playback", "stopped"])
                     self.assertNotIn("private", str(error.exception))
                 else:
                     self.assertEqual(benchmark.display_session_identity(["playback"]), {"displaySessionUnlocked": True})

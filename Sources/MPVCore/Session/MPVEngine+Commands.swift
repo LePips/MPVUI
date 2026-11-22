@@ -9,6 +9,25 @@ import Darwin
 // Bridges commands and properties to libmpv and preserves desired runtime settings.
 package extension MPVSession {
 
+    private static let replayScalarProperties = [
+        "volume",
+        "mute",
+        "speed",
+        "vid",
+        "aid",
+        "sid",
+        "secondary-sid",
+        "audio-delay",
+        "sub-delay",
+        "secondary-sub-delay",
+        "sub-visibility",
+        "secondary-sub-visibility",
+    ]
+
+    // Raw mpv expansions use the same conversion as mpv_get_property_string.
+    // These numeric, flag and track-selection values cannot contain a newline.
+    private static let replayScalarExpansion = replayScalarProperties.map { "${=\($0)}" }.joined(separator: "\n")
+
     static func mpvPath(for url: URL) -> String {
         url.isFileURL ? url.path : url.absoluteString
     }
@@ -158,29 +177,25 @@ package extension MPVSession {
 
     func snapshotRuntimeProperties() {
         dispatchPrecondition(condition: .onQueue(queue))
+        guard handle != nil else { return }
 
-        let names = [
-            "volume",
-            "mute",
-            "speed",
-            "vid",
-            "aid",
-            "sid",
-            "secondary-sid",
-            "audio-delay",
-            "sub-delay",
-            "secondary-sub-delay",
-            "sub-visibility",
-            "secondary-sub-visibility",
-        ]
+        let names = Self.replayScalarProperties
+        lifecycleDiagnostics.engineActivity.propertyReads &+= 1
+        let (_, expansion) = runCommandReturningValue(["expand-text", Self.replayScalarExpansion])
+        let values: [String?] = if let fields = expansion?.stringValue?.components(separatedBy: "\n"), fields.count == names.count {
+            // Unavailable scalar properties expand to an empty field.
+            fields.map { $0.isEmpty ? nil : $0 }
+        } else {
+            names.map(getString)
+        }
 
-        for name in names {
+        for (name, value) in zip(names, values) {
             // Preserve the user's video selection while no surface is attached.
             if name == "vid", renderTarget == nil {
                 continue
             }
 
-            if let value = getString(name) {
+            if let value {
                 desiredProperties[name] = value
             }
         }

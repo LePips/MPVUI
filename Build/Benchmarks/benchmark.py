@@ -22,8 +22,8 @@ from validation import EVIDENCE_ENV, failure_excerpt, publish_evidence
 from comparison import compare_reports, render_markdown
 
 ROOT = Path(__file__).resolve().parents[2]
-SUITES = ("micro", "playback", "cache", "seek", "audio", "subtitle", "size")
-SWIFT_SUITES = ("micro", "playback", "cache", "seek", "audio")
+SWIFT_SUITES = ("micro", "playback", "stopped", "cache", "seek", "audio")
+SUITES = (*SWIFT_SUITES, "subtitle", "size")
 
 
 def selected_suites(value):
@@ -51,11 +51,9 @@ def validate_capture_options(args, suites):
 
 
 def display_session_identity(suites):
-    if "playback" not in suites:
+    if not {"playback", "stopped"}.intersection(suites):
         return {}
-    unavailable = (
-        "Cannot verify whether the macOS console is unlocked. Playback benchmarking requires a verifiable unlocked display session."
-    )
+    unavailable = "Cannot verify whether the macOS console is unlocked."
     try:
         result = subprocess.run(
             ["/usr/sbin/ioreg", "-n", "Root", "-d1", "-a"],
@@ -70,10 +68,11 @@ def display_session_identity(suites):
     locked = root.get("IOConsoleLocked") if isinstance(root, dict) else None
     if type(locked) is not bool:
         raise ValueError(unavailable)
-    if locked:
+    if locked and "playback" in suites:
         raise ValueError("Playback benchmarking requires an unlocked macOS console. Unlock this Mac and rerun.")
-    # Retain only this boolean. IORegistry may also contain console user data.
-    return {"displaySessionUnlocked": True}
+    # Stopped workloads measure native teardown or idle timers. Require a
+    # matching console state since it can affect the renderer before stop.
+    return {"displaySessionUnlocked": not locked}
 
 
 def prepare_media(root, suites, args, logs, env):
@@ -100,7 +99,7 @@ def prepare_media(root, suites, args, logs, env):
                 logs / "prepare-media.log",
                 env=env,
             )
-    for suite, group in [("audio", "audio"), ("seek", "video")]:
+    for suite, group in [("audio", "audio"), ("seek", "video"), ("stopped", "color")]:
         if suite in suites:
             run_step(
                 [sys.executable, str(root / "Build/Tests/prepare_test_media.py"), "--group", group],
@@ -118,6 +117,8 @@ def media_identity(root, suites, media):
         )
     if "audio" in suites:
         files["audio/eac3-5.1"] = root / ".build/test-media/audio-eac3-5.1.mka"
+    if "stopped" in suites:
+        files["stopped/hdr10"] = root / ".build/test-media/color-hdr10.mkv"
     for path in files.values():
         if not path.is_file():
             raise ValueError(f"Benchmark media does not exist: {path}")
@@ -209,9 +210,9 @@ def environment_identity(root, developer, xcode_build, suites, media_inputs=None
             raise ValueError("Missing Tests/Benchmarks Swift workloads in this checkout.")
         protocol_files += swift_protocol
         protocol_files += sorted((root / "Tests/Support").glob("*.swift"))
-    if set(suites) & {"playback", "seek", "audio"}:
+    groups = {"playback": "baseline", "stopped": "color", "seek": "video", "audio": "audio"}
+    if set(suites).intersection(groups):
         protocol_files.append(root / "Build/Tests/prepare_test_media.py")
-        groups = {"playback": "baseline", "seek": "video", "audio": "audio"}
         protocol_files += [root / f"Build/Tests/generate_{group}.py" for suite, group in groups.items() if suite in suites]
     if "playback" in suites:
         protocol_files.append(ROOT / "Build/Benchmarks/generate_playback_fixture.py")
@@ -559,9 +560,7 @@ def main(argv=None):
     run.add_argument("--label", required=True, type=label)
     run.add_argument("--package-path", type=Path, default=ROOT)
     run.add_argument("--output", type=Path)
-    run.add_argument(
-        "--suites", default="all", help="all (excludes audio) or comma-separated micro,playback,cache,seek,audio,subtitle,size"
-    )
+    run.add_argument("--suites", default="all", help="all (excludes audio) or comma-separated " + ",".join(SUITES))
     run.add_argument("--quick", action="store_true", help="One repetition and two-second playback samples; smoke checks only")
     run.add_argument("--repetitions", type=bounded_int(1, 20), default=3)
     run.add_argument("--seconds", type=finite_range(1, 60), default=3.0)

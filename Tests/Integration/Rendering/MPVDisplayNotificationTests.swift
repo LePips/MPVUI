@@ -13,6 +13,44 @@ import UIKit
 struct MPVDisplayNotificationTests {
 
     @Test
+    func `headroom polling stops with the item and resumes on replay`() async throws {
+        let fixture = PlaybackFixture(configuration: .init(
+            additionalOptions: ["ao": "null"],
+            automaticallyPlays: false,
+            hdrPolicy: .always,
+            isLoopingEnabled: true,
+            videoOutput: .metal
+        ))
+        defer { fixture.close() }
+        let surface = fixture.surface
+        let player = fixture.player
+        try await fixture.loadPaused()
+
+        let pausedPolls = surface.headroomPollCount
+        try await eventually("paused HDR surface polls for brightness changes") { surface.headroomPollCount > pausedPolls }
+
+        player.stop()
+        let stopped = await player.lifecycleDiagnostics()
+        try #require(stopped.handlesCreated == 1 && stopped.handlesDestroyed == 1)
+        surface.activateRenderingSurface()
+        let stoppedPolls = surface.headroomPollCount
+        // Leave the surface attached for three timer intervals.
+        try await Task.sleep(for: .milliseconds(750))
+        #expect(surface.headroomPollCount == stoppedPolls)
+        #expect(player.state == .stopped)
+
+        player.play()
+        try await eventually("replayed HDR surface polls again") {
+            player.state == .playing && surface.headroomPollCount > stoppedPolls
+        }
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+            surface.edrHeadroomOverrideForTesting = (3, 4)
+            try await eventually("replayed surface adopts the new headroom") { surface.metalLayer.contentsHeadroom == 3 }
+        }
+        #expect(player.lastError == nil)
+    }
+
+    @Test
     func `display notifications coalesce into one live color update`() async throws {
         let center = NotificationCenter()
 

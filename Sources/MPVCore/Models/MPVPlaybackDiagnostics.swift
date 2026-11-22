@@ -14,7 +14,7 @@ public struct MPVPlaybackDiagnostics: Equatable, Sendable {
         public var nativeEvents: Int64 = 0
         /// Updates enqueued for main-actor delivery, not necessarily delivered yet.
         public var publishedUpdates: Int64 = 0
-        /// Synchronous libmpv property reads attempted, including unavailable values.
+        /// Synchronous libmpv calls to read properties, including batched reads and unavailable values.
         public var propertyReads: Int64 = 0
         /// Complete media-information snapshots constructed.
         public var mediaSnapshots: Int64 = 0

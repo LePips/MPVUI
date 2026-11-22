@@ -39,8 +39,8 @@ struct MPVNativeVideoOutputTests {
     }
 
     @MainActor
-    @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox])
-    func `native frames and seek`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding) async throws {
+    @Test(arguments: [MPVPlayerConfiguration.HardwareDecoding.disabled, .videoToolbox], [false, true])
+    func `native frames and seek`(hardwareDecoding: MPVPlayerConfiguration.HardwareDecoding, detachBeforeStop: Bool) async throws {
         let fixture = PlaybackFixture(
             configuration: .init(
                 additionalOptions: ["ao": "null"],
@@ -170,6 +170,21 @@ struct MPVNativeVideoOutputTests {
         #expect(after.handlesDestroyed == lifecycle.handlesDestroyed)
         #expect(after.loadCommands == lifecycle.loadCommands)
         #expect(player.lastError == nil)
+
+        #if !targetEnvironment(simulator)
+        try await waitUntil("reattached renderer displays a frame before stop") {
+            layer.sampleBufferRenderer.displayedPixelBuffer() != nil
+        }
+        #endif
+        if detachBeforeStop {
+            surface.detach()
+        }
+        player.stop()
+        let stopped = await player.lifecycleDiagnostics()
+        #expect(stopped.handlesCreated == stopped.handlesDestroyed)
+        #expect(player.state == .stopped && !player.hasVideoFrame)
+        // AVFoundation can return the cached paused pixel buffer after a removal flush.
+        #expect(layer.controlTimebase == nil && player.sampleBufferOSDLayer.controlTimebase == nil)
     }
 
     @MainActor

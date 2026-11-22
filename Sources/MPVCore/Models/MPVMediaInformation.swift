@@ -49,7 +49,7 @@ public struct MPVMediaInformation: Equatable, Sendable {
     public let tracks: [MPVMediaTrack]
 
     /// HDR source and output status.
-    public let hdr: MPVHDRStatus
+    public internal(set) var hdr: MPVHDRStatus
 
     /// The video bounding size after pixel-aspect correction and clockwise rotation.
     /// Returns `nil` until valid dimensions are known. Client zoom, crop, and window scaling are separate.

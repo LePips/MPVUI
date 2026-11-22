@@ -901,13 +901,12 @@ extension MPVPlayer {
     func attachSampleBufferOutput() {
         guard videoOutput == .sampleBuffer, !hasAttachedSampleBufferOutput else { return }
 
-        hasAttachedSampleBufferOutput = true
-
         if sampleBufferRenderTarget == nil {
             updateSampleBufferOutput(displayCapabilities: .unknown, configuredDynamicRange: .automatic)
         }
 
         if let sampleBufferRenderTarget {
+            hasAttachedSampleBufferOutput = true
             engine?.attach(to: sampleBufferRenderTarget)
         }
     }
@@ -1148,6 +1147,7 @@ extension MPVPlayer {
             if let target = sampleBufferRenderTarget {
                 engine?.detach(fromLayerAddress: target.layerAddress)
             }
+            sampleBufferRenderTarget = nil
         }
 
         if let layerAddress, videoOutput == .metal {

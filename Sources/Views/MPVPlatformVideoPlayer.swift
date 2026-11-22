@@ -33,6 +33,7 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     var displayMatchingTargetOverrideForTesting: (any MPVDisplayMatchingTarget)?
 
     let surfaceToken = UUID()
+    private(set) var headroomPollCount = 0
     private var attachedLayerAddress: Int64?
     private var isRetainedForPictureInPicture = false
     private var surfaceConfiguration: MPVRenderSurfaceConfiguration?
@@ -316,8 +317,6 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     public func activateRenderingSurface() {
         guard window != nil else { return }
 
-        startHeadroomObservation()
-
         let wasActive = player.isRenderSurfaceActive(token: surfaceToken)
 
         player.activateRenderSurface(token: surfaceToken)
@@ -355,13 +354,6 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
         {
             player.sampleBufferDisplayLayer.removeFromSuperlayer()
             player.sampleBufferOSDLayer.removeFromSuperlayer()
-
-            player.updateSampleBufferOutput(
-                displayCapabilities: .unknown,
-                configuredDynamicRange: surfaceConfiguration?.configuredDynamicRange ?? .automatic,
-                policyFallbackReason: surfaceConfiguration?.policyFallbackReason == .unsupportedPolicy
-                    ? .unsupportedPolicy : nil
-            )
         }
 
         resizeCoordinator.deactivate()
@@ -452,9 +444,8 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
     }
 
     private func refreshRenderingConfiguration(updateGeometry: Bool) {
+        updateHeadroomObservation()
         guard window != nil else { return }
-
-        startHeadroomObservation()
 
         if player.videoOutput == .sampleBuffer {
             updateSampleBufferSurface()
@@ -855,13 +846,12 @@ private extension MPVPlatformVideoPlayer {
     }
     #endif
 
-    // NSScreen has no current-headroom notification. Sample at a bounded rate
-    // while attached, including paused playback and brightness/reference changes.
-    // Quantization in the surface contract prevents tiny changes from reaching mpv.
-    func startHeadroomObservation() {
-        // Keep watching HDR-capable Metal playback even at headroom 1 so a
-        // brightness or power change can restore EDR without another media event.
-        let needsObservation = player.videoOutput == .metal && player.configuration.hdrPolicy != .disabled
+    // Paused HDR frames still track display brightness. A stopped player keeps
+    // its HDR metadata for replay after the renderer has been released.
+    func updateHeadroomObservation() {
+        let needsObservation = window != nil && isActiveRenderingSurface
+            && player.state != .idle && player.state != .stopped
+            && player.videoOutput == .metal && player.configuration.hdrPolicy != .disabled
             && (player.mediaInformation.hdr.isHDRContent || player.configuration.hdrPolicy == .always
                 || player.configuration.hdrPolicy == .constrained || surfaceConfiguration?.usesExtendedDynamicRange == true)
 
@@ -874,8 +864,9 @@ private extension MPVPlatformVideoPlayer {
 
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.isActiveRenderingSurface else { return }
+                guard let self else { return }
 
+                self.headroomPollCount += 1
                 self.refreshRenderingConfiguration(updateGeometry: false)
             }
         }
@@ -911,7 +902,6 @@ private extension MPVPlatformVideoPlayer {
 
             detach()
         } else {
-            startHeadroomObservation()
             activateRenderingSurface()
         }
     }

@@ -42,6 +42,16 @@ struct MPVPerformanceBenchmarkTests {
         if settings.suites.contains("playback") {
             workloads += try await playbackWorkloads(settings)
         }
+        if settings.suites.contains("stopped") {
+            if settings.backends.contains(.metal) {
+                try await workloads.append(stoppedMetalSurfaceWorkload(settings))
+            }
+            if settings.backends.contains(.sampleBuffer) {
+                for detachFirst in [false, true] {
+                    try await workloads.append(sampleBufferCloseWorkload(settings, detachFirst: detachFirst))
+                }
+            }
+        }
 
         var runtime: [String: Any] = [
             "operatingSystem": ProcessInfo.processInfo.operatingSystemVersionString,
@@ -273,6 +283,131 @@ struct MPVPerformanceBenchmarkTests {
         }
 
         return backends.compactMap { collected[$0]?.json }
+    }
+
+    private func stoppedMetalSurfaceWorkload(_ settings: BenchmarkSettings) async throws -> [String: Any] {
+        let media = try TestPaths.testMedia("color-hdr10.mkv")
+        var measurement = try BenchmarkMeasurement(
+            id: "stopped_metal_surface",
+            parameters: [
+                "fixtureSHA256": sha256(media),
+                "hdrPolicy": "automatic",
+                "backend": "metal",
+                "decoder": "software",
+                "sampleSeconds": settings.sampleSeconds,
+                "warmupSeconds": settings.warmupSeconds,
+            ]
+        )
+
+        for repetition in 1 ... settings.repetitions {
+            let fixture = PlaybackFixture(configuration: .init(
+                additionalOptions: ["ao": "null"],
+                automaticallyPlays: false,
+                hardwareDecoding: .disabled,
+                hdrPolicy: .automatic,
+                videoOutput: .metal
+            ))
+            defer { fixture.close() }
+            try await fixture.loadPaused(media, at: .zero)
+            try #require(fixture.player.mediaInformation.hdr.isHDRContent)
+
+            let surface = fixture.surface
+            let pausedPolls = surface.headroomPollCount
+            try await eventually("HDR headroom polling while paused") { surface.headroomPollCount > pausedPolls }
+
+            fixture.player.stop()
+            let lifecycle = await fixture.player.lifecycleDiagnostics()
+            try #require(lifecycle.handlesCreated > 0 && lifecycle.handlesCreated == lifecycle.handlesDestroyed)
+            try await Task.sleep(for: .seconds(settings.warmupSeconds))
+
+            let firstPoll = surface.headroomPollCount
+            let start = ProcessTiming()
+            try await Task.sleep(for: .seconds(settings.sampleSeconds))
+            let elapsed = start.elapsed()
+            let polls = surface.headroomPollCount - firstPoll
+
+            try #require(fixture.player.state == .stopped && fixture.player.lastError == nil)
+            try #require(surface.window === fixture.window && surface.isActiveRenderingSurface)
+            measurement.add("headroomPollsPerSecond", value: Double(polls) / elapsed.wallSeconds, unit: "polls/second", direction: "lower")
+            measurement.add(
+                "cpuSecondsPerWallSecond",
+                value: elapsed.cpuSeconds / elapsed.wallSeconds,
+                unit: "cpu-seconds/wall-second",
+                direction: "lower"
+            )
+            measurement.observations.append(["repetition": repetition, "headroomPolls": polls, "wallSeconds": elapsed.wallSeconds])
+        }
+        return measurement.json
+    }
+
+    private func sampleBufferCloseWorkload(_ settings: BenchmarkSettings, detachFirst: Bool) async throws -> [String: Any] {
+        let media = try TestPaths.testMedia("color-hdr10.mkv")
+        var measurement = try BenchmarkMeasurement(
+            id: detachFirst ? "sample_buffer_dismiss_then_stop" : "sample_buffer_stop",
+            parameters: [
+                "fixtureSHA256": sha256(media),
+                "backend": "sampleBuffer",
+                "decoder": "software",
+                "nativeReadbackPolicy": settings.nativeReadbackPolicy,
+                "warmupSeconds": settings.warmupSeconds,
+            ]
+        )
+
+        for repetition in 1 ... settings.repetitions {
+            let fixture = PlaybackFixture(configuration: .init(
+                additionalOptions: ["ao": "null", "loop-file": "inf"],
+                automaticallyPlays: false,
+                hardwareDecoding: .disabled,
+                videoOutput: .sampleBuffer
+            ))
+            defer { fixture.close() }
+            let player = fixture.player
+            let video = player.sampleBufferDisplayLayer
+            let subtitles = player.sampleBufferOSDLayer
+            if settings.nativeReadbackPolicy == "required" {
+                try await fixture.loadForVideoReadback(media)
+                try await eventually("paused sample-buffer player is seekable") { player.state == .paused && player.isSeekable }
+                _ = try await player.seekAndWait(to: .seconds(1))
+                _ = try await pausedNativeBuffer(player)
+            } else {
+                try await fixture.loadPaused(media, at: .seconds(1))
+            }
+            // AVFoundation exposes displayed pixels only while its clock is paused.
+            let hadDisplayedFrame = video.sampleBufferRenderer.displayedPixelBuffer() != nil
+            player.play()
+            try await eventually("playing through the sample-buffer renderer") {
+                player.state == .playing && player.position > .zero && video.controlTimebase != nil
+            }
+            try await Task.sleep(for: .seconds(settings.warmupSeconds))
+            let before = await player.lifecycleDiagnostics()
+            try #require(player.state == .playing && player.hasVideoFrame)
+            try #require(before.handlesCreated == before.handlesDestroyed + 1)
+
+            let start = ProcessTiming()
+            if detachFirst {
+                fixture.surface.detach()
+            }
+            player.stop()
+            let after = await player.lifecycleDiagnostics()
+            let elapsed = start.elapsed()
+
+            try #require(after.handlesCreated == before.handlesCreated && after.handlesDestroyed == after.handlesCreated)
+            try #require(player.state == .stopped && !player.hasVideoFrame && player.lastError == nil)
+            try #require(video.controlTimebase == nil && subtitles.controlTimebase == nil)
+            let reads = after.engineActivity.propertyReads - before.engineActivity.propertyReads
+            let snapshots = after.engineActivity.mediaSnapshots - before.engineActivity.mediaSnapshots
+            measurement.add("wallMillisecondsPerClose", value: elapsed.wallSeconds * 1000, unit: "milliseconds/close", direction: "lower")
+            measurement.add("cpuMillisecondsPerClose", value: elapsed.cpuSeconds * 1000, unit: "cpu-milliseconds/close", direction: "lower")
+            measurement.add("propertyReadsPerClose", value: Double(reads), unit: "reads/close", direction: "lower")
+            measurement.add("mediaSnapshotsPerClose", value: Double(snapshots), unit: "snapshots/close", direction: "lower")
+            measurement.observations.append([
+                "repetition": repetition,
+                "hadDisplayedFrame": hadDisplayedFrame,
+                "readyForDisplayAfterStop": video.isReadyForDisplay,
+                "readbackAvailableAfterStop": video.sampleBufferRenderer.displayedPixelBuffer() != nil,
+            ])
+        }
+        return measurement.json
     }
 
     private func playbackSample(
@@ -979,7 +1114,7 @@ private struct BenchmarkSettings {
         try #require((1 ... 20).contains(repetitions))
         try #require(sampleSeconds.isFinite && (0.5 ... 60).contains(sampleSeconds))
         try #require(warmupSeconds.isFinite && (0.5 ... 30).contains(warmupSeconds))
-        try #require(!suites.isEmpty && suites.isSubset(of: ["micro", "playback", "cache", "seek", "audio"]))
+        try #require(!suites.isEmpty && suites.isSubset(of: ["micro", "playback", "stopped", "cache", "seek", "audio"]))
 
         try #require(
             ["required", "optional"].contains(nativeReadbackPolicy),

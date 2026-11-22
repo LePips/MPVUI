@@ -279,6 +279,47 @@ package extension MPVSession {
         publish(.audio(volume: volume, isMuted: isMuted, playbackRate: playbackRate))
     }
 
+    func hdrStatus(
+        source: MPVVideoSignal,
+        decoded: MPVVideoSignal,
+        videoOutputInput: MPVVideoSignal,
+        output: MPVVideoSignal,
+        removingDisplay: Bool = false
+    ) -> MPVHDRStatus {
+        let display = removingDisplay ? .unknown : renderTarget?.displayCapabilities ?? .unknown
+
+        let configured: MPVPresentationStatus.DynamicRange = liveConfigurationFailure == nil
+            ? renderTarget?.configuredDynamicRange ?? .unknown : .unknown
+
+        let policy = renderTarget?.policyFallbackReason
+        let fallback = Self.resolvedPresentationFallback(
+            backend: presentationFallbackReason,
+            policy: removingDisplay && policy != .unsupportedPolicy ? nil : policy,
+            liveFailure: liveConfigurationFailure
+        )
+            ?? Self.hdrFallbackReason(
+                source: source,
+                display: display,
+                configuredDynamicRange: configured,
+                requestedPolicy: configuration.hdrPolicy
+            )
+
+        return MPVHDRStatus(
+            source: source,
+            decoded: decoded,
+            videoOutputInput: videoOutputInput,
+            output: output,
+            displayCapabilities: display,
+            presentation: MPVPresentationStatus(
+                requestedPolicy: configuration.hdrPolicy,
+                backend: videoOutput,
+                configuredDynamicRange: configured,
+                actualDynamicRange: .unknown,
+                fallbackReason: fallback
+            )
+        )
+    }
+
     func refreshMediaInformation() {
         latestSnapshot.nativeVideoOutput = getString("current-vo")
         lifecycleDiagnostics.engineActivity.mediaSnapshots &+= 1
@@ -309,38 +350,6 @@ package extension MPVSession {
         let outputParameters = videoOutputParameters?.mapValue
         let width = parameters?["w"]?.integerValue ?? outputParameters?["w"]?.integerValue ?? 0
         let height = parameters?["h"]?.integerValue ?? outputParameters?["h"]?.integerValue ?? 0
-        let display = renderTarget?.displayCapabilities ?? .unknown
-
-        let configured: MPVPresentationStatus.DynamicRange = liveConfigurationFailure == nil
-            ? renderTarget?.configuredDynamicRange ?? .unknown : .unknown
-
-        let fallback = Self.resolvedPresentationFallback(
-            backend: presentationFallbackReason,
-            policy: renderTarget?.policyFallbackReason,
-            liveFailure: liveConfigurationFailure
-        )
-            ?? Self.hdrFallbackReason(
-                source: source,
-                display: display,
-                configuredDynamicRange: configured,
-                requestedPolicy: configuration.hdrPolicy
-            )
-
-        let hdr = MPVHDRStatus(
-            source: source,
-            decoded: decoded,
-            videoOutputInput: videoOutputInput,
-            output: output,
-            displayCapabilities: display,
-            presentation: MPVPresentationStatus(
-                requestedPolicy: configuration.hdrPolicy,
-                backend: videoOutput,
-                configuredDynamicRange: configured,
-                actualDynamicRange: .unknown,
-                fallbackReason: fallback
-            )
-        )
-
         let dimensions: MPVVideoDimensions? =
             width > 0 && height > 0
                 ? MPVVideoDimensions(
@@ -388,7 +397,7 @@ package extension MPVSession {
                     metadata: metadata,
                     chapters: chapters,
                     tracks: tracks,
-                    hdr: hdr
+                    hdr: hdrStatus(source: source, decoded: decoded, videoOutputInput: videoOutputInput, output: output)
                 )
             )
         )

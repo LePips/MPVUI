@@ -427,9 +427,11 @@ struct MPVHeadlessPlaybackTests {
         #expect(player.lastError == nil)
     }
 
-    @Test
-    func `video without an audio track waits for a surface`() async throws {
-        let engine = MPVSession(configuration: .init(additionalOptions: ["ao": "null"], automaticallyPlays: false)) { _ in }
+    @Test(arguments: [nil, 0.025] as [Double?])
+    func `video without an audio track waits for a surface`(drawOffset: Double?) async throws {
+        var options = ["ao": "null", "avfoundation-queue-lead-ms": "96"]
+        options["video-timing-offset"] = drawOffset.map { String($0) }
+        let engine = MPVSession(configuration: .init(additionalOptions: options, automaticallyPlays: false)) { _ in }
         defer { engine.shutdownSynchronously() }
         try engine.load(TestPaths.testMedia("video-hevc-8bit.mkv"), playAutomatically: false, startTime: .milliseconds(500), generation: 1)
 
@@ -455,14 +457,24 @@ struct MPVHeadlessPlaybackTests {
         engine.attach(to: target)
 
         try await eventually("video-only source loads on attachment") {
-            engine.queue.sync { engine.isFileLoaded && engine.getInt64("current-tracks/video/id") != nil }
+            engine.queue.sync {
+                engine.isFileLoaded && engine.latestSnapshot.mediaInformation.dimensions != nil
+                    && engine.getInt64("current-tracks/video/id") != nil
+            }
         }
 
+        let attachedMedia = engine.queue.sync { engine.latestSnapshot.mediaInformation }
+        #expect(engine.queue.sync { engine.getDouble("video-timing-offset") } == (drawOffset ?? 0))
+        #expect(engine.queue.sync { engine.getInt64("avfoundation-queue-lead-ms") } == 96)
+        #expect(attachedMedia.hdr.displayCapabilities == target.displayCapabilities)
         #expect(engine.queue.sync { engine.lifecycleDiagnostics.loadCommands == 1 && engine.lifecycleDiagnostics.seekCommands == 0 })
         engine.detach(fromLayerAddress: target.layerAddress)
         _ = await engine.lifecycleSnapshot()
 
         #expect(engine.queue.sync { engine.handle == nil && engine.needsSourceLoad && engine.fatalPlaybackError == nil })
+        let detachedMedia = engine.queue.sync { engine.latestSnapshot.mediaInformation }
+        #expect(detachedMedia.dimensions == attachedMedia.dimensions && detachedMedia.tracks == attachedMedia.tracks)
+        #expect(detachedMedia.hdr.source == attachedMedia.hdr.source && detachedMedia.hdr.displayCapabilities == .unknown)
         engine.attach(to: target)
 
         try await eventually("video-only source resumes on reattachment") {
