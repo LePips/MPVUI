@@ -1297,6 +1297,14 @@
           "sha256": "8f94c950fbd683c6208377f0aa4ce5df3aa187721634f6a927fb65009c1a85fc"
         },
         {
+          "id": "0032-avfoundation-seek-audio-recovery",
+          "path": "Build/Patches/mpv/0032-avfoundation-seek-audio-recovery.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "837ec8852f22bbdde0ad00c8b7c5c7a5207d489081f52e36aa273c1e6a62dcaf"
+        },
+        {
           "id": "0012-display-untimed-bitmap-subtitles",
           "path": "Build/Android/Patches/0012-display-untimed-bitmap-subtitles.patch",
           "platforms": [

@@ -1,0 +1,91 @@
+Subject: [PATCH] Preserve PCM lookahead on underrun and recover parked Dolby seeks quickly
+
+On PCM underrun recovery during uncached seeks, mpv calls start() without
+flushing the renderer. Resetting end_time_av and pcm_credit_ns on every
+underrun restart let audio pull fresh multi-second bursts while paused for
+cache, driving A/V drift past +15s and causing hundreds of dropped video
+frames once buffering ended. Track whether the PCM renderer was flushed
+and only reset lead/credit on fresh starts.
+
+On compressed AC-3/E-AC-3 seeks, AVPlayer can become ReadyToPlay and report
+AVPlayerTimeControlStatusPlaying while parked at 0.000s. Previously
+avp_update_transport kept extending avp_start_deadline until the full 16s
+startup lead filled and then waited another 2s before issuing
+seekToTime:kCMTimeZero. Cap the pre-seek park grace to 350ms once the item
+is ReadyToPlay and Playing (leaving WaitingToPlayAtSpecifiedRate untouched
+for high-latency routes like AirPlay), while preserving the 2s fallback
+grace after seeking.
+
+diff --git a/audio/out/ao_avfoundation.m b/audio/out/ao_avfoundation.m
+index 163e609..8a1d9d6 100644
+--- a/audio/out/ao_avfoundation.m
++++ b/audio/out/ao_avfoundation.m
+@@ -142,6 +142,9 @@ - (void)invalidate;
+     // PCM feeding flag; mutate only on p->queue. Frozen clock cannot drain,
+     // so stop timer from repeatedly checking exceeded bound.
+     bool feed_enabled;
++    // Set when the PCM renderer is initialized or flushed so underrun restarts
++    // preserve the queued lead and monotonic credit instead of refilling a new burst.
++    bool pcm_flushed;
+     double opt_max_lookahead;
+ };
+ 
+@@ -179,6 +182,8 @@ static AVAudioSpatializationFormats spatial_formats(struct priv *p)
+ #define AVP_READY_GRACE_NS  MP_TIME_S_TO_NS(5)
+ // Playhead-movement deadline after rate applied.
+ #define AVP_START_GRACE_NS  MP_TIME_S_TO_NS(2)
++// Short park-detection grace once AVPlayerItem is ReadyToPlay.
++#define AVP_PARK_GRACE_NS   MP_TIME_MS_TO_NS(350)
+ // Read history for offset-zero restarts.
+ #define AVP_ES_HISTORY_BYTES (2 * 1024 * 1024)
+ // Huge resource lengths park Apple's raw Dolby parser. Use upstream ceiling;
+@@ -547,10 +552,15 @@ static void avp_update_transport(struct ao *ao)
+         p->avp_last_progress = now;
+         return;
+     }
+-    // Slow realtime/CPU-bound transcodes may fill preroll late. Keep waiting
+-    // while priming advances. Startup gate bounds grace: parked player fills
+-    // it at full pull speed, progress stops, deadline resumes.
+-    if (p->es_pts > p->avp_primed_pts && p->es_pts < AVP_START_LEAD_NS(p)) {
++    // Slow realtime/CPU-bound transcodes or high-latency AirPlay routes may
++    // fill preroll while waiting to play. Once the item is ready and AVPlayer
++    // reports Playing while stuck at 0.000s, cap the grace so seek-to-start
++    // unblocks it promptly instead of waiting for the full startup lead buffer.
++    if (p->item.status == AVPlayerItemStatusReadyToPlay &&
++        p->player.timeControlStatus == AVPlayerTimeControlStatusPlaying &&
++        !p->avp_start_seeked) {
++        p->avp_start_deadline = MPMIN(p->avp_start_deadline, now + AVP_PARK_GRACE_NS);
++    } else if (p->es_pts > p->avp_primed_pts && p->es_pts < AVP_START_LEAD_NS(p)) {
+         p->avp_primed_pts = p->es_pts;
+         p->avp_start_deadline = now + AVP_START_GRACE_NS;
+         return;
+@@ -846,6 +856,7 @@ static void pcm_set_feeding(struct ao *ao, bool enabled)
+ static bool pcm_init_feeding(struct ao *ao)
+ {
+     struct priv *p = ao->priv;
++    p->pcm_flushed = true;
+ 
+     if (p->opt_max_lookahead > 0) {
+         double lookahead = MPMAX(p->opt_max_lookahead, ao->def_buffer);
+@@ -1021,8 +1032,11 @@ static void pcm_start(struct ao *ao)
+ {
+     struct priv *p = ao->priv;
+     void (^block)(void) = ^{
+-        p->end_time_av = -1;
+-        p->pcm_credit_ns = p->pcm_lookahead_ns;
++        if (p->pcm_flushed) {
++            p->end_time_av = -1;
++            p->pcm_credit_ns = p->pcm_lookahead_ns;
++            p->pcm_flushed = false;
++        }
+         [p->synchronizer setRate:1];
+         pcm_set_feeding(ao, true);
+     };
+@@ -1038,6 +1052,7 @@ static void pcm_stop(struct ao *ao)
+     pcm_set_feeding(ao, false);
+     [p->renderer flush];
+     [p->synchronizer setRate:0];
++    p->pcm_flushed = true;
+ }
+ 
+ static void pcm_set_pause(struct ao *ao, bool paused)
