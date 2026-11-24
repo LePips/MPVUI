@@ -13,6 +13,35 @@
 #define MP_VERBOSE(...) ((void)0)
 #define MP_ERR(...) ((void)0)
 
+#undef TARGET_OS_TV
+#define TARGET_OS_TV TEST_TV
+
+@interface TestPolicySession : NSObject
+@property double outputLatency;
+@property(copy) NSString *portType;
++ (instancetype)sharedInstance;
+- (instancetype)currentRoute;
+- (NSArray<TestPolicySession *> *)outputs;
+@end
+@implementation TestPolicySession
++ (instancetype)sharedInstance {
+    static TestPolicySession *session;
+    if (!session)
+        session = [TestPolicySession new];
+    return session;
+}
+- (instancetype)currentRoute {
+    return self;
+}
+- (NSArray<TestPolicySession *> *)outputs {
+    return self.portType ? @[ self ] : @[];
+}
+@end
+#define AVAudioSession TestPolicySession
+#define AVAudioSessionPortDescription TestPolicySession
+#undef AVAudioSessionPortHDMI
+#define AVAudioSessionPortHDMI @"HDMIOutput"
+
 // Only platform observations and AO event delivery are simulated. policy.h
 // contains the current patched production functions, extracted by run.py.
 @interface TestItem : NSObject
@@ -62,22 +91,32 @@ struct priv {
     int64_t es_pts, avp_start_deadline, avp_last_position, avp_last_progress;
     int64_t avp_primed_pts, avp_lead_ns;
     int spdif_rate, stash_len, es_len;
+    int64_t pulled_samples, es_dropped_ns;
     bool avp_bounded_length, avp_eof_response;
     int64_t es_served_until, es_head;
     int64_t avp_eof_parked_since, avp_eof_parked_position, avp_eof_parked_end;
 };
 struct ao {
     struct priv *priv;
+    int samplerate;
     _Atomic float gain;
     int fallback_requests, stopped_clocks;
+    int64_t last_delay;
+    double last_rate;
+    bool last_playing;
 };
 static int64_t now;
 static int64_t mp_time_ns(void) { return now; }
 static void avp_timer_idle(struct priv *p) { p->timer_idle = true; }
 static void ao_request_pcm_fallback(struct ao *ao) { ao->fallback_requests++; }
 static void ao_update_streaming_clock(struct ao *ao, int64_t delay, double rate, bool playing) {
-    assert(delay == 0 && rate == 0 && !playing);
-    ao->stopped_clocks++;
+    ao->last_delay = delay;
+    ao->last_rate = rate;
+    ao->last_playing = playing;
+    if (!playing) {
+        assert(delay == 0 && rate == 0);
+        ao->stopped_clocks++;
+    }
 }
 #include "policy.h"
 
@@ -275,6 +314,37 @@ static void test_volume(void) {
     assert(p.player.muted && !q.player.muted);
 }
 
+static void test_hdmi_clock_latency(void) {
+    struct priv p = state();
+    struct ao a = {.priv = &p, .samplerate = 48000, .gain = 1};
+    p.avp_playing = true;
+    p.avp_start_deadline = -1;
+    p.pulled_samples = 48000 * 2; // 2.0s written
+    p.es_pts = MP_TIME_S_TO_NS(2);
+    p.item.observedTime = CMTimeMake(1, 1); // 1.0s position -> 1.0s raw_delay
+
+    TestPolicySession.sharedInstance.portType = @"HDMIOutput";
+    TestPolicySession.sharedInstance.outputLatency = 0.29;
+
+    assert(avp_publish_clock(&a));
+    assert(a.last_playing);
+    assert(a.last_delay == (TEST_TV ? MP_TIME_MS_TO_NS(710) : MP_TIME_MS_TO_NS(1000)));
+
+    // Small positive raw_delay below HDMI latency clamps to zero without false underrun.
+    p.item.observedTime = CMTimeMake(1900, 1000); // 1.9s -> 100ms raw_delay
+    assert(avp_publish_clock(&a));
+    assert(a.last_playing);
+    assert(a.last_delay == (TEST_TV ? 0 : MP_TIME_MS_TO_NS(100)));
+
+    // Wireless routes keep CoreMedia's route latency compensation intact.
+    TestPolicySession.sharedInstance.portType = @"AirPlay";
+    p.item.observedTime = CMTimeMake(1, 1);
+    assert(avp_publish_clock(&a));
+    assert(a.last_delay == MP_TIME_MS_TO_NS(1000));
+    TestPolicySession.sharedInstance.portType = nil;
+    TestPolicySession.sharedInstance.outputLatency = 0;
+}
+
 int main(void) {
     @autoreleasepool {
         test_iec();
@@ -284,7 +354,8 @@ int main(void) {
         test_stalls();
         test_tail();
         test_volume();
+        test_hdmi_clock_latency();
     }
-    puts("Native audio: 7 production-policy checks passed with ASan/UBSan");
+    puts("Native audio: 8 production-policy checks passed with ASan/UBSan");
     return 0;
 }

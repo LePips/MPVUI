@@ -1297,6 +1297,14 @@
           "sha256": "8f94c950fbd683c6208377f0aa4ce5df3aa187721634f6a927fb65009c1a85fc"
         },
         {
+          "id": "0032-tvos-hdmi-output-latency",
+          "path": "Build/Patches/mpv/0032-tvos-hdmi-output-latency.patch",
+          "platforms": [
+            "apple"
+          ],
+          "sha256": "4d7433d8d5795e55ebb730a965a20931b03666d10f618ff99c170baaa7e29e36"
+        },
+        {
           "id": "0012-display-untimed-bitmap-subtitles",
           "path": "Build/Android/Patches/0012-display-untimed-bitmap-subtitles.patch",
           "platforms": [
