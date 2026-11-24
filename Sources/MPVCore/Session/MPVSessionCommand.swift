@@ -15,9 +15,9 @@ public enum MPVSessionCommand: Sendable {
     /// Stops playback and releases native decode and rendering resources.
     case stop
     /// Seeks to an absolute position.
-    case seek(to: Duration)
+    case seek(to: Duration, precision: MPVSeekPrecision = .exact)
     /// Seeks relative to the current or pending position.
-    case seekByOffset(Duration)
+    case seekByOffset(Duration, precision: MPVSeekPrecision = .exact)
     /// Steps one video frame forward and pauses playback.
     case stepForward
     /// Steps one video frame backward and pauses playback.
@@ -139,9 +139,9 @@ public extension MPVSession {
                 generation &+= 1
                 stop(generation: generation)
 
-            case let .seek(time): seek(to: time)
+            case let .seek(time, precision): seek(to: time, precision: precision)
 
-            case let .seekByOffset(time): seek(by: time)
+            case let .seekByOffset(time, precision): seek(by: time, precision: precision)
 
             case .stepForward: frameStep(backward: false)
 

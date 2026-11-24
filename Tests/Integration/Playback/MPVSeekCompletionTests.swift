@@ -200,4 +200,25 @@ struct MPVSeekCompletionTests {
             try await player.seekAndWait(to: .seconds(1))
         }
     }
+
+    @Test
+    func `keyframe precision seeks complete and map to mpv keyframe flags`() async throws {
+        #expect(MPVSeekPrecision.exact.absoluteFlag == "absolute+exact")
+        #expect(MPVSeekPrecision.exact.relativeFlag == "relative+exact")
+        #expect(MPVSeekPrecision.keyframes.absoluteFlag == "absolute+keyframes")
+        #expect(MPVSeekPrecision.keyframes.relativeFlag == "relative+keyframes")
+
+        let fixture = PlaybackFixture()
+        defer {
+            fixture.close()
+        }
+
+        try await fixture.loadPaused(TestPaths.multitrackMedia)
+        let result = try await fixture.player.seekAndWait(to: .seconds(4), precision: .keyframes)
+
+        #expect(result.generation == fixture.player.mediaGeneration)
+        #expect(result.target == .seconds(4))
+        #expect(result.position >= .zero && result.position <= fixture.player.duration)
+        #expect(fixture.player.lastError == nil)
+    }
 }

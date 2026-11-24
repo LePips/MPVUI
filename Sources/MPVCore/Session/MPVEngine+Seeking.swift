@@ -10,8 +10,12 @@ public extension MPVSession {
     ///
     /// - Throws: `MPVPlayerError` if seeking is unavailable, fails, or times out,
     ///   or `CancellationError` if the request is canceled or superseded.
-    func seekAndWait(to position: Duration, timeout: Duration = .seconds(8)) async throws -> MPVSeekResult {
-        try await performSeek(to: position, timeout: timeout, pausesAfterEnd: false)
+    func seekAndWait(
+        to position: Duration,
+        precision: MPVSeekPrecision = .exact,
+        timeout: Duration = .seconds(8)
+    ) async throws -> MPVSeekResult {
+        try await performSeek(to: position, precision: precision, timeout: timeout, pausesAfterEnd: false)
     }
 }
 
@@ -28,7 +32,12 @@ package extension MPVSession {
         var sawSeek = false
     }
 
-    func performSeek(to position: Duration, timeout: Duration, pausesAfterEnd: Bool) async throws -> MPVSeekResult {
+    func performSeek(
+        to position: Duration,
+        precision: MPVSeekPrecision = .exact,
+        timeout: Duration,
+        pausesAfterEnd: Bool
+    ) async throws -> MPVSeekResult {
         let cancellation = MPVOperationCancellation()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
@@ -115,7 +124,7 @@ package extension MPVSession {
                             pendingStartTime = target
                         }
                     } else {
-                        let status = runCommand(["seek", Self.format(target), "absolute+exact"])
+                        let status = runCommand(["seek", Self.format(target), precision.absoluteFlag])
                         if status < 0 {
                             let error = MPVPlayerError.seekFailed(code: status, message: mpvErrorMessage(status))
                             failPendingSeek(error)
