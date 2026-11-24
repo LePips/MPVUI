@@ -387,7 +387,7 @@ public final class MPVPlayer {
 
     /// Seeks to an absolute timeline position, clamped to the known media duration.
     /// Negative positions become zero, including when the duration is unknown.
-    public func seek(to time: Duration) {
+    public func seek(to time: Duration, precision: MPVSeekPrecision = .exact) {
         let target =
             duration > .zero
                 ? clamped(time, to: .zero ... duration)
@@ -398,17 +398,17 @@ public final class MPVPlayer {
             return
         }
 
-        engine?.seek(to: target)
+        engine?.seek(to: target, precision: precision)
     }
 
     /// Seeks by a relative duration.
-    public func seek(by offset: Duration) {
+    public func seek(by offset: Duration, precision: MPVSeekPrecision = .exact) {
         if isUsingExternalPlayback {
-            seek(to: position + offset)
+            seek(to: position + offset, precision: precision)
             return
         }
 
-        engine?.seek(by: offset)
+        engine?.seek(by: offset, precision: precision)
     }
 
     /// Seeks and returns the native destination after playback restarts, preserving play/pause intent.
@@ -417,7 +417,11 @@ public final class MPVPlayer {
     /// Canceling does not undo an already accepted seek. The timeout includes waiting for readiness.
     ///
     /// - Throws: `MPVPlayerError` on unavailability, failure, or timeout, or `CancellationError`.
-    public func seekAndWait(to time: Duration, timeout: Duration = .seconds(8)) async throws -> MPVSeekResult {
+    public func seekAndWait(
+        to time: Duration,
+        precision: MPVSeekPrecision = .exact,
+        timeout: Duration = .seconds(8)
+    ) async throws -> MPVSeekResult {
         if isUsingExternalPlayback, let storedExternalPlayback {
             let result = try await storedExternalPlayback.seekAndWait(to: time, timeout: timeout)
             playbackEvents.publish(.seekCompleted(result))
@@ -430,7 +434,7 @@ public final class MPVPlayer {
         let generation = playbackGeneration
         let result: Result<MPVSeekResult, any Error>
         do {
-            result = try await .success(engine.seekAndWait(to: time, timeout: timeout))
+            result = try await .success(engine.seekAndWait(to: time, precision: precision, timeout: timeout))
         } catch {
             result = .failure(error)
         }
@@ -444,8 +448,12 @@ public final class MPVPlayer {
     }
 
     /// Seeks relative to the current position and waits for the resolved destination.
-    public func seekAndWait(by offset: Duration, timeout: Duration = .seconds(8)) async throws -> MPVSeekResult {
-        try await seekAndWait(to: position + offset, timeout: timeout)
+    public func seekAndWait(
+        by offset: Duration,
+        precision: MPVSeekPrecision = .exact,
+        timeout: Duration = .seconds(8)
+    ) async throws -> MPVSeekResult {
+        try await seekAndWait(to: position + offset, precision: precision, timeout: timeout)
     }
 
     /// Advances one decoded frame and pauses playback.

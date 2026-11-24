@@ -130,13 +130,13 @@ public final class MPVSessionController {
     }
 
     /// Seeks to an absolute source timestamp.
-    public func seek(to time: Duration) {
-        send(.seek(to: time))
+    public func seek(to time: Duration, precision: MPVSeekPrecision = .exact) {
+        send(.seek(to: time, precision: precision))
     }
 
     /// Seeks relative to the current or pending position.
-    public func seek(by offset: Duration) {
-        send(.seekByOffset(offset))
+    public func seek(by offset: Duration, precision: MPVSeekPrecision = .exact) {
+        send(.seekByOffset(offset, precision: precision))
     }
 
     /// Selects a track from the current source.

@@ -292,7 +292,7 @@ package extension MPVSession {
         }
     }
 
-    func seek(to time: Duration) {
+    func seek(to time: Duration, precision: MPVSeekPrecision = .exact) {
         let target = time.clampPositiveOrZero
 
         queue.async { [weak self] in
@@ -312,7 +312,7 @@ package extension MPVSession {
                 self.lastPosition = target
                 self.publishTiming()
             } else {
-                let status = self.runCommand(["seek", Self.format(target), "absolute+exact"])
+                let status = self.runCommand(["seek", Self.format(target), precision.absoluteFlag])
 
                 if status < 0 {
                     self.publishCommandError(status, context: "Seek")
@@ -321,7 +321,7 @@ package extension MPVSession {
         }
     }
 
-    func seek(by offset: Duration) {
+    func seek(by offset: Duration, precision: MPVSeekPrecision = .exact) {
         queue.async { [weak self] in
             guard let self, !self.isClosed else {
                 return
@@ -351,7 +351,7 @@ package extension MPVSession {
                 self.lastPosition = target
                 self.publishTiming()
             } else {
-                let status = self.runCommand(["seek", Self.format(offset), "relative+exact"])
+                let status = self.runCommand(["seek", Self.format(offset), precision.relativeFlag])
 
                 if status < 0 {
                     self.publishCommandError(status, context: "Seek")
