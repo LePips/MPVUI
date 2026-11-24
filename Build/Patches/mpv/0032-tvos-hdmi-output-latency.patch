@@ -1,0 +1,61 @@
+diff --git a/audio/out/ao_avfoundation.m b/audio/out/ao_avfoundation.m
+--- a/audio/out/ao_avfoundation.m
++++ b/audio/out/ao_avfoundation.m
+@@ -209,6 +209,27 @@
+     return CMTimeMake(time, 1000000000);
+ }
+ 
++// On tvOS HDMI routes, AVAudioSession.outputLatency reflects the TV's HDMI
++// display latency while video is presented on an independent layer that still
++// traverses the HDMI display pipeline. Subtract it so audio and video align.
++static int64_t avfoundation_hdmi_latency_ns(void)
++{
++#if TARGET_OS_TV
++    @autoreleasepool {
++        AVAudioSession *session = AVAudioSession.sharedInstance;
++        for (AVAudioSessionPortDescription *port in session.currentRoute.outputs) {
++            if ([port.portType isEqualToString:AVAudioSessionPortHDMI]) {
++                double latency = session.outputLatency;
++                if (isfinite(latency) && latency > 0.0)
++                    return llrint(MPCLAMP(latency, 0.0, 10.0) * 1e9);
++                break;
++            }
++        }
++    }
++#endif
++    return 0;
++}
++
+ static void avp_timer_idle(struct priv *p)
+ {
+     dispatch_source_set_timer(p->avp_timer, DISPATCH_TIME_FOREVER,
+@@ -613,7 +634,8 @@
+     int64_t position = avp_current_time_ns(ao);
+     int64_t written = CMTimeGetNanoseconds(
+         CMTimeMake(p->pulled_samples, ao->samplerate)) - p->es_dropped_ns;
+-    int64_t delay = MPMAX(written - position, 0);
++    int64_t raw_delay = MPMAX(written - position, 0);
++    int64_t delay = MPMAX(raw_delay - avfoundation_hdmi_latency_ns(), 0);
+     int64_t sample_ns = (1000000000LL + p->spdif_rate - 1) / p->spdif_rate;
+     double rate = 0;
+     CMTimebaseRef timebase = p->item.timebase;
+@@ -624,7 +646,7 @@
+                    avp_stream_tail_drained(ao, position, rate, clock_valid);
+     // Device underrun permits refill/re-arm start(). Reuse item; EOF/seek
+     // starts new epoch.
+-    bool underrun = !p->avp_eof && p->avp_start_deadline < 0 && !delay;
++    bool underrun = !p->avp_eof && p->avp_start_deadline < 0 && !raw_delay;
+     ao_update_streaming_clock(ao, delay, rate, !drained && !underrun);
+     if (drained) {
+         MP_VERBOSE(ao, "native compressed audio drained at %.6fs of %.6fs\n",
+@@ -947,7 +969,9 @@
+     int64_t end_time_av = MPMAX(p->end_time_av, cur_time_av);
+     int64_t time_delta = CMTimeGetNanoseconds(CMTimeMake(request_sample_count, samplerate));
+     bool eof;
+-    int real_sample_count = ao_read_data(ao, data, request_sample_count, end_time_av - cur_time_av + cur_time_mp + time_delta, &eof, false, true);
++    int64_t queue_delay = MPMAX(end_time_av - cur_time_av + time_delta -
++                                avfoundation_hdmi_latency_ns(), 0);
++    int real_sample_count = ao_read_data(ao, data, request_sample_count, cur_time_mp + queue_delay, &eof, false, true);
+     if (eof) {
+         pcm_set_feeding(ao, false);
+         ao_stop_streaming(ao);

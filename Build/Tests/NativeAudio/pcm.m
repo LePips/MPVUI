@@ -14,6 +14,8 @@
 // platform clock, renderer readiness, timer delivery, and source are simulated.
 #undef TARGET_OS_IPHONE
 #define TARGET_OS_IPHONE TEST_MOBILE
+#undef TARGET_OS_TV
+#define TARGET_OS_TV TEST_TV
 #undef TARGET_OS_OSX
 #define TARGET_OS_OSX (!TEST_MOBILE)
 static char avfoundation_queue_key;
@@ -22,7 +24,10 @@ static int64_t mp_time_ns(void) { return now; }
 
 @interface TestPCMSession : NSObject
 @property double outputLatency;
+@property(copy) NSString *portType;
 + (instancetype)sharedInstance;
+- (instancetype)currentRoute;
+- (NSArray<TestPCMSession *> *)outputs;
 @end
 @implementation TestPCMSession
 + (instancetype)sharedInstance {
@@ -31,8 +36,17 @@ static int64_t mp_time_ns(void) { return now; }
         session = [TestPCMSession new];
     return session;
 }
+- (instancetype)currentRoute {
+    return self;
+}
+- (NSArray<TestPCMSession *> *)outputs {
+    return self.portType ? @[ self ] : @[];
+}
 @end
 #define AVAudioSession TestPCMSession
+#define AVAudioSessionPortDescription TestPCMSession
+#undef AVAudioSessionPortHDMI
+#define AVAudioSessionPortHDMI @"HDMIOutput"
 
 @interface TestPCMSynchronizer : NSObject
 @property CMTime observedTime;
@@ -399,6 +413,25 @@ static void test_invalid_clock_and_remaining_capacity(void) {
     teardown(&a);
 }
 
+static void test_hdmi_latency_deadline(void) {
+    __block struct ao a;
+    struct priv p;
+    setup(&a, &p, 0, 0.29, 48000);
+    TestPCMSession.sharedInstance.portType = @"HDMIOutput";
+
+    a.available = 4800 * 5; // 500ms total across 5 pulls -> final pull end_time=400ms, delta=100ms
+    a.eof = true;
+    pcm_start(&a);
+    pump(&a);
+    assert(a.deadline == now + (TEST_TV ? MP_TIME_MS_TO_NS(210) : MP_TIME_MS_TO_NS(500)));
+
+    // Wireless routes do not subtract HDMI latency.
+    TestPCMSession.sharedInstance.portType = @"AirPlay";
+    assert(avfoundation_hdmi_latency_ns() == 0);
+    TestPCMSession.sharedInstance.portType = nil;
+    teardown(&a);
+}
+
 int main(void) {
     @autoreleasepool {
         test_route_budget();
@@ -408,7 +441,8 @@ int main(void) {
         test_short_reads_and_eof();
         test_pause_seek_and_teardown();
         test_invalid_clock_and_remaining_capacity();
+        test_hdmi_latency_deadline();
     }
-    printf("PCM feeder: 7 production checks passed (%s)\n", TEST_MOBILE ? "iOS/tvOS" : "macOS");
+    printf("PCM feeder: 8 production checks passed (%s)\n", TEST_TV ? "tvOS" : TEST_MOBILE ? "iOS" : "macOS");
     return 0;
 }

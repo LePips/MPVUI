@@ -69,16 +69,19 @@ def main():
         ]
         signatures = [
             "static int64_t CMTimeGetNanoseconds(",
+            "static int64_t avfoundation_hdmi_latency_ns(",
             "static void spdif_reload(",
             "static int64_t avp_current_time_ns(",
             "static void avp_apply_volume(",
             "static void avp_update_transport(",
             "static bool avp_stream_tail_drained(",
+            "static bool avp_publish_clock(",
         ]
         (work / "policy.h").write_text(constants + "\n\n".join(function(implementation, signature) for signature in signatures))
         pcm_signatures = [
             "static int64_t CMTimeGetNanoseconds(",
             "static CMTime CMTimeFromNanoseconds(",
+            "static int64_t avfoundation_hdmi_latency_ns(",
             "static void pcm_request_media_data(",
             "static void pcm_cancel_pending_feed(",
             "static void pcm_pause_feeding(",
@@ -97,9 +100,11 @@ def main():
             + "\n\n".join(function(implementation, signature) for signature in pcm_signatures)
         )
         for name, file, flags in (
-            ("policy", "policy.m", []),
-            ("pcm-mobile", "pcm.m", ["-DTEST_MOBILE=1"]),
-            ("pcm-desktop", "pcm.m", ["-DTEST_MOBILE=0"]),
+            ("policy-tv", "policy.m", ["-DTEST_TV=1"]),
+            ("policy-desktop", "policy.m", ["-DTEST_TV=0"]),
+            ("pcm-tv", "pcm.m", ["-DTEST_MOBILE=1", "-DTEST_TV=1"]),
+            ("pcm-mobile", "pcm.m", ["-DTEST_MOBILE=1", "-DTEST_TV=0"]),
+            ("pcm-desktop", "pcm.m", ["-DTEST_MOBILE=0", "-DTEST_TV=0"]),
         ):
             executable = work / name
             subprocess.run(
@@ -133,7 +138,7 @@ def main():
             subprocess.run([str(executable)], env=dict(env, ASAN_OPTIONS="detect_leaks=0", UBSAN_OPTIONS="halt_on_error=1"), check=True)
         publish_evidence(
             summary={
-                "tests": {"framework": "native", "count": 21, "outcome": "passed", "issues": 0},
+                "tests": {"framework": "native", "count": 40, "outcome": "passed", "issues": 0},
                 "nativeAudio": {
                     "sanitizers": ["address", "undefined"],
                     "implementationSHA256": hashlib.sha256(implementation.encode()).hexdigest(),
@@ -141,6 +146,7 @@ def main():
                         "IEC periods and malformed data",
                         "loader range overflow",
                         "native clock bounds",
+                        "tvOS HDMI compressed clock latency offset",
                         "startup recovery",
                         "decoder stalls and source underruns",
                         "EOF tail eligibility",
@@ -151,8 +157,9 @@ def main():
                         "PCM partial reads, source starvation and EOF",
                         "PCM pause, resume, seek and timer teardown",
                         "PCM invalid time and fractional queue capacity",
+                        "PCM tvOS HDMI deadline latency offset",
                     ],
-                    "scope": "Production functions with simulated Apple clock/status inputs, including mobile and desktop PCM branches. Does not measure audible output or Atmos.",
+                    "scope": "Production functions with simulated Apple clock/status inputs across tvOS, mobile, and desktop branches. Does not measure audible output or Atmos.",
                 },
             }
         )
